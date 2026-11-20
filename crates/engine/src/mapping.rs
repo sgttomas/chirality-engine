@@ -79,35 +79,47 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
             ItemBody::Command { command: command.clone(), cwd: cwd.into(), output: aggregated_output.clone().unwrap_or_default(), exit_code: *exit_code },
         ),
         ThreadItem::FileChange { id, changes } => (id, ItemBody::FileChange { files: file_diffs(changes) }),
-        ThreadItem::McpToolCall { id, server, tool, arguments, result, error } => (
+        ThreadItem::McpToolCall { id, server, tool, arguments, result, error, status } => (
             id,
             ItemBody::ToolCall {
                 server: Some(server.clone()),
                 tool: tool.clone(),
                 arguments: arguments.to_string(),
+                status: tool_status(*status, error.is_some(), done),
                 result: error.as_ref().map(|e| e.message.clone()).or_else(|| result.as_ref().map(Value::to_string)),
+                images: Vec::new(),
             },
         ),
-        ThreadItem::DynamicToolCall { id, namespace, tool, arguments, content_items } => (
-            id,
-            ItemBody::ToolCall { server: namespace.clone(), tool: tool.clone(), arguments: arguments.to_string(), result: content_items.as_deref().and_then(tool_text) },
-        ),
+        ThreadItem::DynamicToolCall { id, namespace, tool, arguments, status, content_items } => {
+            let content = content_items.as_deref().unwrap_or_default();
+            let texts: Vec<&str> = content.iter().filter_map(|c| if let p::ToolContentInfo::InputText { text } = c { Some(text.as_str()) } else { None }).collect();
+            let images = content.iter().filter_map(|c| if let p::ToolContentInfo::InputImage { image_url } = c { Some(image_url.clone()) } else { None }).collect();
+            let body = ItemBody::ToolCall {
+                server: namespace.clone(),
+                tool: tool.clone(),
+                arguments: arguments.to_string(),
+                status: tool_status(*status, false, done),
+                result: (!texts.is_empty()).then(|| texts.join("\n")),
+                images,
+            };
+            (id, body)
+        }
         ThreadItem::WebSearch { id, query } => (id, ItemBody::WebSearch { query: query.clone() }),
         ThreadItem::Other => return None,
     };
     Some(Item { id: ItemId(id.clone()), body, done })
 }
 
-/// The text an application's tool answered with; none for a call cancelled unanswered.
-fn tool_text(content: &[p::ToolContentInfo]) -> Option<String> {
-    let texts: Vec<&str> = content
-        .iter()
-        .filter_map(|c| match c {
-            p::ToolContentInfo::InputText { text } => Some(text.as_str()),
-            p::ToolContentInfo::Other => None,
-        })
-        .collect();
-    (!content.is_empty()).then(|| texts.join("\n"))
+/// Codex's status for a tool call; for history without one, what is known.
+fn tool_status(status: Option<p::ToolStatusInfo>, error: bool, done: bool) -> ToolCallStatus {
+    match status {
+        Some(p::ToolStatusInfo::InProgress) => ToolCallStatus::Running,
+        Some(p::ToolStatusInfo::Completed) => ToolCallStatus::Completed,
+        Some(p::ToolStatusInfo::Failed) => ToolCallStatus::Failed,
+        _ if error => ToolCallStatus::Failed,
+        _ if done => ToolCallStatus::Completed,
+        _ => ToolCallStatus::Running,
+    }
 }
 
 pub(crate) fn file_diffs(changes: &[p::FileChangeInfo]) -> Vec<FileDiff> {

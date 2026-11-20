@@ -260,12 +260,16 @@ pub async fn app_tool(ctx: &mut Ctx) {
     assert_eq!(tools.called(1).await, vec![call]);
     assert!(ctx.engine.snapshot().pending.is_empty(), "the person is not asked");
     let item = tool_item(&turn);
-    let body = ItemBody::ToolCall { server: Some(NAMESPACE.into()), tool: CHECK.into(), arguments: r#"{"total":120}"#.into(), result: Some("The estimate of 120 checks out.".into()) };
+    let body = ItemBody::ToolCall { server: Some(NAMESPACE.into()), tool: CHECK.into(), arguments: r#"{"total":120}"#.into(),
+        status: ToolCallStatus::Completed,
+        result: Some("The estimate of 120 checks out.".into()),
+        images: vec![],
+    };
     assert_eq!((&item.id, &item.body, item.done), (&ItemId("call_check".into()), &body, true));
     assert!(agent_text(&turn).contains("checks out"), "{}", agent_text(&turn));
     // A failure is the application's answer too, and the agent hears it.
     let (_, turn) = check_turn(ctx, Some(&thread), &project, "none", 0).await;
-    assert!(matches!(&tool_item(&turn).body, ItemBody::ToolCall { result: Some(r), .. } if r == "The estimate has no total."));
+    assert!(matches!(&tool_item(&turn).body, ItemBody::ToolCall { status: ToolCallStatus::Failed, result: Some(r), .. } if r == "The estimate has no total."));
     assert!(agent_text(&turn).contains("no total"), "{}", agent_text(&turn));
 }
 
@@ -303,10 +307,10 @@ pub async fn app_tool_cancelled(ctx: &mut Ctx) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert_eq!(tools.dropped.load(std::sync::atomic::Ordering::SeqCst), 1, "the call's future is dropped");
-    assert_eq!(ctx.engine.inner().tool_calls.len(), 0);
+    assert_eq!(ctx.engine.inner().tool_calls.running(), 0);
     let turn = turns(ctx, &thread).await.remove(0);
     let item = tool_item(&turn);
-    assert!(matches!(&item.body, ItemBody::ToolCall { result: None, .. }) && item.done, "{item:?}");
+    assert!(matches!(&item.body, ItemBody::ToolCall { status: ToolCallStatus::Failed, result: None, .. }) && item.done, "{item:?}");
 }
 
 /// Live only: a library workflow picked into a conversation that runs a command.

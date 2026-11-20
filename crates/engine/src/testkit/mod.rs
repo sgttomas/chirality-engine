@@ -10,6 +10,8 @@
 
 mod apptools;
 mod export;
+mod fake;
+mod tool_calls;
 mod harness;
 mod record;
 mod scenarios;

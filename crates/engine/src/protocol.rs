@@ -182,6 +182,15 @@ pub struct TurnResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadStartParams {
+    pub cwd: String,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadListParams {
     pub cwd: Vec<String>,
     pub limit: u32,
@@ -201,10 +210,38 @@ pub enum ThreadItem {
     #[serde(rename_all = "camelCase")]
     CommandExecution { id: String, command: String, cwd: String, aggregated_output: Option<String>, exit_code: Option<i32> },
     FileChange { id: String, changes: Vec<FileChangeInfo> },
-    McpToolCall { id: String, server: String, tool: String, arguments: Value, result: Option<Value>, error: Option<TurnError> },
+    McpToolCall {
+        id: String,
+        server: String,
+        tool: String,
+        arguments: Value,
+        result: Option<Value>,
+        error: Option<TurnError>,
+        #[serde(default)]
+        status: Option<ToolStatusInfo>,
+    },
     #[serde(rename_all = "camelCase")]
-    DynamicToolCall { id: String, namespace: Option<String>, tool: String, arguments: Value, content_items: Option<Vec<ToolContentInfo>> },
+    DynamicToolCall {
+        id: String,
+        namespace: Option<String>,
+        tool: String,
+        arguments: Value,
+        #[serde(default)]
+        status: Option<ToolStatusInfo>,
+        content_items: Option<Vec<ToolContentInfo>>,
+    },
     WebSearch { id: String, query: String },
+    #[serde(other)]
+    Other,
+}
+
+/// An MCP or dynamic tool call's status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolStatusInfo {
+    InProgress,
+    Completed,
+    Failed,
     #[serde(other)]
     Other,
 }
@@ -400,12 +437,19 @@ pub struct AnswerList {
 
 // ---------- the application's tools ----------
 
-/// A `thread/start` `dynamicTools` entry; a namespace holds functions only.
+/// A `thread/start` `dynamicTools` entry. The engine gives its tools in a
+/// namespace only, so none clashes with one of Codex's own.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DynamicToolSpec {
+    Namespace { name: String, description: String, tools: Vec<NamespaceTool> },
+}
+
+/// A namespace holds functions only.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum NamespaceTool {
     Function(FunctionSpec),
-    Namespace { name: String, description: String, tools: Vec<DynamicToolSpec> },
 }
 
 #[derive(Serialize)]
@@ -449,6 +493,8 @@ pub enum ToolContentItem {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ToolContentInfo {
     InputText { text: String },
+    #[serde(rename_all = "camelCase")]
+    InputImage { image_url: String },
     #[serde(other)]
     Other,
 }

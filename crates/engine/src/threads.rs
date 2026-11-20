@@ -85,10 +85,7 @@ impl Inner {
     pub(crate) async fn start_thread(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings) -> Result<ThreadId> {
         let project = self.project(project)?;
         let session = self.session()?;
-        let mut params = json!({ "cwd": project.path.display().to_string(), "model": settings.model });
-        if let Some(tools) = &self.config.tools {
-            params["dynamicTools"] = serde_json::to_value(crate::tools::specs(tools)).map_err(|e| EngineError::Invalid { message: e.to_string() })?;
-        }
+        let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: self.config.tools.as_ref().map(crate::tools::specs) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
         let id = self.adopt_thread(&started.thread).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
         session.mark_loaded(&id);
@@ -137,6 +134,7 @@ impl Inner {
         self.known_thread(thread)?;
         session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
         self.store.remove_thread(thread);
+        self.tool_calls.cancel(|place| place.thread == thread.0);
         Ok(())
     }
 

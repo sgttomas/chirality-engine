@@ -97,6 +97,7 @@
 .work-command-line { display: flex; align-items: center; gap: 7px; color: var(--ink); }
 .work-command-line code { font-size: 12px; overflow-wrap: anywhere; }
 .work-exit { color: var(--danger); font: 11px var(--font-mono); }
+.work-image { display: block; margin-top: 5px; max-width: 100%; max-height: 240px; border-radius: 6px; border: 1px solid var(--rule); }
 .work-output {
   margin: 5px 0 0;
   max-height: 200px; overflow: auto;

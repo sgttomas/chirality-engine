@@ -75,8 +75,12 @@ function WorkItem({ item }: { item: Item }) {
         <li className="work-command">
           <div className="work-command-line">
             <code>{workLine(item)}</code>
+            {b.status === "failed" && <span className="work-exit">failed</span>}
           </div>
           {b.result && <pre className="work-output">{b.result}</pre>}
+          {b.images.map((src, i) => (
+            <img key={i} className="work-image" src={src} alt="" />
+          ))}
         </li>
       );
     case "webSearch":

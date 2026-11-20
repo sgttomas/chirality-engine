@@ -104,13 +104,19 @@ impl Inner {
         })
     }
 
+    /// Stops Codex and returns once no application tool call is still running.
+    /// Under the same lock as a session's publication, so none starts after.
     pub async fn shutdown(&self) {
-        self.shutting_down.store(true, Ordering::SeqCst);
-        if let Some(session) = self.current.lock().unwrap().take() {
-            self.tool_calls.cancel_generation(session.generation);
-            session.client.close();
-            session.stopper.stop();
-        }
+        let mut calls = {
+            let mut current = self.current.lock().unwrap();
+            self.shutting_down.store(true, Ordering::SeqCst);
+            if let Some(session) = current.take() {
+                session.client.close();
+                session.stopper.stop();
+            }
+            self.tool_calls.close()
+        };
+        while calls.join_next().await.is_some() {}
     }
 
     /// Ends the Codex process as if it had died.
@@ -147,7 +153,16 @@ impl Inner {
         };
         client.notify("initialized", None).map_err(|e| failed(e.to_string()))?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        *self.current.lock().unwrap() = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+        {
+            let mut current = self.current.lock().unwrap();
+            if self.shutting_down.load(Ordering::SeqCst) {
+                client.close();
+                stopper.kill();
+                return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            }
+            *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+            self.tool_calls.open(generation);
+        }
         self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
         Ok(incoming)
     }
@@ -184,7 +199,7 @@ impl Inner {
     /// its running turns have ended.
     fn after_death(&self, generation: u64) {
         self.store.resolve(|p| p.generation == generation);
-        self.tool_calls.cancel_generation(generation);
+        drop(self.tool_calls.close());
         let message = "Codex stopped during this turn".to_string();
         for id in self.store.thread_ids() {
             let ended = self.store.update_thread(&id, |entry| {

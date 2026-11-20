@@ -56,7 +56,7 @@ impl TestTools {
             }
         };
         AppTools {
-            namespace: Some(ToolNamespace { name: NAMESPACE.into(), description: "The project's estimate.".into() }),
+            namespace: ToolNamespace { name: NAMESPACE.into(), description: "The project's estimate.".into() },
             tools: vec![
                 AppTool {
                     name: CHECK.into(),

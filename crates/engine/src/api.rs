@@ -51,8 +51,9 @@ pub struct EngineConfig {
 /// started without them never has them.
 #[derive(Clone)]
 pub struct AppTools {
-    /// Groups the tools under one name the agent sees, with what they are for.
-    pub namespace: Option<ToolNamespace>,
+    /// The one name the agent sees the tools under, with what they are for.
+    /// Always given, so no tool clashes with one of Codex's own.
+    pub namespace: ToolNamespace,
     pub tools: Vec<AppTool>,
     pub handler: Arc<dyn ToolHandler>,
 }
@@ -326,11 +327,21 @@ pub enum ItemBody {
     Plan { steps: Vec<PlanStep> },
     Command { command: String, cwd: PathBuf, output: String, exit_code: Option<i32> },
     FileChange { files: Vec<FileDiff> },
-    /// An MCP tool (`server` names it) or one of the application's tools
-    /// (`server` is its namespace, if any).
-    ToolCall { server: Option<String>, tool: String, arguments: String, result: Option<String> },
+    /// An MCP tool (`server` names it) or an application's tool (`server` is
+    /// its namespace). `result` is its text; `images` are `data:` URLs.
+    ToolCall { server: Option<String>, tool: String, arguments: String, status: ToolCallStatus, result: Option<String>, images: Vec<String> },
     WebSearch { query: String },
     Error { message: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolCallStatus {
+    Running,
+    Completed,
+    /// The tool failed, or the call was cancelled before it answered.
+    Failed,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

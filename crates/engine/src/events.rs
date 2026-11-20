@@ -45,8 +45,11 @@ impl Inner {
                 let Some(note) = decode::<p::NameNote>(params) else { return };
                 self.store.update_thread(&ThreadId(note.thread_id), |e| e.title = note.thread_name);
             }
-            "thread/archived" | "thread/deleted" => {
-                if let Some(note) = decode::<p::ThreadNote>(params) {
+            "thread/archived" | "thread/deleted" | "thread/closed" => {
+                let Some(note) = decode::<p::ThreadNote>(params) else { return };
+                // Codex drops a closed thread's requests without saying so.
+                self.tool_calls.cancel(|place| place.thread == note.thread_id);
+                if method != "thread/closed" {
                     self.store.remove_thread(&ThreadId(note.thread_id));
                 }
             }
@@ -64,9 +67,7 @@ impl Inner {
             }
             "turn/completed" => {
                 let Some(note) = decode::<p::TurnNote>(params) else { return };
-                if let Ok(session) = self.session() {
-                    self.tool_calls.cancel_turn(session.generation, &note.turn.id);
-                }
+                self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn.id);
                 let state = mapping::turn_state(&note.turn);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
                 let known = self.store.update_thread(&thread, |e| {
@@ -91,9 +92,7 @@ impl Inner {
                     p::ThreadItem::FileChange { id, changes } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
                     // A call that ends unanswered was cancelled by Codex.
                     p::ThreadItem::DynamicToolCall { id, .. } if method == "item/completed" => {
-                        if let Ok(session) = self.session() {
-                            self.tool_calls.cancel_call(session.generation, id);
-                        }
+                        self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn_id && &place.item == id);
                     }
                     _ => {}
                 }
@@ -154,7 +153,7 @@ impl Inner {
             return;
         }
         if let (crate::tools::TOOL_CALL, Some(tools)) = (method, &self.config.tools) {
-            return self.on_tool_call(session, id, params, tools.handler.clone());
+            return self.on_tool_call(session, id, params, tools);
         }
         match mapping::request(method, &params, |item| self.store.file_change(item)) {
             Some((thread, request)) => {
