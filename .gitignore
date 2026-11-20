@@ -5,3 +5,4 @@ dist/
 /.supplier/
 /scratch/
 *.log
+/crates/engine/bindings/

@@ -51,7 +51,7 @@ pub struct Snapshot {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CodexStatus {
     #[default]
     Starting,
@@ -61,7 +61,7 @@ pub enum CodexStatus {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Account {
     #[default]
     Unknown,
@@ -134,6 +134,7 @@ pub struct ThreadSummary {
     /// The thread this one was forked from.
     pub forked_from: Option<ThreadId>,
     /// Seconds since the Unix epoch.
+    #[ts(type = "number")]
     pub updated_at: i64,
     pub settings: Option<TurnSettings>,
 }
@@ -141,7 +142,7 @@ pub struct ThreadSummary {
 /// One status per thread, highest first: what the person most needs to know.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ThreadStatus {
     NeedsApproval,
     NeedsAnswer,
@@ -163,7 +164,7 @@ pub struct Message {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Attachment {
     Image { path: PathBuf },
     /// A file in or outside the project, referenced so the agent reads it.
@@ -190,7 +191,7 @@ pub struct Turn {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TurnState {
     Running,
     Completed,
@@ -209,7 +210,7 @@ pub struct Item {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ItemBody {
     UserMessage { text: String, attachments: Vec<Attachment>, workflow: Option<WorkflowId> },
     /// Markdown.
@@ -261,7 +262,7 @@ pub struct PendingRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Request {
     Command { command: String, cwd: PathBuf, reason: Option<String> },
     FileChange { files: Vec<FileDiff>, reason: Option<String> },
@@ -284,7 +285,7 @@ pub struct Question {
 /// The person's answer to a [`PendingRequest`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Answer {
     Allow,
     AllowForSession,
@@ -310,7 +311,7 @@ pub struct Workflow {
 /// A change to the [`Snapshot`] or to a thread being shown.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Event {
     Codex { status: CodexStatus },
     Account { account: Account },
@@ -331,7 +332,7 @@ pub enum Event {
 /// Why an engine call failed, in words an interface can show.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS, thiserror::Error)]
 #[ts(export)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EngineError {
     #[error("Codex is not running: {message}")]
     CodexUnavailable { message: String },
