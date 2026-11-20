@@ -205,6 +205,11 @@ pub fn question_call(call_id: &str, questions: Value) -> Value {
     json!({"type": "function_call", "name": "request_user_input", "call_id": call_id, "id": format!("fc_{call_id}"), "arguments": json!({"questions": questions}).to_string()})
 }
 
+/// A call to one of the application's tools.
+pub fn tool_call(call_id: &str, namespace: &str, name: &str, arguments: Value) -> Value {
+    json!({"type": "function_call", "namespace": namespace, "name": name, "call_id": call_id, "id": format!("fc_{call_id}"), "arguments": arguments.to_string()})
+}
+
 /// A reply of `text`.
 pub fn says(key: &str, text: &str) -> Script {
     let (id, text) = (format!("msg_{key}"), text.to_string());

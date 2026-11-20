@@ -88,14 +88,26 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
                 result: error.as_ref().map(|e| e.message.clone()).or_else(|| result.as_ref().map(Value::to_string)),
             },
         ),
-        ThreadItem::DynamicToolCall { id, tool, arguments, content_items } => (
+        ThreadItem::DynamicToolCall { id, namespace, tool, arguments, content_items } => (
             id,
-            ItemBody::ToolCall { server: None, tool: tool.clone(), arguments: arguments.to_string(), result: content_items.as_ref().map(Value::to_string) },
+            ItemBody::ToolCall { server: namespace.clone(), tool: tool.clone(), arguments: arguments.to_string(), result: content_items.as_deref().and_then(tool_text) },
         ),
         ThreadItem::WebSearch { id, query } => (id, ItemBody::WebSearch { query: query.clone() }),
         ThreadItem::Other => return None,
     };
     Some(Item { id: ItemId(id.clone()), body, done })
+}
+
+/// The text an application's tool answered with; none for a call cancelled unanswered.
+fn tool_text(content: &[p::ToolContentInfo]) -> Option<String> {
+    let texts: Vec<&str> = content
+        .iter()
+        .filter_map(|c| match c {
+            p::ToolContentInfo::InputText { text } => Some(text.as_str()),
+            p::ToolContentInfo::Other => None,
+        })
+        .collect();
+    (!content.is_empty()).then(|| texts.join("\n"))
 }
 
 pub(crate) fn file_diffs(changes: &[p::FileChangeInfo]) -> Vec<FileDiff> {

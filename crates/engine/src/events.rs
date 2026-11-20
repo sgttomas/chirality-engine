@@ -64,6 +64,9 @@ impl Inner {
             }
             "turn/completed" => {
                 let Some(note) = decode::<p::TurnNote>(params) else { return };
+                if let Ok(session) = self.session() {
+                    self.tool_calls.cancel_turn(session.generation, &note.turn.id);
+                }
                 let state = mapping::turn_state(&note.turn);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
                 let known = self.store.update_thread(&thread, |e| {
@@ -84,8 +87,15 @@ impl Inner {
             }
             "item/started" | "item/completed" => {
                 let Some(note) = decode::<p::ItemNote>(params) else { return };
-                if let p::ThreadItem::FileChange { id, changes } = &note.item {
-                    self.store.remember_file_change(id, mapping::file_diffs(changes));
+                match &note.item {
+                    p::ThreadItem::FileChange { id, changes } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
+                    // A call that ends unanswered was cancelled by Codex.
+                    p::ThreadItem::DynamicToolCall { id, .. } if method == "item/completed" => {
+                        if let Ok(session) = self.session() {
+                            self.tool_calls.cancel_call(session.generation, id);
+                        }
+                    }
+                    _ => {}
                 }
                 let Some(item) = mapping::item(&note.item, method == "item/completed") else { return };
                 self.emit_for(note.thread_id, note.turn_id, |thread, turn| Event::Item { thread, turn, item });
@@ -135,12 +145,16 @@ impl Inner {
         }
     }
 
-    /// Codex waits on the answer to every request it sends; each is either
-    /// shown to the person or answered at once as one this engine does not take.
+    /// Codex waits on the answer to every request it sends; each is shown to
+    /// the person, given to the application's tool handler, or answered at once
+    /// as one this engine does not take.
     pub(crate) fn on_request(&self, generation: u64, id: Value, method: &str, params: Value) {
         let Ok(session) = self.session() else { return };
         if session.generation != generation {
             return;
+        }
+        if let (crate::tools::TOOL_CALL, Some(tools)) = (method, &self.config.tools) {
+            return self.on_tool_call(session, id, params, tools.handler.clone());
         }
         match mapping::request(method, &params, |item| self.store.file_change(item)) {
             Some((thread, request)) => {

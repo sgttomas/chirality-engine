@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
+use super::apptools::{self, TestTools};
 use super::record::{Recorder, Replay};
 use super::stub::{Script, Stub};
 use super::transcript::{self, Places};
@@ -46,13 +47,14 @@ impl Run {
         self.root.join("project")
     }
 
-    fn config(&self) -> EngineConfig {
+    fn config(&self, tools: Option<&Arc<TestTools>>) -> EngineConfig {
         EngineConfig {
             codex_bin: PathBuf::from(CODEX),
             codex_home: Some(self.root.join("home")),
             state_dir: self.root.join("state"),
             workflow_roots: vec![PathBuf::from(LIBRARY)],
             codex_settings: Vec::new(),
+            tools: tools.map(|t| t.app_tools()),
         }
     }
 
@@ -100,6 +102,8 @@ pub struct Ctx {
     pub run: Run,
     /// When set, keeps every event and each thread view the scenario reads.
     pub tape: Option<std::sync::Mutex<Tape>>,
+    /// The application's tools, for the scenarios that have them.
+    pub tools: Option<Arc<TestTools>>,
     mode: Mode,
     places: Places,
 }
@@ -128,7 +132,8 @@ impl Ctx {
     pub async fn live(name: &str, record: bool) -> Ctx {
         let run = Run::new(Path::new(SCRATCH), name);
         let stub = Stub::start().await;
-        let config = run.config();
+        let tools = apptools::for_scenario(name);
+        let config = run.config(tools.as_ref());
         let settings = vec!["analytics.enabled=false".to_string(), "model_provider=\"openai\"".to_string(), format!("openai_base_url=\"{}\"", stub.base_url())];
         let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings, env: Some(run.environment()), cwd: Some(run.project()) };
         let recorder = record.then(Recorder::new);
@@ -141,7 +146,7 @@ impl Ctx {
         let places = run.places(stub.port);
         let engine = Engine::start_with(config, connector, tap).await.expect("the engine starts");
         let events = engine.subscribe();
-        Ctx { engine, events, run, tape: None, mode: Mode::Live { stub, recorder }, places }
+        Ctx { engine, events, run, tape: None, tools, mode: Mode::Live { stub, recorder }, places }
     }
 
     /// The recorded transcript for `name`, played through the real client.
@@ -149,12 +154,13 @@ impl Ctx {
         let run = Run::new(&std::env::temp_dir().join("chirality-engine-replay"), name);
         let places = run.places(0);
         let replay = Replay::new(transcript::read(name), places.clone());
-        let engine = match Engine::start_with(run.config(), replay.clone(), None).await {
+        let tools = apptools::for_scenario(name);
+        let engine = match Engine::start_with(run.config(tools.as_ref()), replay.clone(), None).await {
             Ok(engine) => engine,
             Err(e) => panic!("the engine did not start: {e}; {:?}", replay.failure()),
         };
         let events = engine.subscribe();
-        Ctx { engine, events, run, tape: None, mode: Mode::Replay(replay), places }
+        Ctx { engine, events, run, tape: None, tools, mode: Mode::Replay(replay), places }
     }
 
     /// Reads a thread, keeping the view on the tape if there is one.
@@ -213,6 +219,11 @@ impl Ctx {
             _ => None,
         })
         .await
+    }
+
+    /// The application's tools this scenario runs with.
+    pub fn app_tools(&self) -> Arc<TestTools> {
+        self.tools.clone().expect("this scenario has the application's tools")
     }
 
     pub async fn pending(&mut self, thread: &ThreadId) -> PendingRequest {

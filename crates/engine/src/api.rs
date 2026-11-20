@@ -8,7 +8,10 @@
 //! These types are ours, not Codex's: the engine maps the app-server protocol
 //! into them, so an application never depends on the protocol's shape.
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -35,6 +38,110 @@ pub struct EngineConfig {
     pub workflow_roots: Vec<PathBuf>,
     /// Extra `-c key=value` settings passed to `codex app-server`.
     pub codex_settings: Vec<String>,
+    /// The application's own tools, given to the agent in every thread the engine starts.
+    pub tools: Option<AppTools>,
+}
+
+// ---------- the application's tools ----------
+
+/// Tools the application gives the agent, answered by its [`ToolHandler`].
+///
+/// Codex fixes a thread's tools when the thread starts and keeps them with it:
+/// a resumed or forked thread has the tools it was started with, and a thread
+/// started without them never has them.
+#[derive(Clone)]
+pub struct AppTools {
+    /// Groups the tools under one name the agent sees, with what they are for.
+    pub namespace: Option<ToolNamespace>,
+    pub tools: Vec<AppTool>,
+    pub handler: Arc<dyn ToolHandler>,
+}
+
+impl std::fmt::Debug for AppTools {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppTools").field("namespace", &self.namespace).field("tools", &self.tools).finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolNamespace {
+    /// Letters, digits, `_` and `-`.
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppTool {
+    /// Letters, digits, `_` and `-`; unique among the tools.
+    pub name: String,
+    /// What the tool does, for the agent.
+    pub description: String,
+    /// JSON Schema of the arguments.
+    pub input_schema: serde_json::Value,
+}
+
+/// The agent's call to one of the application's tools.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolCall {
+    /// The thread it shows on (a subagent's call shows on its root thread).
+    pub thread: ThreadId,
+    /// The project of that thread, when it is one of the engine's.
+    pub project: Option<ProjectId>,
+    /// The turn that made the call (a subagent's own turn when a subagent made it).
+    pub turn: TurnId,
+    /// The call's item in the thread, [`Item::id`].
+    pub item: ItemId,
+    pub namespace: Option<String>,
+    pub tool: String,
+    /// As the agent wrote them; not checked against the schema.
+    pub arguments: serde_json::Value,
+}
+
+/// The answer to a [`ToolCall`], given to the agent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolOutput {
+    /// False tells the agent the tool failed.
+    pub success: bool,
+    pub content: Vec<ToolContent>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ToolContent {
+    Text(String),
+    /// A `data:` URL; Codex refuses a remote image.
+    Image(String),
+}
+
+impl ToolOutput {
+    pub fn text(text: impl Into<String>) -> ToolOutput {
+        ToolOutput { success: true, content: vec![ToolContent::Text(text.into())] }
+    }
+
+    pub fn failure(text: impl Into<String>) -> ToolOutput {
+        ToolOutput { success: false, content: vec![ToolContent::Text(text.into())] }
+    }
+}
+
+pub type ToolFuture = Pin<Box<dyn Future<Output = ToolOutput> + Send>>;
+
+/// Answers the agent's calls to the application's tools; any `Fn(ToolCall)`
+/// returning a future of [`ToolOutput`] is one.
+///
+/// Each call is answered with what its future gives. Codex cancels a call
+/// when its turn is interrupted or ends, or Codex stops; the engine then drops
+/// the future. A future that panics answers its call as failed.
+pub trait ToolHandler: Send + Sync {
+    fn call(&self, call: ToolCall) -> ToolFuture;
+}
+
+impl<F, Fut> ToolHandler for F
+where
+    F: Fn(ToolCall) -> Fut + Send + Sync,
+    Fut: Future<Output = ToolOutput> + Send + 'static,
+{
+    fn call(&self, call: ToolCall) -> ToolFuture {
+        Box::pin(self(call))
+    }
 }
 
 /// Everything an interface shows, at one moment.
@@ -219,6 +326,8 @@ pub enum ItemBody {
     Plan { steps: Vec<PlanStep> },
     Command { command: String, cwd: PathBuf, output: String, exit_code: Option<i32> },
     FileChange { files: Vec<FileDiff> },
+    /// An MCP tool (`server` names it) or one of the application's tools
+    /// (`server` is its namespace, if any).
     ToolCall { server: Option<String>, tool: String, arguments: String, result: Option<String> },
     WebSearch { query: String },
     Error { message: String },

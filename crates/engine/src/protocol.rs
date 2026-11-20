@@ -203,7 +203,7 @@ pub enum ThreadItem {
     FileChange { id: String, changes: Vec<FileChangeInfo> },
     McpToolCall { id: String, server: String, tool: String, arguments: Value, result: Option<Value>, error: Option<TurnError> },
     #[serde(rename_all = "camelCase")]
-    DynamicToolCall { id: String, tool: String, arguments: Value, content_items: Option<Value> },
+    DynamicToolCall { id: String, namespace: Option<String>, tool: String, arguments: Value, content_items: Option<Vec<ToolContentInfo>> },
     WebSearch { id: String, query: String },
     #[serde(other)]
     Other,
@@ -396,6 +396,61 @@ pub struct UserInputAnswers {
 #[derive(Serialize)]
 pub struct AnswerList {
     pub answers: Vec<String>,
+}
+
+// ---------- the application's tools ----------
+
+/// A `thread/start` `dynamicTools` entry; a namespace holds functions only.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum DynamicToolSpec {
+    Function(FunctionSpec),
+    Namespace { name: String, description: String, tools: Vec<DynamicToolSpec> },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionSpec {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+/// `item/tool/call`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicToolCall {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub call_id: String,
+    pub namespace: Option<String>,
+    pub tool: String,
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicToolResponse {
+    pub content_items: Vec<ToolContentItem>,
+    pub success: bool,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ToolContentItem {
+    InputText { text: String },
+    #[serde(rename_all = "camelCase")]
+    InputImage { image_url: String },
+}
+
+/// A dynamic tool call's output as its item shows it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ToolContentInfo {
+    InputText { text: String },
+    #[serde(other)]
+    Other,
 }
 
 // ---------- files ----------

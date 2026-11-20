@@ -66,6 +66,8 @@ pub(crate) struct Inner {
     shutting_down: AtomicBool,
     /// The ChatGPT sign-in under way, to cancel it.
     pub login: Mutex<Option<String>>,
+    /// The application's tool calls being answered.
+    pub tool_calls: crate::tools::Calls,
 }
 
 impl Inner {
@@ -80,6 +82,7 @@ impl Inner {
             generation: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
             login: Mutex::new(None),
+            tool_calls: Default::default(),
         });
         inner.store.set_projects(projects);
         let incoming = inner.open().await?;
@@ -104,6 +107,7 @@ impl Inner {
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
         if let Some(session) = self.current.lock().unwrap().take() {
+            self.tool_calls.cancel_generation(session.generation);
             session.client.close();
             session.stopper.stop();
         }
@@ -180,6 +184,7 @@ impl Inner {
     /// its running turns have ended.
     fn after_death(&self, generation: u64) {
         self.store.resolve(|p| p.generation == generation);
+        self.tool_calls.cancel_generation(generation);
         let message = "Codex stopped during this turn".to_string();
         for id in self.store.thread_ids() {
             let ended = self.store.update_thread(&id, |entry| {

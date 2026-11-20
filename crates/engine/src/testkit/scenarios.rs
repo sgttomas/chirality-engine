@@ -3,8 +3,9 @@
 
 use serde_json::json;
 
+use super::apptools::{CHECK, NAMESPACE, WAIT};
 use super::harness::{Ctx, LIBRARY, settings, text};
-use super::stub::{calls, hangs, patch_call, question_call, says, shell_call};
+use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, tool_call};
 use crate::api::*;
 
 async fn project(ctx: &Ctx) -> Project {
@@ -220,6 +221,92 @@ pub async fn restart(ctx: &mut Ctx) {
     next_turn(ctx, &thread, "after", "After.").await;
     let all = turns(ctx, &thread).await;
     assert_eq!(all.iter().map(agent_text).collect::<Vec<_>>(), vec!["Before.".to_string(), "After.".to_string()]);
+}
+
+/// A turn whose model calls the application's estimate check with `total`.
+async fn check_turn(ctx: &mut Ctx, thread: Option<&ThreadId>, project: &Project, key: &str, total: i64) -> (ThreadId, Turn) {
+    ctx.script(key, calls(key, tool_call(&format!("call_{key}"), NAMESPACE, CHECK, json!({ "total": total })), true));
+    let message = text(&format!("STUB[{key}] check the estimate"));
+    let thread = match thread {
+        Some(thread) => {
+            ctx.engine.send(thread, message, settings(Access::Ask)).await.expect("the message is sent");
+            thread.clone()
+        }
+        None => ctx.engine.start_thread(&project.id, message, settings(Access::Ask)).await.expect("the thread starts"),
+    };
+    let (turn, state) = ctx.turn_ended(&thread).await;
+    assert_eq!(state, TurnState::Completed);
+    let turn = turns(ctx, &thread).await.into_iter().find(|t| t.id == turn).expect("the turn is in the thread");
+    (thread, turn)
+}
+
+fn tool_item(turn: &Turn) -> &Item {
+    turn.items.iter().find(|i| matches!(i.body, ItemBody::ToolCall { .. })).expect("a tool call item")
+}
+
+pub async fn app_tool(ctx: &mut Ctx) {
+    let project = project(ctx).await;
+    let tools = ctx.app_tools();
+    let (thread, turn) = check_turn(ctx, None, &project, "check", 120).await;
+    let call = ToolCall {
+        thread: thread.clone(),
+        project: Some(project.id.clone()),
+        turn: turn.id.clone(),
+        item: ItemId("call_check".into()),
+        namespace: Some(NAMESPACE.into()),
+        tool: CHECK.into(),
+        arguments: json!({ "total": 120 }),
+    };
+    assert_eq!(tools.called(1).await, vec![call]);
+    assert!(ctx.engine.snapshot().pending.is_empty(), "the person is not asked");
+    let item = tool_item(&turn);
+    let body = ItemBody::ToolCall { server: Some(NAMESPACE.into()), tool: CHECK.into(), arguments: r#"{"total":120}"#.into(), result: Some("The estimate of 120 checks out.".into()) };
+    assert_eq!((&item.id, &item.body, item.done), (&ItemId("call_check".into()), &body, true));
+    assert!(agent_text(&turn).contains("checks out"), "{}", agent_text(&turn));
+    // A failure is the application's answer too, and the agent hears it.
+    let (_, turn) = check_turn(ctx, Some(&thread), &project, "none", 0).await;
+    assert!(matches!(&tool_item(&turn).body, ItemBody::ToolCall { result: Some(r), .. } if r == "The estimate has no total."));
+    assert!(agent_text(&turn).contains("no total"), "{}", agent_text(&turn));
+}
+
+/// Codex keeps a thread's tools: a fork has them, and so has the thread resumed after a restart.
+pub async fn app_tool_kept(ctx: &mut Ctx) {
+    let project = project(ctx).await;
+    let tools = ctx.app_tools();
+    let (thread, first) = check_turn(ctx, None, &project, "first", 1).await;
+    let fork = ctx.engine.fork(&thread, &first.id).await.unwrap();
+    check_turn(ctx, Some(&fork), &project, "forked", 2).await;
+    assert_eq!(tools.called(2).await[1].thread, fork);
+    ctx.kill_codex();
+    ctx.wait("Codex to stop", |e| matches!(e, Event::Codex { status: CodexStatus::Starting }).then_some(())).await;
+    ctx.wait("Codex to be back", |e| matches!(e, Event::Codex { status: CodexStatus::Ready { .. } }).then_some(())).await;
+    let (_, resumed) = check_turn(ctx, Some(&thread), &project, "resumed", 3).await;
+    assert_eq!(tools.called(3).await[2].thread, thread);
+    assert!(agent_text(&resumed).contains("checks out"), "{}", agent_text(&resumed));
+}
+
+/// Interrupting the turn cancels a call still being answered: the handler's
+/// future is dropped, the engine sends no answer, and the item ends without a result.
+pub async fn app_tool_cancelled(ctx: &mut Ctx) {
+    let project = project(ctx).await;
+    let tools = ctx.app_tools();
+    ctx.script("wait", calls("wait", tool_call("call_wait", NAMESPACE, WAIT, json!({})), false));
+    let thread = ctx.engine.start_thread(&project.id, text("STUB[wait] build the network"), settings(Access::Ask)).await.unwrap();
+    tools.called(1).await;
+    assert_eq!(status(ctx, &thread).status, ThreadStatus::Working);
+    ctx.engine.interrupt(&thread).await.unwrap();
+    assert_eq!(ctx.turn_ended(&thread).await.1, TurnState::Interrupted);
+    for _ in 0..500 {
+        if tools.dropped.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(tools.dropped.load(std::sync::atomic::Ordering::SeqCst), 1, "the call's future is dropped");
+    assert_eq!(ctx.engine.inner().tool_calls.len(), 0);
+    let turn = turns(ctx, &thread).await.remove(0);
+    let item = tool_item(&turn);
+    assert!(matches!(&item.body, ItemBody::ToolCall { result: None, .. }) && item.done, "{item:?}");
 }
 
 /// Live only: a library workflow picked into a conversation that runs a command.
