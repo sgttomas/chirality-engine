@@ -53,7 +53,7 @@ export function changesOf(view: ThreadView | undefined): Change[] {
 
 /** Threads of a project, each fork placed under the thread it came from. */
 export function treeOf(threads: ThreadSummary[], project: string): { thread: ThreadSummary; depth: number }[] {
-  const mine = threads.filter((t) => t.project === project).sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
+  const mine = threads.filter((t) => t.project === project).sort((a, b) => b.updatedAt - a.updatedAt);
   const ids = new Set(mine.map((t) => t.id));
   const children = new Map<string, ThreadSummary[]>();
   for (const t of mine) if (t.forkedFrom && ids.has(t.forkedFrom)) children.set(t.forkedFrom, [...(children.get(t.forkedFrom) ?? []), t]);
@@ -67,10 +67,23 @@ export function treeOf(threads: ThreadSummary[], project: string): { thread: Thr
 }
 
 /** "now", "5m", "3h", "2d": how long ago. */
-export function ago(seconds: bigint | number, now = Date.now() / 1000): string {
-  const s = Math.max(0, now - Number(seconds));
+export function ago(seconds: number, now = Date.now() / 1000): string {
+  const s = Math.max(0, now - seconds);
   if (s < 60) return "now";
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+
+/** A path as the person thinks of it: inside the project, relative to it. */
+export function shortPath(path: string, root: string | undefined): string {
+  if (root && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+  return path;
+}
+
+/** Where a workflow comes from, in a word. */
+export function sourceName(source: string): string {
+  if (source === "project") return "Project";
+  const parts = source.split("/").filter(Boolean);
+  return (parts.at(-1) === "workflows" ? parts.at(-2) : parts.at(-1)) ?? source;
 }

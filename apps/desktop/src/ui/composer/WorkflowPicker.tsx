@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Workflow } from "../../engine/types";
+import { sourceName } from "../../state/selectors";
 import { Icon } from "../Icon";
 import { Dropdown } from "./Dropdown";
 
@@ -21,7 +22,7 @@ export function WorkflowPicker({ workflows, picked, onPick }: { workflows: Workf
       }
       value={picked}
       header={<input type="search" className="dropdown-search" placeholder="Find a workflow" value={query} autoFocus onChange={(e) => setQuery(e.target.value)} />}
-      options={shown.map((w) => ({ value: w, label: w.name, detail: `${w.summary} · ${w.source}` }))}
+      options={shown.map((w) => ({ value: w, label: w.name, detail: `${w.summary} · ${sourceName(w.source)}` }))}
       onPick={(w) => {
         onPick(w);
         setQuery("");

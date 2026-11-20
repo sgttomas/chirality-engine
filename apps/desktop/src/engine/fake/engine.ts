@@ -52,7 +52,7 @@ const titleOf = (text: string) => {
   if (clause.length <= 44) return clause || "New thread";
   return clause.slice(0, 44).replace(/\s+\S*$/, "");
 };
-const now = () => BigInt(Math.floor(Date.now() / 1000));
+const now = () => Math.floor(Date.now() / 1000);
 const fail = (error: EngineError) => Promise.reject(error);
 
 export class FakeEngine implements EngineClient {
@@ -62,6 +62,8 @@ export class FakeEngine implements EngineClient {
   private running = new Map<ThreadId, Running>();
   private waiting = new Map<RequestId, { thread: ThreadId; resolve: (a: Answer) => void }>();
   private marks = new Map<string, () => void>();
+  /** Files the fake's turns wrote, by absolute path. */
+  private written = new Map<string, string>();
   private stopAt: string | null = null;
   private next = 0;
 
@@ -99,7 +101,7 @@ export class FakeEngine implements EngineClient {
   }
   setUpdated(thread: ThreadId, secondsAgo: number, unread = false) {
     const summary = this.summary(thread);
-    summary.updatedAt = now() - BigInt(secondsAgo);
+    summary.updatedAt = now() - secondsAgo;
     summary.unread = unread;
   }
 
@@ -189,7 +191,6 @@ export class FakeEngine implements EngineClient {
       id: this.id("t"),
       status: { state: "idle" },
       unread: false,
-      title: view.summary.title && `${view.summary.title} (fork)`,
       forkedFrom: thread,
       updatedAt: now(),
     };
@@ -227,9 +228,20 @@ export class FakeEngine implements EngineClient {
     if (!this.waiting.has(request)) return fail({ kind: "notFound", what: `request ${request}` });
     this.resolve(request, answer);
   }
-  async findFiles(_project: ProjectId, query: string) {
+  async findFiles(project: ProjectId, query: string) {
+    const root = this.snap.projects.find((p) => p.id === project)?.path;
+    if (!root) return fail({ kind: "notFound", what: `project ${project}` });
     const q = query.toLowerCase();
-    return files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8);
+    return files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8).map((f) => `${root}/${f}`);
+  }
+  async readFile(project: ProjectId, path: string) {
+    const root = this.snap.projects.find((p) => p.id === project)?.path;
+    if (!root) return fail({ kind: "notFound", what: `project ${project}` });
+    const full = path.startsWith("/") ? path : `${root}/${path}`;
+    const written = this.written.get(full);
+    if (written !== undefined) return written;
+    if (!files.some((f) => `${root}/${f}` === full)) return fail({ kind: "notFound", what: path });
+    return `# ${full.split("/").pop()}\n`;
   }
 
   // Turns.
@@ -285,7 +297,8 @@ export class FakeEngine implements EngineClient {
       },
       item: (body, done = false) => {
         check();
-        const item: Item = { id: this.id("item"), body, done };
+        const item: Item = { id: this.id("item"), body: this.absolute(thread, body), done };
+        if (body.kind === "fileChange" && done) for (const f of (item.body as typeof body).files) this.write(f.path, f.diff);
         this.addItem(thread, turn, item);
         return item.id;
       },
@@ -300,17 +313,18 @@ export class FakeEngine implements EngineClient {
         return id;
       },
       command: async (command, output, exitCode = 0) => {
-        const id = run.item({ kind: "command", command, cwd: this.projectOf(thread).path, output: "", exit_code: null });
+        const id = run.item({ kind: "command", command, cwd: this.projectOf(thread).path, output: "", exitCode: null });
         await run.wait(350);
         for (const chunk of output.match(/([^\n]*\n){1,2}|[^\n]+$/g) ?? []) {
           await run.wait(60);
           this.appendText(thread, turn, id, chunk);
         }
         const body = this.itemIn(turn, id).body as Extract<ItemBody, { kind: "command" }>;
-        this.addItem(thread, turn, { id, body: { ...body, exit_code: exitCode }, done: true });
+        this.addItem(thread, turn, { id, body: { ...body, exitCode }, done: true });
       },
       ask: async (request) => {
         check();
+        if (request.kind === "fileChange") request = { ...request, files: request.files.map((f) => ({ ...f, path: this.full(thread, f.path) })) };
         const pending: PendingRequest = { id: this.id("req"), thread, request };
         const answer = new Promise<Answer>((resolve) => this.waiting.set(pending.id, { thread, resolve }));
         this.snap.pending.push(pending);
@@ -346,6 +360,19 @@ export class FakeEngine implements EngineClient {
   }
 
   // State.
+
+  /** Paths as the engine gives them: absolute. */
+  private full(thread: ThreadId, path: string) {
+    return path.startsWith("/") ? path : `${this.projectOf(thread).path}/${path}`;
+  }
+  private absolute(thread: ThreadId, body: ItemBody): ItemBody {
+    return body.kind === "fileChange" ? { ...body, files: body.files.map((f) => ({ ...f, path: this.full(thread, f.path) })) } : body;
+  }
+  /** Keeps what a change leaves: a new file's content, or the added lines of an edit. */
+  private write(path: string, diff: string) {
+    const isEdit = diff.split("\n").some((l) => l.startsWith("@@"));
+    this.written.set(path, isEdit ? diff.split("\n").filter((l) => !l.startsWith("-") && !l.startsWith("@@")).map((l) => l.slice(1)).join("\n") : diff);
+  }
 
   private userItem(message: Message): Item {
     return { id: this.id("item"), body: { kind: "userMessage", ...structuredClone(message) }, done: true };

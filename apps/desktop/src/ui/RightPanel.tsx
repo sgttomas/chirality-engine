@@ -1,7 +1,8 @@
-import { changesOf, workflowInUse, type Change } from "../state/selectors";
-import { useStore } from "../state/store";
+import { useEffect, useState } from "react";
+
+import { changesOf, shortPath, sourceName, workflowInUse, type Change } from "../state/selectors";
+import { describe, useProjectRoot, useStore, useStoreHandle } from "../state/store";
 import { Markdown } from "./conversation/Markdown";
-import { contentAfter } from "./unifiedDiff";
 import { Diff, DiffStat } from "./Diff";
 import { Icon } from "./Icon";
 import { usePanel, type PanelTab } from "./panel";
@@ -12,6 +13,8 @@ const tabs: { tab: PanelTab; label: string }[] = [
   { tab: "workflow", label: "Workflow" },
   { tab: "preview", label: "Preview" },
 ];
+
+const pathsOf = (changes: Change[]) => [...new Set(changes.map((c) => c.path))];
 
 export function RightPanel() {
   const { panel, show, toggle } = usePanel();
@@ -24,7 +27,7 @@ export function RightPanel() {
         {tabs.map(({ tab, label }) => (
           <button key={tab} role="tab" aria-selected={panel.tab === tab} className="panel-tab" onClick={() => show(tab, panel.file)}>
             {label}
-            {tab === "changes" && changes.length > 0 && <span className="panel-count">{new Set(changes.map((c) => c.path)).size}</span>}
+            {tab === "changes" && changes.length > 0 && <span className="panel-count">{pathsOf(changes).length}</span>}
           </button>
         ))}
         <span className="composer-spacer" />
@@ -43,16 +46,17 @@ export function RightPanel() {
 
 function Changes({ changes, file }: { changes: Change[]; file: string | null }) {
   const { show } = usePanel();
+  const root = useProjectRoot();
   if (changes.length === 0) return <p className="panel-empty">No changes yet</p>;
   const shown = file ? changes.filter((c) => c.path === file) : changes;
   return (
     <div className="panel-changes">
       <ul className="panel-files">
-        {[...new Set(changes.map((c) => c.path))].map((path) => (
+        {pathsOf(changes).map((path) => (
           <li key={path}>
             <button aria-current={path === file ? "true" : undefined} className="panel-file" onClick={() => show("changes", path === file ? null : path)}>
               <span className="panel-file-name">{path.split("/").pop()}</span>
-              <span className="panel-file-dir">{path.split("/").slice(0, -1).join("/")}</span>
+              <span className="panel-file-dir">{shortPath(path, root).split("/").slice(0, -1).join("/")}</span>
               <DiffStat diff={changes.filter((c) => c.path === path).map((c) => c.diff).join("\n")} />
             </button>
           </li>
@@ -61,7 +65,7 @@ function Changes({ changes, file }: { changes: Change[]; file: string | null }) 
       {shown.map((c, i) => (
         <section key={`${c.turn}-${c.path}-${i}`} className="panel-diff">
           <header className="panel-diff-head">
-            <span className="mono">{c.path}</span>
+            <span className="mono">{shortPath(c.path, root)}</span>
             <button className="quiet" onClick={() => show("preview", c.path)}>
               Preview
             </button>
@@ -77,7 +81,7 @@ function WorkflowTab({ workflow }: { workflow: ReturnType<typeof workflowInUse> 
   if (!workflow) return <p className="panel-empty">No workflow in this thread</p>;
   return (
     <div className="panel-workflow">
-      <div className="panel-workflow-source">{workflow.source}</div>
+      <div className="panel-workflow-source">{sourceName(workflow.source)}</div>
       <h2>{workflow.name}</h2>
       <p>{workflow.summary}</p>
       <div className="mono faint panel-workflow-path">{workflow.path}</div>
@@ -85,27 +89,44 @@ function WorkflowTab({ workflow }: { workflow: ReturnType<typeof workflowInUse> 
   );
 }
 
-/** A file the agent produced, from the change that made it. */
+/** A file the agent changed, as it is now in the project. */
 function Preview({ changes, file }: { changes: Change[]; file: string | null }) {
+  const store = useStoreHandle();
   const { show } = usePanel();
-  const created = changes.filter((c) => contentAfter(c.diff) !== null);
-  const path = file ?? created.at(-1)?.path ?? null;
-  const change = changes.filter((c) => c.path === path).at(-1);
-  if (!path || !change) return <p className="panel-empty">No file to preview</p>;
-  const content = contentAfter(change.diff);
+  const root = useProjectRoot();
+  const project = useStore((s) => s.project);
+  const paths = pathsOf(changes);
+  const path = file ?? paths.at(-1) ?? null;
+  const [content, setContent] = useState<{ path: string; text: string } | { path: string; error: string } | null>(null);
+
+  useEffect(() => {
+    if (!path || !project) return;
+    let current = true;
+    store.engine.readFile(project, path).then(
+      (text) => current && setContent({ path, text }),
+      (e) => current && setContent({ path, error: describe(e) }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [store, project, path]);
+
+  if (!path) return <p className="panel-empty">No file to preview</p>;
+  const shown = content?.path === path ? content : null;
   return (
     <div className="panel-preview">
-      {created.length > 1 && (
+      {paths.length > 1 && (
         <div className="panel-preview-pick">
-          {created.map((c) => (
-            <button key={c.path} className={`quiet ${c.path === path ? "is-on" : ""}`} onClick={() => show("preview", c.path)}>
-              {c.path.split("/").pop()}
+          {paths.map((p) => (
+            <button key={p} className={`quiet ${p === path ? "is-on" : ""}`} onClick={() => show("preview", p)}>
+              {p.split("/").pop()}
             </button>
           ))}
         </div>
       )}
-      <div className="mono faint panel-preview-path">{path}</div>
-      {content === null ? <Diff diff={change.diff} /> : /\.md$/i.test(path) ? <Markdown text={content} /> : <pre className="panel-preview-text">{content}</pre>}
+      <div className="mono faint panel-preview-path">{shortPath(path, root)}</div>
+      {shown && "error" in shown && <p className="panel-empty">{shown.error}</p>}
+      {shown && "text" in shown && (/\.(md|markdown)$/i.test(path) ? <Markdown text={shown.text} /> : <pre className="panel-preview-text">{shown.text}</pre>)}
     </div>
   );
 }

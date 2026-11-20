@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 import type { Answer, PendingRequest } from "../../engine/types";
-import { useStoreHandle } from "../../state/store";
+import { shortPath } from "../../state/selectors";
+import { useProjectRoot, useStoreHandle } from "../../state/store";
 import { Diff, DiffStat } from "../Diff";
 import { Icon } from "../Icon";
 
@@ -10,6 +11,7 @@ const headings = { command: "Run this command?", fileChange: "Make these changes
 /** An approval in the composer area: Allow, Decline, or one more press for the rest. */
 export function Approval({ pending }: { pending: PendingRequest }) {
   const store = useStoreHandle();
+  const root = useProjectRoot();
   const [more, setMore] = useState(false);
   const [sent, setSent] = useState(false);
   const request = pending.request;
@@ -44,7 +46,7 @@ export function Approval({ pending }: { pending: PendingRequest }) {
         request.files.map((f) => (
           <div key={f.path} className="ask-file">
             <div className="ask-file-head">
-              <span className="mono">{f.path}</span>
+              <span className="mono">{shortPath(f.path, root)}</span>
               <DiffStat diff={f.diff} />
             </div>
             <Diff diff={f.diff} limit={10} />
@@ -60,7 +62,7 @@ export function Approval({ pending }: { pending: PendingRequest }) {
         {more ? (
           <>
             <button className="quiet" disabled={sent} onClick={() => answer({ kind: "allowForSession" })}>
-              Allow for this session
+              {request.kind === "command" ? "Always allow this command" : "Allow for this session"}
             </button>
             <button className="quiet" disabled={sent} onClick={() => answer({ kind: "cancel" })}>
               Decline and stop

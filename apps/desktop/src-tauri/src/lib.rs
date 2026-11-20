@@ -7,7 +7,7 @@ use chirality_engine::{
     Answer, Engine, EngineConfig, Message, Project, ProjectId, RequestId, Result, Snapshot, ThreadId,
     ThreadView, TurnId, TurnSettings, Workflow,
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Builder, Emitter, Manager, Runtime, State};
 use tokio::sync::OnceCell;
 
 /// The engine, started once; every command waits for the same start.
@@ -92,6 +92,10 @@ async fn answer(s: S<'_>, request: RequestId, answer: Answer) -> Result<()> {
     engine(&s).await?.answer(&request, answer).await
 }
 #[tauri::command]
+async fn read_file(s: S<'_>, project: ProjectId, path: PathBuf) -> Result<String> {
+    engine(&s).await?.read_file(&project, path).await
+}
+#[tauri::command]
 async fn find_files(s: S<'_>, project: ProjectId, query: String) -> Result<Vec<PathBuf>> {
     engine(&s).await?.find_files(&project, query).await
 }
@@ -116,7 +120,7 @@ fn config(app: &tauri::App) -> std::result::Result<EngineConfig, Box<dyn std::er
 }
 
 /// Forwards every engine event, in order, for as long as the app runs.
-async fn forward(app: tauri::AppHandle) {
+async fn forward<R: Runtime>(app: AppHandle<R>) {
     let Ok(engine) = engine(&app.state::<Started>()).await else { return };
     let mut events = engine.subscribe();
     loop {
@@ -130,36 +134,46 @@ async fn forward(app: tauri::AppHandle) {
     }
 }
 
+/// The engine's commands.
+fn commands<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+    builder.invoke_handler(tauri::generate_handler![
+        snapshot,
+        sign_in,
+        cancel_sign_in,
+        sign_out,
+        add_project,
+        remove_project,
+        workflows,
+        read_thread,
+        start_thread,
+        send,
+        interrupt,
+        fork,
+        revert,
+        rename,
+        archive,
+        mark_read,
+        answer,
+        read_file,
+        find_files,
+    ])
+}
+
+/// Gives the app its engine and starts forwarding the engine's events.
+fn start<R: Runtime>(app: &AppHandle<R>, config: EngineConfig) {
+    app.manage(Started { config, engine: OnceCell::new() });
+    tauri::async_runtime::spawn(forward(app.clone()));
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    commands(Builder::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            app.manage(Started { config: config(app)?, engine: OnceCell::new() });
-            tauri::async_runtime::spawn(forward(app.handle().clone()));
+            start(app.handle(), config(app)?);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            snapshot,
-            sign_in,
-            cancel_sign_in,
-            sign_out,
-            add_project,
-            remove_project,
-            workflows,
-            read_thread,
-            start_thread,
-            send,
-            interrupt,
-            fork,
-            revert,
-            rename,
-            archive,
-            mark_read,
-            answer,
-            find_files,
-        ])
         .build(tauri::generate_context!())
         .expect("the app starts")
         .run(|app, event| {
@@ -168,3 +182,6 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod headless;

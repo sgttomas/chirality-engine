@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { Attachment, Message, TurnSettings, Workflow } from "../../engine/types";
-import { isRunning, pendingFor } from "../../state/selectors";
+import { isRunning, pendingFor, shortPath } from "../../state/selectors";
 import { remember, remembered, resolveSettings } from "../../state/settings";
-import { useStore, useStoreHandle } from "../../state/store";
+import { useProjectRoot, useStore, useStoreHandle } from "../../state/store";
 import { Icon } from "../Icon";
 import { Approval } from "./Approval";
 import { Controls } from "./Controls";
@@ -24,6 +24,7 @@ export function Composer() {
   const pending = useStore((s) => pendingFor(s.model!.snapshot, s.thread));
   const workflows = useStore((s) => s.workflows[project]) ?? [];
   const running = isRunning(view);
+  const root = useProjectRoot();
 
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -73,7 +74,7 @@ export function Composer() {
     if (!mention) return;
     const before = text.slice(0, mention.start);
     const after = text.slice(mention.end);
-    setText(`${before}@${path} ${after.replace(/^\s/, "")}`);
+    setText(`${before}@${shortPath(path, root)} ${after.replace(/^\s/, "")}`);
     setAttachments((a) => (a.some((x) => x.path === path) ? a : [...a, { kind: "file", path }]));
     setMention(null);
     input.current?.focus();
@@ -99,9 +100,9 @@ export function Composer() {
               </span>
             )}
             {attachments.map((a) => (
-              <span key={a.path} className="chip" title={a.path}>
+              <span key={a.path} className="chip" title={shortPath(a.path, root)}>
                 <Icon name={a.kind === "image" ? "file" : "paperclip"} /> {a.path.split("/").pop()}
-                <button className="chip-x" aria-label={`Remove ${a.path}`} onClick={() => setAttachments((all) => all.filter((x) => x !== a))}>
+                <button className="chip-x" aria-label={`Remove ${shortPath(a.path, root)}`} onClick={() => setAttachments((all) => all.filter((x) => x !== a))}>
                   <Icon name="x" />
                 </button>
               </span>

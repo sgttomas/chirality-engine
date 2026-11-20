@@ -58,6 +58,7 @@ export class Store {
     if (model !== before.model) this.set({ model });
     if (event.type === "thread" && event.thread.id === this.state.thread && event.thread.unread) this.markRead(event.thread.id);
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
+    if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });
     for (const listener of this.eventListeners) listener(event, before);
   }
 
@@ -128,3 +129,6 @@ export function useStore<T>(select: (state: State) => T): T {
   const store = useStoreHandle();
   return useSyncExternalStore(store.subscribe, () => select(store.get()));
 }
+
+/** The folder of the project in view. */
+export const useProjectRoot = () => useStore((s) => s.model?.snapshot.projects.find((p) => p.id === s.project)?.path);

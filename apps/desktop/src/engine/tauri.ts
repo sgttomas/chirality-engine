@@ -31,6 +31,7 @@ export const tauriEngine: EngineClient = {
   markRead: (thread) => invoke("mark_read", { thread }),
   answer: (request, answer) => invoke("answer", { request, answer }),
   findFiles: (project, query) => invoke("find_files", { project, query }),
+  readFile: (project, path) => invoke("read_file", { project, path }),
 };
 
 export const tauriHost: Host = {

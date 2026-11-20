@@ -54,9 +54,9 @@ export function TurnView(props: { thread: ThreadId; turn: Turn; workflows: Workf
         <div className="turn-actions">
           {confirmRevert ? (
             <>
-              <span className="turn-confirm">Undo this turn and everything after it?</span>
+              <span className="turn-confirm">Remove this turn and the ones after it? Files stay as they are.</span>
               <button className="quiet" onClick={revert}>
-                Undo
+                Remove
               </button>
               <button className="quiet" onClick={() => setConfirmRevert(false)}>
                 Keep
@@ -67,7 +67,7 @@ export function TurnView(props: { thread: ThreadId; turn: Turn; workflows: Workf
               <button className="quiet" onClick={fork} title="A new thread from here">
                 <Icon name="fork" /> Fork
               </button>
-              <button className="quiet" onClick={() => setConfirmRevert(true)} title="Undo this turn and everything after it">
+              <button className="quiet" onClick={() => setConfirmRevert(true)} title="Remove this turn and the ones after it">
                 <Icon name="undo" /> Revert
               </button>
             </>

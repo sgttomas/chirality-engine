@@ -1,4 +1,6 @@
 import type { Item, PlanStep, Workflow } from "../../engine/types";
+import { shortPath } from "../../state/selectors";
+import { useProjectRoot } from "../../state/store";
 import { Diff, DiffStat } from "../Diff";
 import { Icon } from "../Icon";
 import { usePanel } from "../panel";
@@ -6,6 +8,7 @@ import { workLine, workSummary } from "./group";
 import { Markdown } from "./Markdown";
 
 export function UserMessage({ item, workflows }: { item: Item; workflows: Workflow[] }) {
+  const root = useProjectRoot();
   if (item.body.kind !== "userMessage") return null;
   const { text, attachments, workflow } = item.body;
   const picked = workflow ? workflows.find((w) => w.id === workflow) : undefined;
@@ -13,13 +16,13 @@ export function UserMessage({ item, workflows }: { item: Item; workflows: Workfl
     <div className="msg-user">
       {(picked || attachments.length > 0) && (
         <div className="chips">
-          {picked && (
+          {workflow && (
             <span className="chip chip--workflow">
-              <Icon name="book" /> {picked.name}
+              <Icon name="book" /> {picked?.name ?? workflow.split("/").at(-2) ?? workflow}
             </span>
           )}
           {attachments.map((a) => (
-            <span key={a.path} className="chip" title={a.path}>
+            <span key={a.path} className="chip" title={shortPath(a.path, root)}>
               <Icon name={a.kind === "image" ? "file" : "paperclip"} /> {a.path.split("/").pop()}
             </span>
           ))}
@@ -62,7 +65,7 @@ function WorkItem({ item }: { item: Item }) {
           <div className="work-command-line">
             <Icon name="terminal" />
             <code>{b.command}</code>
-            {b.exit_code !== null && b.exit_code !== 0 && <span className="work-exit">exit {b.exit_code}</span>}
+            {b.exitCode !== null && b.exitCode !== 0 && <span className="work-exit">exit {b.exitCode}</span>}
           </div>
           {b.output && <pre className="work-output">{b.output}</pre>}
         </li>
@@ -104,6 +107,7 @@ export function Plan({ steps }: { steps: PlanStep[] }) {
 
 export function FileChange({ item }: { item: Item }) {
   const { show } = usePanel();
+  const root = useProjectRoot();
   if (item.body.kind !== "fileChange") return null;
   return (
     <div className="change">
@@ -111,7 +115,7 @@ export function FileChange({ item }: { item: Item }) {
         <div key={file.path} className="change-file">
           <button className="change-head" onClick={() => show("changes", file.path)}>
             <Icon name="file" />
-            <span className="change-path">{file.path}</span>
+            <span className="change-path">{shortPath(file.path, root)}</span>
             <DiffStat diff={file.diff} />
           </button>
           <Diff diff={file.diff} limit={8} />

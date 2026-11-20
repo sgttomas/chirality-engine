@@ -23,21 +23,21 @@ export const libraryWorkflows: Workflow[] = [
     id: "wf-decompose",
     name: "Decompose a project",
     summary: "Break the work into packages and deliverables, each with a scope and its dependencies.",
-    source: "Chirality Library",
+    source: library,
     path: `${library}/decompose/WORKFLOW.md`,
   },
   {
     id: "wf-scope",
     name: "Write a scope of work",
     summary: "State what a deliverable must achieve, under what conditions, and what shows it is adequate.",
-    source: "Chirality Library",
+    source: library,
     path: `${library}/scope-of-work/WORKFLOW.md`,
   },
   {
     id: "wf-basis",
     name: "Basis of estimate",
     summary: "Record the quantities, rates and assumptions behind each line of the estimate.",
-    source: "Chirality Library",
+    source: library,
     path: `${library}/basis-of-estimate/WORKFLOW.md`,
   },
 ];
@@ -46,7 +46,7 @@ export const projectWorkflow = (project: Project): Workflow => ({
   id: `wf-${project.id}-review`,
   name: "Weekly cost review",
   summary: "Compare the forecast with the last review and explain each movement over 2%.",
-  source: "Project",
+  source: "project",
   path: `${project.path}/.chirality/workflows/cost-review/WORKFLOW.md`,
 });
 
@@ -72,30 +72,26 @@ export const files = [
   "tools/takeoff.py",
 ];
 
-export const sowDiff = `--- /dev/null
-+++ b/scope/SOW-01-foundations.md
-@@ -0,0 +1,16 @@
-+# SOW-01 Foundations
-+
-+## What it must achieve
-+
-+Piled foundations for piers P1 to P4, carrying the deck loads in
-+\`drawings/S-101-piers.pdf\` to the rock head found in the geotechnical survey.
-+
-+## Conditions
-+
-+- Marine works inside the tidal window, April to September.
-+- Rock head between 14 m and 19 m below bed level.
-+
-+## What shows it is adequate
-+
-+- Pile load tests on two working piles per pier.
-+- As-built toe levels within 0.5 m of design.
+/** A new file: Codex gives its content as the diff. */
+export const sowDiff = `# SOW-01 Foundations
+
+## What it must achieve
+
+Piled foundations for piers P1 to P4, carrying the deck loads in
+\`drawings/S-101-piers.pdf\` to the rock head found in the geotechnical survey.
+
+## Conditions
+
+- Marine works inside the tidal window, April to September.
+- Rock head between 14 m and 19 m below bed level.
+
+## What shows it is adequate
+
+- Pile load tests on two working piles per pier.
+- As-built toe levels within 0.5 m of design.
 `;
 
-export const basisDiff = `--- a/estimate/basis.md
-+++ b/estimate/basis.md
-@@ -4,7 +4,10 @@
+export const basisDiff = `@@ -4,7 +4,10 @@
  ## Foundations
 
 -Piles priced at an allowance of 40 m per pile.
@@ -108,9 +104,7 @@ export const basisDiff = `--- a/estimate/basis.md
 
 `;
 
-export const quantitiesDiff = `--- a/estimate/quantities.csv
-+++ b/estimate/quantities.csv
-@@ -1,5 +1,5 @@
+export const quantitiesDiff = `@@ -1,5 +1,5 @@
  item,unit,quantity
 -bored pile 1.2m,m,1280
 +bored pile 1.2m,m,608
@@ -119,9 +113,7 @@ export const quantitiesDiff = `--- a/estimate/quantities.csv
  crosshead,m3,188
 `;
 
-export const alternativeDiff = `--- a/estimate/basis.md
-+++ b/estimate/basis.md
-@@ -4,8 +4,12 @@
+export const alternativeDiff = `@@ -4,8 +4,12 @@
  ## Foundations
  
  Piles priced from the geotechnical summary: 17 m average to rock head,

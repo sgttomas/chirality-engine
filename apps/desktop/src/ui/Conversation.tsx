@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { isRunning, markLabel, markOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Composer } from "./composer/Composer";
+import { ThreadTitle } from "./conversation/ThreadTitle";
 import { TurnView } from "./conversation/TurnView";
 import { Icon } from "./Icon";
 import { usePanel } from "./panel";
@@ -39,7 +40,7 @@ export function Conversation() {
     <main className="conv">
       <header className="conv-head">
         <div className="conv-title">
-          <h1>{summary ? (summary.title ?? "New thread") : project ? project.name : ""}</h1>
+          {summary ? <ThreadTitle thread={summary} /> : <h1>{project?.name ?? ""}</h1>}
           {parent && (
             <button className="conv-parent" onClick={() => store.selectThread(parent.id)}>
               <Icon name="fork" /> {parent.title ?? "Parent thread"}

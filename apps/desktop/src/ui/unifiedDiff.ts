@@ -16,6 +16,11 @@ export interface ParsedDiff {
 }
 
 export function parseDiff(diff: string): ParsedDiff {
+  // A new file: Codex gives its content rather than a diff.
+  if (!/^@@ /m.test(diff)) {
+    const text = diff.replace(/\n$/, "").split("\n");
+    return { lines: text.map((t, i) => ({ kind: "add", text: t, new: i + 1 })), added: text.length, removed: 0, created: true };
+  }
   const lines: DiffLine[] = [];
   let added = 0;
   let removed = 0;
@@ -44,14 +49,4 @@ export function parseDiff(diff: string): ParsedDiff {
     }
   }
   return { lines, added, removed, created };
-}
-
-/** The file's text after the change, where the diff holds all of it. */
-export function contentAfter(diff: string): string | null {
-  const parsed = parseDiff(diff);
-  if (!parsed.created) return null;
-  return parsed.lines
-    .filter((l) => l.kind === "add")
-    .map((l) => l.text)
-    .join("\n");
 }

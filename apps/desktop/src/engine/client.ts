@@ -40,7 +40,10 @@ export interface EngineClient {
   markRead(thread: ThreadId): Promise<void>;
 
   answer(request: RequestId, answer: Answer): Promise<void>;
+  /** Absolute paths. */
   findFiles(project: ProjectId, query: string): Promise<string[]>;
+  /** A file in the project, by absolute path or relative to it. */
+  readFile(project: ProjectId, path: string): Promise<string>;
 }
 
 /** What the desktop itself provides: dialogs, the browser, notifications. */

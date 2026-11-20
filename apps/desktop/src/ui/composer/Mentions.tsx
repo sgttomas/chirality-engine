@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 import type { ProjectId } from "../../engine/types";
-import { useStoreHandle } from "../../state/store";
+import { shortPath } from "../../state/selectors";
+import { useProjectRoot, useStoreHandle } from "../../state/store";
 import { Icon } from "../Icon";
 
 export interface Mention {
@@ -25,6 +26,7 @@ export function MentionMenu({ project, mention, onPick, onClose }: { project: Pr
   const store = useStoreHandle();
   const [files, setFiles] = useState<string[]>([]);
   const [active, setActive] = useState(0);
+  const root = useProjectRoot();
 
   useEffect(() => {
     let current = true;
@@ -66,7 +68,7 @@ export function MentionMenu({ project, mention, onPick, onClose }: { project: Pr
         >
           <Icon name="file" />
           <span className="mention-name">{path.split("/").pop()}</span>
-          <span className="mention-dir">{path.split("/").slice(0, -1).join("/")}</span>
+          <span className="mention-dir">{shortPath(path, root).split("/").slice(0, -1).join("/")}</span>
         </button>
       ))}
     </div>

@@ -2,7 +2,7 @@ import { act, render } from "@testing-library/react";
 
 import { FakeEngine, type FakeOptions } from "../engine/fake/engine";
 import { bridge } from "../engine/fake/fixtures";
-import type { Host } from "../engine/client";
+import type { EngineClient, Host } from "../engine/client";
 import { Store, StoreContext } from "../state/store";
 import { App } from "../ui/App";
 
@@ -26,7 +26,7 @@ export function fakeEngine(options: FakeOptions & { bare?: boolean } = {}) {
 }
 
 /** Mounts the whole interface over an engine. */
-export async function mount(engine: FakeEngine) {
+export async function mount(engine: EngineClient) {
   const store = new Store(engine, testHost);
   await store.start();
   const project = store.get().project;

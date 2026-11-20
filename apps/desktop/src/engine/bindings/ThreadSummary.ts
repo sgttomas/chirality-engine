@@ -16,4 +16,4 @@ forkedFrom: ThreadId | null,
 /**
  * Seconds since the Unix epoch.
  */
-updatedAt: bigint, settings: TurnSettings | null, };
+updatedAt: number, settings: TurnSettings | null, };
