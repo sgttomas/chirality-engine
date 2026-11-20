@@ -63,8 +63,9 @@ impl Inner {
             return Err(EngineError::NotFound { what: format!("request {}", request.0) });
         }
         let (reply, stop) = mapping::reply(&pending.method, &pending.params, &answer)?;
+        let gone = || EngineError::NotFound { what: format!("request {}", request.0) };
+        let pending = self.store.take_pending(request).ok_or_else(gone)?;
         session.client.respond(pending.rpc_id.clone(), reply).map_err(crate::session::engine_error)?;
-        self.store.resolve(|p| p.request.id == *request);
         if stop {
             self.interrupt(&pending.request.thread).await?;
         }

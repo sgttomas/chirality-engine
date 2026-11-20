@@ -213,6 +213,9 @@ pub(crate) fn reply(method: &str, params: &Value, answer: &Answer) -> std::resul
     let invalid = || EngineError::Invalid { message: "that answer does not fit this request".into() };
     match method {
         COMMAND_APPROVAL | FILE_APPROVAL => {
+            if let (Answer::AllowForSession, Some(amendment)) = (answer, standing_amendment(params)) {
+                return Ok((json!({ "decision": amendment }), false));
+            }
             let decision = match answer {
                 Answer::Allow => "accept",
                 Answer::AllowForSession => "acceptForSession",
@@ -247,6 +250,17 @@ pub(crate) fn reply(method: &str, params: &Value, answer: &Answer) -> std::resul
         },
         _ => Err(invalid()),
     }
+}
+
+/// When Codex offers no `acceptForSession` for a command but offers to allow
+/// it from now on (an exec-policy amendment), that is what "for this session"
+/// can be.
+fn standing_amendment(params: &Value) -> Option<Value> {
+    let offered = params.get("availableDecisions")?.as_array()?;
+    if offered.iter().any(|d| d == "acceptForSession") {
+        return None;
+    }
+    offered.iter().find(|d| d.get("acceptWithExecpolicyAmendment").is_some()).cloned()
 }
 
 /// A granted profile leaves out what was not asked for.
@@ -287,5 +301,8 @@ mod tests {
         let asked = json!({"permissions": {"network": {"enabled": true}, "fileSystem": null}});
         assert_eq!(reply(PERMISSIONS_APPROVAL, &asked, &Answer::Allow).unwrap().0, json!({"permissions": {"network": {"enabled": true}}, "scope": "turn"}));
         assert!(reply(FILE_APPROVAL, &json!({}), &Answer::Answers { answers: vec![] }).is_err());
+        let amendment = json!({"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["ls"]}});
+        let offered = json!({"availableDecisions": ["accept", amendment, "cancel"]});
+        assert_eq!(reply(COMMAND_APPROVAL, &offered, &Answer::AllowForSession).unwrap().0, json!({"decision": amendment}));
     }
 }

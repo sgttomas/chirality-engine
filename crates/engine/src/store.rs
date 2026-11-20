@@ -45,6 +45,8 @@ struct State {
     pending: Vec<Pending>,
     /// File changes by Codex item id, for the approval that names only the item.
     file_changes: HashMap<String, Vec<FileDiff>>,
+    /// Subagent threads, by the thread that started them.
+    parents: HashMap<ThreadId, ThreadId>,
 }
 
 pub(crate) struct Store {
@@ -181,12 +183,39 @@ impl Store {
         }
     }
 
+    /// Removes one request and announces it; `None` if it is already gone,
+    /// so a request is answered once however often the person presses.
+    pub fn take_pending(&self, id: &RequestId) -> Option<Pending> {
+        let taken = self.pending(id)?;
+        let mut found = false;
+        self.resolve(|p| {
+            let hit = &p.request.id == id;
+            found |= hit;
+            hit
+        });
+        found.then_some(taken)
+    }
+
+    pub fn set_parent(&self, child: ThreadId, parent: ThreadId) {
+        self.state.lock().unwrap().parents.insert(child, parent);
+    }
+
+    /// The thread a subagent's requests are shown on: its root ancestor.
+    pub fn owner(&self, thread: ThreadId) -> ThreadId {
+        let state = self.state.lock().unwrap();
+        let mut current = thread;
+        while let Some(parent) = state.parents.get(&current) {
+            current = parent.clone();
+        }
+        current
+    }
+
     pub fn pending(&self, id: &RequestId) -> Option<Pending> {
         self.state.lock().unwrap().pending.iter().find(|p| &p.request.id == id).cloned()
     }
 
     /// Removes the requests `matches` selects, announcing each.
-    pub fn resolve(&self, matches: impl Fn(&Pending) -> bool) {
+    pub fn resolve(&self, mut matches: impl FnMut(&Pending) -> bool) {
         let mut state = self.state.lock().unwrap();
         let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut state.pending).into_iter().partition(|p| matches(p));
         state.pending = kept;

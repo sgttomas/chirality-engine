@@ -69,6 +69,8 @@ pub async fn text_turn(ctx: &mut Ctx) {
     assert_eq!(status(ctx, &thread).title.as_deref(), Some("Greeting"));
     let found = ctx.engine.find_files(&project.id, "notes".into()).await.unwrap();
     assert!(found.contains(&ctx.run.project().join("notes.md")), "{found:?}");
+    assert_eq!(ctx.engine.read_file(&project.id, "notes.md".into()).await.unwrap(), "notes\n");
+    assert!(ctx.engine.read_file(&project.id, ctx.run.project().join("../home")).await.is_err());
 }
 
 pub async fn workflow_turn(ctx: &mut Ctx) {
@@ -81,7 +83,10 @@ pub async fn workflow_turn(ctx: &mut Ctx) {
     let estimate = workflows.iter().find(|w| w.source == "project").expect("the project's workflow").clone();
     assert_eq!((estimate.name.as_str(), estimate.summary.as_str()), ("estimate", "Estimate the work."));
     ctx.script("flow", says("flow", "Following the workflow."));
-    let attachments = vec![Attachment::File { path: ctx.run.project().join("scope.md") }];
+    // A 1x1 PNG.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89\0\0\0\rIDATx\x9cc\xf8\xff\xff?\0\x05\xfe\x02\xfe\xa7\x35\x81\x84\0\0\0\0IEND\xaeB`\x82";
+    std::fs::write(ctx.run.project().join("sketch.png"), PNG).unwrap();
+    let attachments = vec![Attachment::File { path: ctx.run.project().join("scope.md") }, Attachment::Image { path: ctx.run.project().join("sketch.png") }];
     let message = Message { text: "STUB[flow] Estimate this".into(), attachments: attachments.clone(), workflow: Some(estimate.id.clone()) };
     let thread = ctx.engine.start_thread(&project.id, message, settings(Access::Ask)).await.unwrap();
     assert_eq!(ctx.turn_ended(&thread).await.1, TurnState::Completed);

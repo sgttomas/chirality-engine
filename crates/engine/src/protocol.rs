@@ -130,10 +130,16 @@ pub enum ThreadStatus {
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_items")]
     pub items: Vec<ThreadItem>,
     pub status: TurnStatus,
     pub error: Option<TurnError>,
+}
+
+/// Items that do not decode are left out, so one odd item never loses its turn.
+fn lenient_items<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<ThreadItem>, D::Error> {
+    let values = Vec::<Value>::deserialize(deserializer)?;
+    Ok(values.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]

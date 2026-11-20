@@ -62,6 +62,16 @@ impl Inner {
         Ok(project)
     }
 
+    pub(crate) fn read_file(&self, project: &ProjectId, path: PathBuf) -> Result<String> {
+        let project = self.project(project)?;
+        let path = if path.is_absolute() { path } else { project.path.join(path) };
+        let real = path.canonicalize().map_err(|e| invalid(format!("{}: {e}", path.display())))?;
+        if !real.starts_with(&project.path) {
+            return Err(invalid(format!("{} is outside the project", path.display())));
+        }
+        std::fs::read_to_string(&real).map_err(|e| invalid(format!("{}: {e}", path.display())))
+    }
+
     pub(crate) async fn remove_project(&self, project: &ProjectId) -> Result<()> {
         let mut projects = self.store.projects();
         let before = projects.len();

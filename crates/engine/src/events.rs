@@ -24,8 +24,21 @@ impl Inner {
             }
             "thread/status/changed" => {
                 let Some(note) = decode::<p::StatusNote>(params) else { return };
-                if let p::ThreadStatus::SystemError = note.status {
-                    self.store.update_thread(&ThreadId(note.thread_id), |e| e.failed = Some("Codex reported an error".into()));
+                let thread = ThreadId(note.thread_id);
+                match note.status {
+                    p::ThreadStatus::SystemError => {
+                        self.store.update_thread(&thread, |e| e.failed = Some("Codex reported an error".into()));
+                    }
+                    // Idle means no turn runs, even if a note was missed; the
+                    // turn's own end (which follows) still says how it ended.
+                    p::ThreadStatus::Idle => {
+                        self.store.update_thread(&thread, |e| {
+                            if let Some(turn) = e.active_turn.take() {
+                                e.last_ended = Some(turn);
+                            }
+                        });
+                    }
+                    _ => {}
                 }
             }
             "thread/name/updated" => {
@@ -131,6 +144,7 @@ impl Inner {
         }
         match mapping::request(method, &params, |item| self.store.file_change(item)) {
             Some((thread, request)) => {
+                let thread = self.store.owner(thread);
                 let request = PendingRequest { id: RequestId(format!("{generation}:{}", rpc_id_text(&id))), thread, request };
                 self.store.add_pending(Pending { request, generation, rpc_id: id, method: method.to_string(), params });
             }
@@ -142,7 +156,8 @@ impl Inner {
 
     /// Records a thread Codex reports if it belongs to one of the projects.
     pub(crate) fn adopt_thread(&self, thread: &p::Thread) -> Option<ThreadId> {
-        if thread.parent_thread_id.is_some() {
+        if let Some(parent) = &thread.parent_thread_id {
+            self.store.set_parent(ThreadId(thread.id.clone()), ThreadId(parent.clone()));
             return None;
         }
         let project = self.store.projects().into_iter().find(|p| mapping::same_folder(&thread.cwd, &p.path))?;

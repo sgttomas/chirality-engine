@@ -149,6 +149,11 @@ impl Engine {
         self.inner.answer(request, answer).await
     }
 
+    /// A text file inside the project folder, for a preview; a path outside it is refused.
+    pub async fn read_file(&self, project: &ProjectId, path: PathBuf) -> Result<String> {
+        self.inner.read_file(project, path)
+    }
+
     /// Files in a project matching `query`, for `@` references.
     pub async fn find_files(&self, project: &ProjectId, query: String) -> Result<Vec<PathBuf>> {
         self.inner.find_files(project, query).await
