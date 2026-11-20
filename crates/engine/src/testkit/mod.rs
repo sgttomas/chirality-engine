@@ -8,6 +8,7 @@
 //! - `live_main_path`: the main path against the real Codex, not recorded;
 //!   skipped when the binary is absent.
 
+mod export;
 mod harness;
 mod record;
 mod scenarios;

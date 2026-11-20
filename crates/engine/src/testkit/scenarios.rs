@@ -12,7 +12,7 @@ async fn project(ctx: &Ctx) -> Project {
 }
 
 async fn turns(ctx: &Ctx, thread: &ThreadId) -> Vec<Turn> {
-    ctx.engine.read_thread(thread).await.expect("the thread reads").turns
+    ctx.read_thread(thread).await.turns
 }
 
 fn agent_text(turn: &Turn) -> String {

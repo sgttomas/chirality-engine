@@ -98,8 +98,29 @@ pub struct Ctx {
     pub engine: Engine,
     pub events: broadcast::Receiver<Event>,
     pub run: Run,
+    /// When set, keeps every event and each thread view the scenario reads.
+    pub tape: Option<std::sync::Mutex<Tape>>,
     mode: Mode,
     places: Places,
+}
+
+/// The events since taping began, and each view read with how many events preceded it.
+pub struct Tape {
+    pub rx: broadcast::Receiver<Event>,
+    pub events: Vec<Event>,
+    pub reads: Vec<(usize, ThreadView)>,
+}
+
+impl Tape {
+    pub fn drain(&mut self) {
+        loop {
+            match self.rx.try_recv() {
+                Ok(event) => self.events.push(event),
+                Err(broadcast::error::TryRecvError::Lagged(n)) => panic!("{n} events lost"),
+                Err(_) => return,
+            }
+        }
+    }
 }
 
 impl Ctx {
@@ -120,7 +141,7 @@ impl Ctx {
         let places = run.places(stub.port);
         let engine = Engine::start_with(config, connector, tap).await.expect("the engine starts");
         let events = engine.subscribe();
-        Ctx { engine, events, run, mode: Mode::Live { stub, recorder }, places }
+        Ctx { engine, events, run, tape: None, mode: Mode::Live { stub, recorder }, places }
     }
 
     /// The recorded transcript for `name`, played through the real client.
@@ -133,7 +154,19 @@ impl Ctx {
             Err(e) => panic!("the engine did not start: {e}; {:?}", replay.failure()),
         };
         let events = engine.subscribe();
-        Ctx { engine, events, run, mode: Mode::Replay(replay), places }
+        Ctx { engine, events, run, tape: None, mode: Mode::Replay(replay), places }
+    }
+
+    /// Reads a thread, keeping the view on the tape if there is one.
+    pub async fn read_thread(&self, thread: &ThreadId) -> ThreadView {
+        let view = self.engine.read_thread(thread).await.expect("the thread reads");
+        if let Some(tape) = &self.tape {
+            let mut tape = tape.lock().unwrap();
+            tape.drain();
+            let at = tape.events.len();
+            tape.reads.push((at, view.clone()));
+        }
+        view
     }
 
     pub fn is_live(&self) -> bool {

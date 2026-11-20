@@ -1,0 +1,86 @@
+//! What the engine produces from recorded transcripts, written as JSON for the
+//! desktop interface's tests: the snapshot before, every event, the snapshot
+//! after, and each thread view the scenario read with the number of events
+//! before it. `interface_data` checks the committed files still match;
+//! `CHIRALITY_EXPORT=1` writes them again.
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use serde_json::{Value, json};
+
+use super::harness::{Ctx, Tape};
+use super::scenarios;
+
+fn out_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/src/test/engine-data")
+}
+
+/// Times the engine stamped during this run (not recorded ones) become one fixed time.
+fn fix_times(value: &mut Value, since: i64) {
+    match value {
+        Value::Object(map) => {
+            for (key, v) in map.iter_mut() {
+                if key == "updatedAt" && v.as_i64().is_some_and(|t| t >= since) {
+                    *v = json!(1_795_000_000);
+                } else {
+                    fix_times(v, since);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| fix_times(v, since)),
+        _ => {}
+    }
+}
+
+async fn capture(name: &str) -> Value {
+    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 - 5;
+    let mut ctx = Ctx::replay(name).await;
+    let before = ctx.engine.snapshot();
+    ctx.tape = Some(Mutex::new(Tape { rx: ctx.engine.subscribe(), events: Vec::new(), reads: Vec::new() }));
+    match name {
+        "text_turn" => scenarios::text_turn(&mut ctx).await,
+        "workflow_turn" => scenarios::workflow_turn(&mut ctx).await,
+        "command_approved" => scenarios::command_approved(&mut ctx).await,
+        "file_change" => scenarios::file_change(&mut ctx).await,
+        "question" => scenarios::question(&mut ctx).await,
+        "interrupt" => scenarios::interrupt(&mut ctx).await,
+        "fork" => scenarios::fork(&mut ctx).await,
+        other => panic!("no scenario {other}"),
+    }
+    let after = ctx.engine.snapshot();
+    let mut tape = ctx.tape.take().unwrap().into_inner().unwrap();
+    tape.drain();
+    let reads: Vec<Value> = tape.reads.iter().map(|(at, view)| json!({ "afterEvents": at, "view": view })).collect();
+    let root = ctx.run.root.display().to_string();
+    // Project ids are derived from the run's folder; name them by position instead.
+    let projects: Vec<String> = after.projects.iter().map(|p| p.id.0.clone()).collect();
+    ctx.finish(name).await;
+    let data = json!({ "before": before, "events": tape.events, "after": after, "reads": reads });
+    // The run's temporary folder becomes a fixed one, so the files are stable.
+    let mut text = serde_json::to_string(&data).unwrap().replace(&root, "/work/run");
+    for (i, id) in projects.iter().enumerate() {
+        text = text.replace(&format!("\"{id}\""), &format!("\"project-{}\"", i + 1));
+    }
+    let mut value: Value = serde_json::from_str(&text).unwrap();
+    fix_times(&mut value, since);
+    value
+}
+
+const SCENARIOS: [&str; 7] = ["text_turn", "workflow_turn", "command_approved", "file_change", "question", "interrupt", "fork"];
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interface_data() {
+    let write = std::env::var_os("CHIRALITY_EXPORT").is_some();
+    std::fs::create_dir_all(out_dir()).unwrap();
+    for name in SCENARIOS {
+        let data = serde_json::to_string_pretty(&capture(name).await).unwrap() + "\n";
+        let path = out_dir().join(format!("{name}.json"));
+        if write {
+            std::fs::write(&path, data).unwrap();
+        } else {
+            let committed = std::fs::read_to_string(&path).unwrap_or_default();
+            assert!(committed == data, "{} is out of date: CHIRALITY_EXPORT=1 cargo test -p chirality-engine interface_data", path.display());
+        }
+    }
+}
