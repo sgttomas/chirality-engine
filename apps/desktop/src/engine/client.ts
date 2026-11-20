@@ -50,3 +50,6 @@ export interface Host {
   openUrl(url: string): Promise<void>;
   notify(title: string, body: string): Promise<void>;
 }
+
+/** Whether the interface runs inside the desktop app. */
+export const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

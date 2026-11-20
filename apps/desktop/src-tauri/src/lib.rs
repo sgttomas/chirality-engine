@@ -84,7 +84,8 @@ async fn archive(s: S<'_>, thread: ThreadId) -> Result<()> {
 }
 #[tauri::command]
 async fn mark_read(s: S<'_>, thread: ThreadId) -> Result<()> {
-    Ok(engine(&s).await?.mark_read(&thread))
+    engine(&s).await?.mark_read(&thread);
+    Ok(())
 }
 #[tauri::command]
 async fn answer(s: S<'_>, request: RequestId, answer: Answer) -> Result<()> {
@@ -162,10 +163,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("the app starts")
         .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(Ok(engine)) = app.state::<Started>().engine.get() {
-                    tauri::async_runtime::block_on(engine.shutdown());
-                }
+            if let (tauri::RunEvent::Exit, Some(Ok(engine))) = (event, app.state::<Started>().engine.get()) {
+                tauri::async_runtime::block_on(engine.shutdown());
             }
         });
 }

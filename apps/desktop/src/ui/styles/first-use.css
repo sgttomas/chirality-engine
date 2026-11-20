@@ -1,0 +1,34 @@
+.first-use {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--ground);
+}
+.first-use-card {
+  width: min(400px, calc(100% - 32px));
+  padding: 34px 36px 30px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+}
+.brand {
+  margin: 0 0 26px;
+  font: 500 24px/1.2 var(--font-display);
+  letter-spacing: 0.01em;
+  color: var(--brand-ink);
+}
+.first-use-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; }
+.first-use-steps li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; color: var(--ink-faint); }
+.first-use-steps li.current, .first-use-steps li.done { color: var(--ink); }
+.first-use-n {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border: 1px solid var(--rule-strong);
+  border-radius: 50%;
+  font-size: 11.5px; font-weight: 600;
+}
+.first-use-steps li.current .first-use-n { border-color: var(--accent); color: var(--accent-ink); }
+.first-use-steps li.done .first-use-n { border-color: var(--sage); background: var(--sage-soft); color: var(--sage-ink); }
+.first-use-title { font-weight: 500; line-height: 22px; }
+.first-use-actions { display: flex; gap: 8px; margin-top: 10px; }
+.first-use-error { margin: 20px 0 0; color: var(--danger); font-size: 12.5px; }

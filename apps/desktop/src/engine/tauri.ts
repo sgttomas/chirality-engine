@@ -48,5 +48,3 @@ export const tauriHost: Host = {
     sendNotification({ title, body });
   },
 };
-
-export const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
