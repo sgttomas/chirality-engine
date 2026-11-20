@@ -18,6 +18,8 @@ mod transport;
 mod turns;
 mod workflows;
 
+#[cfg(test)]
+mod testkit;
 
 pub use api::*;
 
