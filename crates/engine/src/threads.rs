@@ -7,9 +7,26 @@ use serde_json::json;
 
 use crate::api::*;
 use crate::protocol as p;
-use crate::session::{Inner, Session};
+use crate::rpc::RpcError;
+use crate::session::{Inner, Session, engine_error};
 
 const PAGE: u32 = 100;
+const METHOD_NOT_FOUND: i64 = -32601;
+
+async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
+    let mut turns = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let params = json!({ "threadId": thread.0, "cursor": cursor, "limit": PAGE, "sortDirection": "asc", "itemsView": "full" });
+        let page: p::TurnsListResponse = session.client.request("thread/turns/list", params).await?;
+        let empty = page.data.is_empty();
+        turns.extend(page.data.iter().map(crate::mapping::turn));
+        match page.next_cursor {
+            Some(next) if !empty => cursor = Some(next),
+            _ => return Ok(turns),
+        }
+    }
+}
 
 impl Inner {
     /// Reads a project's threads from Codex into the snapshot.
@@ -53,18 +70,14 @@ impl Inner {
         self.known_thread(thread)?;
         let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
         self.adopt_thread(&read.thread);
-        let mut turns = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let params = json!({ "threadId": thread.0, "cursor": cursor, "limit": PAGE, "sortDirection": "asc", "itemsView": "full" });
-            let page: p::TurnsListResponse = session.call("thread/turns/list", params).await?;
-            let empty = page.data.is_empty();
-            turns.extend(page.data.iter().map(crate::mapping::turn));
-            match page.next_cursor {
-                Some(next) if !empty => cursor = Some(next),
-                _ => break,
+        let turns = match list_turns(&session, thread).await {
+            Err(RpcError::Server { code: METHOD_NOT_FOUND, .. }) => {
+                // Threads kept in Codex's older history format cannot be paged; read them whole.
+                let whole: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0, "includeTurns": true })).await?;
+                whole.thread.turns.iter().map(crate::mapping::turn).collect()
             }
-        }
+            other => other.map_err(engine_error)?,
+        };
         let summary = self.store.summary(thread).ok_or_else(|| EngineError::NotFound { what: format!("thread {}", thread.0) })?;
         Ok(ThreadView { summary, turns })
     }
