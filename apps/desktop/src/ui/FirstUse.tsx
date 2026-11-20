@@ -27,7 +27,7 @@ export function FirstUse() {
               {account.state === "signedIn" && <div className="faint">{account.email ?? "Signed in"}</div>}
               {account.state === "signingIn" && (
                 <div className="first-use-actions">
-                  <button className="primary" onClick={() => store.host.openUrl(account.url)}>
+                  <button className="primary" onClick={() => store.attempt(() => store.host.openUrl(account.url))}>
                     Open sign-in page
                   </button>
                   <button className="quiet" onClick={() => store.attempt(() => store.engine.cancelSignIn())}>
