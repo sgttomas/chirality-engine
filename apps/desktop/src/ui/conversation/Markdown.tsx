@@ -17,7 +17,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
               href={href}
               onClick={(e) => {
                 e.preventDefault();
-                if (href) void store.host.openUrl(href);
+                if (href) void store.attempt(() => store.host.openUrl(href));
               }}
             >
               {children}
