@@ -1,0 +1,70 @@
+{
+  "name": "@chirality/engine-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The Chirality engine's interface parts: its client, generated types, state and components.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tauri": "./src/tauri/index.ts",
+    "./fake": "./src/fake/index.ts",
+    "./testing": "./src/testing/index.ts",
+    "./tokens.css": "./src/ui/styles/tokens.css"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "bindings": "rm -rf src/engine/bindings && TS_RS_EXPORT_DIR=\"$PWD/src/engine/bindings\" cargo test -p chirality-engine export_bindings && node scripts/bindings-index.mjs"
+  },
+  "dependencies": {
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
+  },
+  "peerDependencies": {
+    "@tauri-apps/api": "^2.12.5",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-notification": "^2.8.1",
+    "@tauri-apps/plugin-opener": "^2.7.3",
+    "@testing-library/react": "^16.3.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "peerDependenciesMeta": {
+    "@tauri-apps/api": {
+      "optional": true
+    },
+    "@tauri-apps/plugin-dialog": {
+      "optional": true
+    },
+    "@tauri-apps/plugin-notification": {
+      "optional": true
+    },
+    "@tauri-apps/plugin-opener": {
+      "optional": true
+    },
+    "@testing-library/react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "2.12.5",
+    "@tauri-apps/plugin-dialog": "2.8.4",
+    "@tauri-apps/plugin-notification": "2.8.1",
+    "@tauri-apps/plugin-opener": "2.7.3",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.13",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "jsdom": "31.0.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.1"
+  }
+}

@@ -1,5 +1,5 @@
 //! What the engine produces from recorded transcripts, written as JSON for the
-//! desktop interface's tests: the snapshot before, every event, the snapshot
+//! interface package's tests (`packages/ui`): the snapshot before, every event, the snapshot
 //! after, and each thread view the scenario read with the number of events
 //! before it. `interface_data` checks the committed files still match;
 //! `CHIRALITY_EXPORT=1` writes them again.
@@ -13,7 +13,7 @@ use super::harness::{Ctx, Tape};
 use super::scenarios;
 
 fn out_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/src/test/engine-data")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/ui/src/testing/engine-data")
 }
 
 /// Times the engine stamped during this run (not recorded ones) become one fixed time.

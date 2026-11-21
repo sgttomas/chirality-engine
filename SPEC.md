@@ -4,11 +4,13 @@
 
 Chirality is an engine that gives an application a built-in agent working on
 workflows. It runs the Codex app-server and exposes conversations, workflows
-and the person's part in them through one typed Rust API. Each application
-puts a thin adapter and its own interface over the engine.
+and the person's part in them through one typed Rust API. With it come the
+parts an application builds its interface from: a Tauri adapter and an
+interface package. Each application composes the parts it wants.
 
-The first application is a plain desktop wrapper for using and trying the
-engine on its own. The next is a project-estimating application (decomposition,
+The plain application is the Chirality App (`sgttomas/chirality-app`): the
+standard layout, for using any Library workflow with the agent. The next is a
+project-estimating application (`sgttomas/epc-project-init`: decomposition,
 scopes, dependencies, basis of estimate, cost estimate, schedule and resource
 loading); its integration is out of scope here, but every engine decision
 should serve an application like it.
@@ -18,8 +20,8 @@ should serve an application like it.
 1. A person can do real work with an agent on a project folder, with the
    experience of a current agent interface, not a governance tool.
 2. A workflow is a first-class thing to pick and use in a conversation.
-3. The engine is embeddable: no dependency on the wrapper or its framework,
-   one typed API, and the wrapper uses nothing the engine does not expose.
+3. The engine is embeddable: no dependency on an application or its framework,
+   one typed API, and the parts use nothing the engine does not expose.
 4. The code is exemplary: small modules, typed boundaries, tests on what Codex
    really sends, and nothing in it that does not serve a goal above.
 
@@ -68,19 +70,36 @@ give it another home.
 - **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current.
 
 The API is Rust types. Bindings for an application's interface are generated
-from them (TypeScript for the wrapper); nothing crosses as hand-built JSON.
+from them (TypeScript, in the interface package); nothing crosses as
+hand-built JSON.
 
-## The wrapper
+## The parts an application builds on
 
-A desktop app (Tauri, React) that is a thin adapter over the engine.
+Versioned with the engine, so its types, the adapter and the interface move
+together. An application pins one engine revision for all of them.
 
-- **Left:** projects, each with its threads; new thread; search; a mark on a thread that is running, finished, or waiting on the person.
-- **Centre:** the conversation. The person's messages, the agent's text rendered as Markdown, reasoning and tool activity folded, a plan when there is one, file changes as diffs. A composer with attachments, file references (`@`), the workflow picker, and one line of controls: model, reasoning level, access level. Send becomes Stop while a turn runs.
-- **Approvals and questions:** shown where the person will see them, answered in one or two presses, then out of the way.
-- **Right panel:** the diff of the thread's changes, the workflow in use, and a preview of a file the agent produced.
-- **Forks:** fork a thread at a message to try another path; the fork is a thread of its own, shown under its parent.
-- **Background:** several threads may run at once; a notice when one finishes or needs the person.
-- **First use:** sign in, add a project folder, start. Nothing else.
+- **Tauri adapter** (`crates/tauri`, crate `chirality-engine-tauri`): one
+  command per engine method, every engine event forwarded to the webview, the
+  engine shut down when the app exits. An application registers it on its
+  Tauri builder (`plugin(config)` and `commands(its own handler)`), gives its
+  own tools in the engine's setup, and reaches the engine from its own
+  commands. Tested headless against the pinned Codex.
+- **Interface package** (`packages/ui`, package `@chirality/engine-ui`): the
+  engine client over a host transport (invoke and listen; Tauri is one, recorded
+  engine data another), the generated bindings, the engine half of the state,
+  and the interface as parts. Each part works inside an application's own
+  layout; the standard layout puts them together:
+  - **Left:** projects, each with its threads; new thread; search; a mark on a thread that is running, finished, or waiting on the person.
+  - **Centre:** the conversation. The person's messages, the agent's text rendered as Markdown, reasoning and tool activity folded, a plan when there is one, file changes as diffs. A composer with attachments, file references (`@`), the workflow picker, and one line of controls: model, reasoning level, access level. Send becomes Stop while a turn runs.
+  - **Approvals and questions:** shown where the person will see them, answered in one or two presses, then out of the way.
+  - **Right panel:** the diff of the thread's changes, the workflow in use, and a preview of a file the agent produced; an application adds its own tabs.
+  - **Forks:** fork a thread at a message to try another path; the fork is a thread of its own, shown under its parent.
+  - **Background:** several threads may run at once; a notice when one finishes or needs the person.
+  - **First use:** sign in, add a project folder, start. Nothing else.
+
+An application consumes both from this repository at a pinned revision (a git
+dependency in Cargo, and `#<revision>::path:packages/ui` in npm), fetched with
+the developer's own access; no registry.
 
 ## Non-goals
 
@@ -98,5 +117,5 @@ These are what made v4 unusable. None of them is built.
 ## Done means
 
 - A person signs in, adds a project, picks a model and reasoning level, picks a workflow, works through it with the agent, approves what it asks, answers its questions, reviews its changes as diffs, forks to try an alternative, and comes back after quitting to find every thread where it was.
-- The engine is used by the wrapper only through its API, and could be used by another application the same way.
+- The parts use the engine only through its API, and every application uses the engine and the parts the same way.
 - Engine tests run the pinned Codex against a local stub model, with no network and no account; interface tests use data the engine itself produced.

@@ -1,0 +1,34 @@
+/* Shared by the parts: chips, icons, the error notice. */
+.toast {
+  position: fixed; z-index: 50;
+  left: 50%; bottom: 22px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  max-width: min(560px, calc(100% - 32px));
+  padding: 8px 8px 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--rule));
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+  box-shadow: var(--shadow);
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chip--workflow { border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); color: var(--accent-ink); }
+.chip-x { border: 0; padding: 0 0 0 2px; background: transparent; color: var(--ink-faint); display: inline-grid; }
+.chip-x:hover { color: var(--ink) !important; }
+.chip-x .icon { width: 11px; height: 11px; }
+
+.icon { flex: none; vertical-align: -2px; }
+button.is-on { background: var(--selected); color: var(--ink); }
