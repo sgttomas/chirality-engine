@@ -22,8 +22,8 @@ fn catalog(namespace: &str, tool: &str, schema: Value) -> AppTools {
     }
 }
 
-/// Whether Codex gives the tool to the model.
-async fn codex_takes(tools: AppTools) -> bool {
+/// Whether Codex gives the tool to the model; when it refuses the thread, Codex's message.
+async fn codex_takes(tools: AppTools) -> Result<bool> {
     let mut ctx = Ctx::live_with("catalog", false, Some(tools)).await;
     ctx.script("probe", Arc::new(|request| {
         let offered = request.body.to_string().contains(MARK);
@@ -31,11 +31,11 @@ async fn codex_takes(tools: AppTools) -> bool {
     }));
     let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
     let taken = match ctx.engine.start_thread(&project.id, text("STUB[probe] go"), settings(Access::Ask)).await {
-        Err(_) => false,
+        Err(error) => Err(error),
         Ok(thread) => {
             ctx.turn_ended(&thread).await;
             let view = ctx.engine.read_thread(&thread).await.unwrap();
-            view.turns[0].items.iter().any(|i| i.body == ItemBody::AgentMessage { text: "offered".into() })
+            Ok(view.turns[0].items.iter().any(|i| i.body == ItemBody::AgentMessage { text: "offered".into() }))
         }
     };
     ctx.finish("catalog").await;
@@ -76,7 +76,15 @@ async fn the_catalog_check_matches_codex() {
     for (namespace, tool, schema, expected) in cases() {
         let tools = catalog(namespace, tool, schema.clone());
         let engine = crate::tools::validate(&tools).is_ok();
-        let codex = codex_takes(tools).await;
+        let codex = match codex_takes(tools).await {
+            Ok(offered) => offered,
+            // A schema Codex refuses reaches the application as Codex's own message.
+            Err(EngineError::Codex { message }) => {
+                assert!(message.contains("input schema is not supported for t"), "{message}");
+                false
+            }
+            Err(other) => panic!("{other:?}"),
+        };
         eprintln!("{namespace}.{tool} {schema}: codex {codex}, engine {engine}, listed {expected}");
         // The engine may refuse more than Codex (a namespace Codex keeps for itself), never less.
         if engine != expected || (engine && !codex) {

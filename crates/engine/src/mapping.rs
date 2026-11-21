@@ -92,17 +92,8 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
             (id, body)
         }
         ThreadItem::DynamicToolCall { id, namespace, tool, arguments, status, content_items } => {
-            let content = content_items.as_deref().unwrap_or_default();
-            let texts: Vec<&str> = content.iter().filter_map(|c| if let p::ToolContentInfo::InputText { text } = c { Some(text.as_str()) } else { None }).collect();
-            let images = content.iter().filter_map(|c| if let p::ToolContentInfo::InputImage { image_url } = c { Some(image_url.clone()) } else { None }).collect();
-            let body = ItemBody::ToolCall {
-                server: namespace.clone(),
-                tool: tool.clone(),
-                arguments: arguments.to_string(),
-                status: tool_status(*status, false, done),
-                result: (!texts.is_empty()).then(|| texts.join("\n")),
-                images,
-            };
+            let (result, images) = dynamic_result(content_items.as_deref().unwrap_or_default());
+            let body = ItemBody::ToolCall { server: namespace.clone(), tool: tool.clone(), arguments: arguments.to_string(), status: tool_status(*status, false, done), result, images };
             (id, body)
         }
         ThreadItem::WebSearch { id, query } => (id, ItemBody::WebSearch { query: query.clone() }),
@@ -111,25 +102,38 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
     Some(Item { id: ItemId(id.clone()), body, done })
 }
 
-/// An MCP result's text and images (`data:` URLs). Text blocks are joined;
-/// other blocks, or structured content alone, are kept as JSON.
-fn mcp_result(result: &Value) -> (Option<String>, Vec<String>) {
-    let blocks = result.get("content").and_then(Value::as_array).cloned().unwrap_or_default();
+/// An application tool's answer: its text and images (`data:` URLs); any
+/// other item (audio) is kept as its JSON.
+fn dynamic_result(items: &[Value]) -> (Option<String>, Vec<String>) {
     let mut texts = Vec::new();
     let mut images = Vec::new();
-    for block in &blocks {
+    for item in items {
+        match (item["type"].as_str(), item["text"].as_str(), item["imageUrl"].as_str()) {
+            (Some("inputText"), Some(text), _) => texts.push(text.to_string()),
+            (Some("inputImage"), _, Some(url)) => images.push(url.to_string()),
+            _ => texts.push(item.to_string()),
+        }
+    }
+    ((!texts.is_empty()).then(|| texts.join("\n")), images)
+}
+
+/// An MCP result's text and images (`data:` URLs). Text blocks are joined;
+/// other blocks, and structured content, are kept as JSON.
+fn mcp_result(result: &Value) -> (Option<String>, Vec<String>) {
+    let Some(blocks) = result.get("content").and_then(Value::as_array) else {
+        return (Some(result.to_string()), Vec::new());
+    };
+    let mut texts = Vec::new();
+    let mut images = Vec::new();
+    for block in blocks {
         match (block["type"].as_str(), block["text"].as_str(), block["data"].as_str(), block["mimeType"].as_str()) {
             (Some("text"), Some(text), _, _) => texts.push(text.to_string()),
             (Some("image"), _, Some(data), Some(mime)) => images.push(format!("data:{mime};base64,{data}")),
             _ => texts.push(block.to_string()),
         }
     }
-    if blocks.is_empty() {
-        match result.get("structuredContent").filter(|v| !v.is_null()) {
-            Some(structured) => texts.push(structured.to_string()),
-            None if result.get("content").is_none() => texts.push(result.to_string()),
-            None => {}
-        }
+    if let Some(structured) = result.get("structuredContent").filter(|v| !v.is_null()) {
+        texts.push(structured.to_string());
     }
     ((!texts.is_empty()).then(|| texts.join("\n")), images)
 }
@@ -351,6 +355,14 @@ mod tests {
             "contentItems": [{"type": "inputImage", "imageUrl": "data:image/png;base64,BB"}]});
         let ItemBody::ToolCall { status, result, images, .. } = done_body(dynamic) else { panic!() };
         assert_eq!((status, result, images), (ToolCallStatus::Completed, None, vec!["data:image/png;base64,BB".to_string()]));
+        let audio = json!({"type": "dynamicToolCall", "id": "d", "namespace": "estimate", "tool": "say", "arguments": {}, "status": "completed", "success": true,
+            "contentItems": [{"type": "inputText", "text": "said"}, {"type": "inputAudio", "audioUrl": "data:audio/wav;base64,CC"}]});
+        let ItemBody::ToolCall { result, .. } = done_body(audio) else { panic!() };
+        assert_eq!(result.as_deref(), Some("said\n{\"audioUrl\":\"data:audio/wav;base64,CC\",\"type\":\"inputAudio\"}"));
+        let structured = json!({"type": "mcpToolCall", "id": "m", "server": "files", "tool": "stat", "arguments": {}, "status": "completed", "error": null,
+            "result": {"content": [{"type": "text", "text": "ok"}], "structuredContent": {"size": 3}}});
+        let ItemBody::ToolCall { result, .. } = done_body(structured) else { panic!() };
+        assert_eq!(result.as_deref(), Some("ok\n{\"size\":3}"));
         let running = json!({"type": "dynamicToolCall", "id": "d", "namespace": null, "tool": "t", "arguments": {}, "status": "inProgress", "contentItems": null});
         assert!(matches!(item_body(running), ItemBody::ToolCall { status: ToolCallStatus::Running, .. }));
     }

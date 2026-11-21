@@ -156,7 +156,11 @@ impl Inner {
             EngineError::CodexUnavailable { message }
         };
         let connection = self.connector.connect().await.map_err(failed)?;
-        let (client, incoming, stopper) = RpcClient::start(connection, self.tap.clone());
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // Requests the connection delivered before ending are taken from no more.
+        let calls = self.tool_calls.clone();
+        let on_end: Box<dyn FnOnce() + Send> = Box::new(move || calls.close_session(generation));
+        let (client, incoming, stopper) = RpcClient::start(connection, self.tap.clone(), Some(on_end));
         let params = p::InitializeParams {
             client_info: p::ClientInfo { name: "chirality", title: "Chirality", version: env!("CARGO_PKG_VERSION") },
             capabilities: p::Capabilities { experimental_api: true, request_attestation: false, opt_out_notification_methods: vec!["turn/diff/updated"] },
@@ -174,7 +178,6 @@ impl Inner {
             }
         };
         client.notify("initialized", None).map_err(|e| failed(e.to_string()))?;
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         {
             let mut current = self.current.lock().unwrap();
             if self.shutting_down.load(Ordering::SeqCst) {

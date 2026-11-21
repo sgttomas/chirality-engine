@@ -135,7 +135,8 @@ impl Inner {
         self.known_thread(thread)?;
         session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
         self.store.remove_thread(thread);
-        self.tool_calls.close_thread(&thread.0);
+        self.tool_calls.close_thread(&thread.0, false);
+        session.forget_loaded(thread);
         Ok(())
     }
 

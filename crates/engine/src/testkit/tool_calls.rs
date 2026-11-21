@@ -105,6 +105,10 @@ async fn start(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wi
 
 /// Also the scripted Codex itself, and a project folder the engine knows nothing of yet.
 async fn start_with(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wire, Arc<FakeCodex>, std::path::PathBuf) {
+    start_configured(Some(tools(probe))).await
+}
+
+async fn start_configured(tools: Option<AppTools>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wire, Arc<FakeCodex>, std::path::PathBuf) {
     let root = std::env::temp_dir().join(format!("chirality-tool-calls-{}-{}", std::process::id(), RUN.fetch_add(1, Ordering::SeqCst)));
     std::fs::create_dir_all(&root).unwrap();
     let config = EngineConfig {
@@ -113,7 +117,7 @@ async fn start_with(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire
         state_dir: root.join("state"),
         workflow_roots: Vec::new(),
         codex_settings: Vec::new(),
-        tools: Some(tools(probe)),
+        tools,
     };
     let (connector, mut wires) = FakeCodex::new();
     let engine = Engine::start_with(config, connector.clone(), None).await.expect("the engine starts");
@@ -349,4 +353,112 @@ async fn shutdowns_overlapping_a_restart_wait_for_it_and_end_its_codex() {
     second.await.unwrap();
     assert!(next.is_ended(), "the Codex started during shutdown was ended");
     assert!(engine.inner().session().is_err(), "no session after shutdown");
+}
+
+/// Adds the project and has Codex report thread `id` in it.
+async fn known_thread(engine: &Engine, wire: &mut Wire, folder: &std::path::Path, id: &str) {
+    let adding = tokio::spawn({
+        let (engine, folder) = (engine.clone(), folder.to_path_buf());
+        async move { engine.add_project(folder).await }
+    });
+    wire.answer("thread/list", json!({"data": [], "nextCursor": null})).await;
+    adding.await.unwrap().expect("the project is added");
+    started(wire, folder, id);
+    for _ in 0..250 {
+        if engine.snapshot().threads.iter().any(|t| t.id.0 == id) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the thread is not in the snapshot");
+}
+
+fn started(wire: &Wire, folder: &std::path::Path, id: &str) {
+    wire.send(json!({"method": "thread/started", "params": {"thread": {"id": id, "status": {"type": "idle"}, "cwd": folder.display().to_string()}}}));
+}
+
+fn thread(folder: &std::path::Path, id: &str) -> Value {
+    json!({"thread": {"id": id, "status": {"type": "idle"}, "cwd": folder.display().to_string()}})
+}
+
+/// Codex ending holds requests it delivered just before: none of them reaches the handler.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn calls_delivered_just_before_codex_dies_are_not_run() {
+    let probe = Arc::new(Probe::default());
+    let (engine, mut wires, mut wire, codex, _) = start_with(&probe).await;
+    codex.hold("account/read");
+    wire.send(json!({"method": "account/updated", "params": {}}));
+    assert_eq!(wire.next().await["method"], "account/read");
+    for id in 1..=32 {
+        wire.send(call(id, "a", &format!("call_{id}"), "quick"));
+    }
+    wire.kill();
+    let _next = tokio::time::timeout(Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
+    probe.settle(|_| matches!(engine.snapshot().codex, CodexStatus::Ready { .. })).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(probe.called(), 0, "a call of a dead connection ran");
+    engine.shutdown().await;
+}
+
+/// After archive, Codex no longer has the thread loaded: if it comes back
+/// (unarchived elsewhere and listed again), the engine resumes it before a turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_archived_thread_that_comes_back_is_resumed_before_its_next_turn() {
+    let probe = Arc::new(Probe::default());
+    let (engine, _wires, mut wire, _, folder) = start_with(&probe).await;
+    known_thread(&engine, &mut wire, &folder, "t1").await;
+    let settings = TurnSettings { model: "m".into(), effort: None, access: Access::Ask };
+    let message = || Message { text: "go".into(), attachments: vec![], workflow: None };
+    let sending = tokio::spawn({
+        let (engine, settings) = (engine.clone(), settings.clone());
+        async move { engine.send(&ThreadId("t1".into()), message(), settings).await }
+    });
+    wire.answer("thread/resume", thread(&folder, "t1")).await;
+    wire.answer("turn/start", json!({"turn": {"id": "u1", "status": "completed", "items": []}})).await;
+    sending.await.unwrap().expect("the turn starts");
+    let archiving = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.archive(&ThreadId("t1".into())).await }
+    });
+    wire.answer("thread/archive", json!({})).await;
+    archiving.await.unwrap().expect("the thread is archived");
+    wire.send(json!({"method": "thread/archived", "params": {"threadId": "t1"}}));
+    wire.send(json!({"method": "thread/unarchived", "params": {"threadId": "t1"}}));
+    started(&wire, &folder, "t1");
+    probe.settle(|_| engine.snapshot().threads.iter().any(|t| t.id.0 == "t1")).await;
+    let sending = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.send(&ThreadId("t1".into()), message(), settings).await }
+    });
+    wire.answer("thread/resume", thread(&folder, "t1")).await;
+    wire.answer("turn/start", json!({"turn": {"id": "u2", "status": "inProgress", "items": []}})).await;
+    sending.await.unwrap().expect("the turn starts");
+    // The thread is live again: its calls reach the handler.
+    wire.send(call(9, "t1", "call_9", "quick"));
+    assert_eq!(wire.next().await, reply(9, "quick", true));
+    engine.shutdown().await;
+}
+
+/// Codex can close a subagent's thread and wake it again under the same id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_new_turn_on_a_closed_thread_takes_its_calls_again() {
+    let probe = Arc::new(Probe::default());
+    let (engine, _wires, mut wire) = start(&probe).await;
+    wire.send(json!({"method": "thread/closed", "params": {"threadId": "child"}}));
+    wire.send(call(1, "child", "call_1", "quick"));
+    assert_eq!(wire.next().await, reply(1, "The thread is closed.", false));
+    wire.send(json!({"method": "turn/started", "params": {"threadId": "child", "turn": {"id": "u2", "status": "inProgress", "items": []}}}));
+    wire.send(call(2, "child", "call_2", "quick"));
+    assert_eq!(wire.next().await, reply(2, "quick", true));
+    engine.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn with_no_tools_a_call_sent_again_gets_one_error() {
+    let (engine, _wires, mut wire, _, _) = start_configured(None).await;
+    wire.send(call(3, "a", "call_3", "quick"));
+    wire.send(call(3, "a", "call_3", "quick"));
+    assert_eq!(wire.next().await, json!({"id": 3, "error": {"code": -32601, "message": "not supported by this client"}}));
+    wire.quiet().await;
+    engine.shutdown().await;
 }

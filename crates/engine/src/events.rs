@@ -19,7 +19,13 @@ impl Inner {
         match method {
             "thread/started" => {
                 if let Some(note) = decode::<p::ThreadResponse>(params) {
+                    self.tool_calls.thread_live(&note.thread.id);
                     self.adopt_thread(&note.thread);
+                }
+            }
+            "thread/unarchived" => {
+                if let Some(note) = decode::<p::ThreadNote>(params) {
+                    self.tool_calls.thread_live(&note.thread_id);
                 }
             }
             "thread/status/changed" => {
@@ -48,18 +54,19 @@ impl Inner {
             "thread/archived" | "thread/deleted" | "thread/closed" => {
                 let Some(note) = decode::<p::ThreadNote>(params) else { return };
                 // Codex drops a closed thread's requests without saying so.
-                self.tool_calls.close_thread(&note.thread_id);
+                self.tool_calls.close_thread(&note.thread_id, true);
                 let thread = ThreadId(note.thread_id);
-                if method == "thread/closed" {
-                    if let Ok(session) = self.session() {
-                        session.forget_loaded(&thread);
-                    }
-                } else {
+                // Codex no longer has it loaded: a later turn resumes it first.
+                if let Ok(session) = self.session() {
+                    session.forget_loaded(&thread);
+                }
+                if method != "thread/closed" {
                     self.store.remove_thread(&thread);
                 }
             }
             "turn/started" => {
                 let Some(note) = decode::<p::TurnNote>(params) else { return };
+                self.tool_calls.thread_live(&note.thread_id);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
                 let known = self.store.update_thread(&thread, |e| {
                     e.active_turn = Some(turn.clone());
@@ -157,8 +164,8 @@ impl Inner {
         if session.generation != generation {
             return;
         }
-        if let (crate::tools::TOOL_CALL, Some(tools)) = (method, &self.config.tools) {
-            return self.on_tool_call(session, id, params, tools);
+        if method == crate::tools::TOOL_CALL {
+            return self.on_tool_call(session, id, params, self.config.tools.as_ref());
         }
         match mapping::request(method, &params, |item| self.store.file_change(item)) {
             Some((thread, request)) => {

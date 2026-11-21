@@ -228,7 +228,8 @@ pub enum ThreadItem {
         arguments: Value,
         #[serde(default)]
         status: Option<ToolStatusInfo>,
-        content_items: Option<Vec<ToolContentInfo>>,
+        /// `inputText`, `inputImage`, `inputAudio`; kept whole so none is lost.
+        content_items: Option<Vec<Value>>,
     },
     WebSearch { id: String, query: String },
     #[serde(other)]
@@ -486,17 +487,6 @@ pub enum ToolContentItem {
     InputText { text: String },
     #[serde(rename_all = "camelCase")]
     InputImage { image_url: String },
-}
-
-/// A dynamic tool call's output as its item shows it.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum ToolContentInfo {
-    InputText { text: String },
-    #[serde(rename_all = "camelCase")]
-    InputImage { image_url: String },
-    #[serde(other)]
-    Other,
 }
 
 // ---------- files ----------

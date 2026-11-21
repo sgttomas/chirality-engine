@@ -49,6 +49,13 @@ pub struct EngineConfig {
 /// Codex fixes a thread's tools when the thread starts and keeps them with it:
 /// a resumed or forked thread has the tools it was started with, and a thread
 /// started without them never has them.
+///
+/// [`crate::Engine::start`] refuses names Codex refuses and its own
+/// namespaces. A catalog Codex refuses otherwise (an argument schema it
+/// cannot use) makes [`crate::Engine::start_thread`] fail with Codex's own
+/// message. Under some Codex settings Codex has further tools of its own in
+/// namespaces of their own, and it leaves out, without saying, an
+/// application's tool whose namespace and name are the same as one of those.
 #[derive(Clone)]
 pub struct AppTools {
     /// The one name the agent sees the tools under, with what they are for.

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::api::*;
-use crate::calls::{Admission, Place, ReplyTo};
+use crate::calls::{Ask, Place, ReplyTo, Taken};
 use crate::protocol as p;
 use crate::session::{Inner, Session};
 
@@ -114,40 +114,49 @@ fn response(output: ToolOutput) -> Value {
 }
 
 impl Inner {
-    /// Answers a call to the application's tools through its handler, once
-    /// per request; a call to a tool it does not have, or on a thread gone
-    /// from Codex, is answered as failed at once.
-    pub(crate) fn on_tool_call(&self, session: Arc<Session>, id: Value, params: Value, tools: &AppTools) {
-        let Ok(call) = serde_json::from_value::<p::DynamicToolCall>(params) else {
-            let _ = session.client.respond_error(id, -32602, "invalid tool call");
-            return;
+    /// Takes each `item/tool/call` once per session, before anything is sent:
+    /// with no tools it is unsupported, as any request the engine does not
+    /// take; a tool the application does not have, or a call on a thread gone
+    /// from Codex, is answered as failed at once; anything else goes to the
+    /// application's handler.
+    pub(crate) fn on_tool_call(&self, session: Arc<Session>, id: Value, params: Value, tools: Option<&AppTools>) {
+        let to = ReplyTo { client: session.client.clone(), generation: session.generation, id: id.clone() };
+        let call = serde_json::from_value::<p::DynamicToolCall>(params).ok();
+        let thread = call.as_ref().map(|c| c.thread_id.clone());
+        let ask = match (tools, call) {
+            (None, _) => Ask::Unsupported,
+            (Some(_), None) => Ask::Invalid,
+            (Some(tools), Some(call)) if !offers(tools, call.namespace.as_deref(), &call.tool) => {
+                Ask::Unknown([call.namespace.as_deref(), Some(call.tool.as_str())].into_iter().flatten().collect::<Vec<_>>().join("."))
+            }
+            (Some(tools), Some(call)) => {
+                let place = Place { thread: call.thread_id.clone(), turn: call.turn_id.clone(), item: call.call_id.clone() };
+                let thread = self.store.owner(ThreadId(call.thread_id));
+                let project = self.store.thread(&thread).map(|e| e.project);
+                let call = ToolCall {
+                    thread,
+                    project,
+                    turn: TurnId(call.turn_id),
+                    item: ItemId(call.call_id),
+                    namespace: call.namespace,
+                    tool: call.tool,
+                    arguments: call.arguments,
+                };
+                Ask::Call { place, call: Box::new(call), handler: tools.handler.clone() }
+            }
         };
-        let refuse = |text: String| {
-            let _ = session.client.respond(id.clone(), response(ToolOutput::failure(text)));
-        };
-        match self.tool_calls.admit(session.generation, &id, &call.thread_id) {
-            Admission::Ignore => return,
-            Admission::Refuse => return refuse("The thread is closed.".into()),
-            Admission::Run => {}
+        match self.tool_calls.take(to, thread.as_deref(), ask, response) {
+            Taken::Nothing | Taken::Running => {}
+            Taken::Unsupported => {
+                let _ = session.client.respond_error(id, -32601, "not supported by this client");
+            }
+            Taken::Invalid => {
+                let _ = session.client.respond_error(id, -32602, "invalid tool call");
+            }
+            Taken::Refused(text) => {
+                let _ = session.client.respond(id, response(ToolOutput::failure(text)));
+            }
         }
-        if !offers(tools, call.namespace.as_deref(), &call.tool) {
-            let name = [call.namespace.as_deref(), Some(call.tool.as_str())].into_iter().flatten().collect::<Vec<_>>().join(".");
-            return refuse(format!("This application has no tool {name}."));
-        }
-        let place = Place { thread: call.thread_id.clone(), turn: call.turn_id.clone(), item: call.call_id.clone() };
-        let thread = self.store.owner(ThreadId(call.thread_id));
-        let project = self.store.thread(&thread).map(|e| e.project);
-        let call = ToolCall {
-            thread,
-            project,
-            turn: TurnId(call.turn_id),
-            item: ItemId(call.call_id),
-            namespace: call.namespace,
-            tool: call.tool,
-            arguments: call.arguments,
-        };
-        let to = ReplyTo { client: session.client.clone(), generation: session.generation, id };
-        self.tool_calls.run(to, place, call, tools.handler.clone(), response);
     }
 }
 
