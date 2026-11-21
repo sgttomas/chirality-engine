@@ -14,6 +14,9 @@ mod apptools;
 pub(crate) mod catalog;
 mod export;
 mod fake;
+mod history;
+mod history_live;
+mod unkept;
 mod tool_calls;
 pub(crate) mod harness;
 mod record;
@@ -53,7 +56,7 @@ macro_rules! scenarios {
     };
 }
 
-scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled);
+scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled, unkept_thread);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_main_path() {

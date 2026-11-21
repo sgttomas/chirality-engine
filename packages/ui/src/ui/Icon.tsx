@@ -11,6 +11,7 @@ const paths = {
   stop: "M7 7h10v10H7z",
   panel: "M4 5h16v14H4zM15 5v14",
   undo: "M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
+  pin: "M9 3h6l-1 6 4 4H6l4-4zM12 13v8",
   book: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 19V5M8 7h7",
   file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5",
   x: "M6 6l12 12M18 6L6 18",

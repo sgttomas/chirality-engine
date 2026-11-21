@@ -1,7 +1,7 @@
 //! The engine's running core: one Codex session at a time, started,
 //! initialised, watched, restarted when it dies, and stopped.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -64,6 +64,10 @@ pub(crate) struct Session {
     stopper: Arc<dyn Stopper>,
     /// Threads this process has started, resumed or forked.
     loaded: Mutex<HashSet<ThreadId>>,
+    /// Threads the engine started in this process and has not yet read, with
+    /// the number of the last event before each started: Codex may not have
+    /// kept their first message.
+    unkept: Mutex<HashMap<ThreadId, u64>>,
 }
 
 impl Session {
@@ -78,6 +82,21 @@ impl Session {
     /// Codex has unloaded the thread; the next turn resumes it.
     pub fn forget_loaded(&self, thread: &ThreadId) {
         self.loaded.lock().unwrap().remove(thread);
+        self.unkept.lock().unwrap().remove(thread);
+    }
+
+    /// The engine has started the thread, after event number `seq`.
+    pub fn mark_unkept(&self, thread: &ThreadId, seq: u64) {
+        self.unkept.lock().unwrap().insert(thread.clone(), seq);
+    }
+
+    /// The number before the thread started, while it has not been read.
+    pub fn unkept_since(&self, thread: &ThreadId) -> Option<u64> {
+        self.unkept.lock().unwrap().get(thread).copied()
+    }
+
+    pub fn mark_kept(&self, thread: &ThreadId) {
+        self.unkept.lock().unwrap().remove(thread);
     }
 
     pub async fn call<R: DeserializeOwned>(&self, method: &str, params: impl Serialize) -> Result<R> {
@@ -287,7 +306,7 @@ impl Inner {
                 stopper.kill();
                 Some(stopper.reaped())
             } else {
-                *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+                *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default(), unkept: Mutex::default() }));
                 self.tool_calls.open(generation);
                 self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
                 None

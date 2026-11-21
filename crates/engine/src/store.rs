@@ -173,8 +173,12 @@ impl Store {
     /// summary changed.
     /// `read_at` is [`Store::renames`] when the reply being adopted was asked
     /// for: after a rename since, the known title stays.
-    pub fn upsert_thread(&self, id: ThreadId, read_at: Option<u64>, build: impl FnOnce(Option<&ThreadEntry>) -> ThreadEntry) {
+    /// With `known_only`, a thread no longer in the snapshot (archived meanwhile) is left out.
+    pub fn upsert_thread(&self, id: ThreadId, read_at: Option<u64>, known_only: bool, build: impl FnOnce(Option<&ThreadEntry>) -> ThreadEntry) {
         let mut state = self.state.lock().unwrap();
+        if known_only && !state.threads.contains_key(&id) {
+            return;
+        }
         let before = state.threads.contains_key(&id).then(|| summary(&state, &id));
         let mut entry = build(state.threads.get(&id));
         let renamed_since = read_at.is_some_and(|at| at != state.renames);

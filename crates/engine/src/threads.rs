@@ -11,7 +11,6 @@ use crate::rpc::RpcError;
 use crate::session::{Inner, Session, engine_error};
 
 const PAGE: u32 = 100;
-const METHOD_NOT_FOUND: i64 = -32601;
 
 async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
     let mut turns = Vec::new();
@@ -73,15 +72,23 @@ impl Inner {
         // Every event after this is applied to the view; one before it, the history holds.
         let seq = self.store.seq();
         let read_at = self.store.renames();
-        let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
-        self.adopt_thread(&read.thread, Some(read_at));
-        let turns = match list_turns(&session, thread).await {
-            Err(RpcError::Server { code: METHOD_NOT_FOUND, .. }) => {
-                // Threads kept in Codex's older history format cannot be paged; read them whole.
-                let whole: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0, "includeTurns": true })).await?;
-                whole.thread.turns.iter().map(crate::mapping::turn).collect()
+        let history = async {
+            let read: p::ThreadResponse = session.client.request("thread/read", json!({ "threadId": thread.0 })).await?;
+            self.refresh_thread(&read.thread, read_at);
+            list_turns(&session, thread).await
+        };
+        let (turns, seq) = match history.await {
+            Ok(turns) => {
+                session.mark_kept(thread);
+                (turns, seq)
             }
-            other => other.map_err(engine_error)?,
+            // A thread the engine started, before Codex has kept it and before any turn of it has
+            // ended, whatever Codex answers: its history is empty, and every event since it
+            // started is after the view's number.
+            Err(e) => match session.unkept_since(thread) {
+                Some(since) if self.known_thread(thread)?.last_ended.is_none() => (Vec::new(), since),
+                _ => return Err(engine_error(e)),
+            },
         };
         let summary = self.store.summary(thread).ok_or_else(|| EngineError::NotFound { what: format!("thread {}", thread.0) })?;
         Ok(ThreadView { summary, turns, seq })
@@ -90,16 +97,30 @@ impl Inner {
     pub(crate) async fn start_thread(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings) -> Result<ThreadId> {
         let project = self.project(project)?;
         let session = self.session()?;
+        // A first message that cannot be made makes no thread.
+        if let Some(id) = &message.workflow {
+            crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?;
+        }
+        let before = self.store.seq();
         let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: self.config.tools.as_ref().map(crate::tools::specs) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
         let id = self.adopt_thread(&started.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
         session.mark_loaded(&id);
-        self.send(&id, message, settings).await?;
+        session.mark_unkept(&id, before);
+        if let Err(e) = self.send(&id, message, settings).await {
+            // No turn started: the thread the engine just made is not listed.
+            self.store.remove_thread(&id);
+            session.forget_loaded(&id);
+            return Err(e);
+        }
         Ok(id)
     }
 
     pub(crate) async fn fork(&self, thread: &ThreadId, through: &TurnId) -> Result<ThreadId> {
         let session = self.session()?;
+        if self.known_thread(thread)?.active_turn.as_ref() == Some(through) {
+            return Err(EngineError::Invalid { message: "A turn can be forked once it has ended.".into() });
+        }
         self.ensure_loaded(&session, thread).await?;
         let params = json!({ "threadId": thread.0, "lastTurnId": through.0, "excludeTurns": true });
         let forked: p::ThreadResponse = session.call("thread/fork", params).await?;

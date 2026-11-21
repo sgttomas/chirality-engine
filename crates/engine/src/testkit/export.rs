@@ -1,7 +1,7 @@
 //! What the engine produces from recorded transcripts, written as JSON for the
 //! interface package's tests (`packages/ui`): the snapshot before, every event, the snapshot
-//! after, and each thread view the scenario read with the number of events
-//! before it. `interface_data` checks the committed files still match;
+//! after, each thread view the scenario read with the number of events
+//! before it, and the workflows the engine finds in the scenario's project. `interface_data` checks the committed files still match;
 //! `CHIRALITY_EXPORT=1` writes them again.
 
 use std::path::PathBuf;
@@ -93,8 +93,13 @@ async fn capture(name: &str) -> Value {
     let root = ctx.run.root.display().to_string();
     // Project ids are derived from the run's folder; name them by position instead.
     let projects: Vec<String> = after.projects.iter().map(|p| p.id.0.clone()).collect();
+    let mut workflows = Vec::new();
+    for project in &after.projects {
+        // The project's own, not a Library edition a run may name.
+        workflows.extend(ctx.engine.workflows(&project.id).await.unwrap().into_iter().filter(|w| w.source == "project"));
+    }
     ctx.finish(name).await;
-    let data = json!({ "before": before, "events": events, "after": after, "reads": reads });
+    let data = json!({ "before": before, "events": events, "after": after, "reads": reads, "workflows": workflows });
     // The run's temporary folder becomes a fixed one, so the files are stable.
     let mut text = serde_json::to_string(&data).unwrap().replace(&root, "/work/run");
     for (i, id) in projects.iter().enumerate() {

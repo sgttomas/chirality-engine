@@ -457,7 +457,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Done: The estimate of 120 checks out."
+          "text": ""
         },
         "done": false,
         "id": "msg_check_done"
@@ -627,7 +627,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Done: The estimate has no total."
+          "text": ""
         },
         "done": false,
         "id": "msg_none_done"
@@ -851,5 +851,6 @@
         ]
       }
     }
-  ]
+  ],
+  "workflows": []
 }

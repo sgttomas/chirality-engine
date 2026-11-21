@@ -106,8 +106,12 @@ the developer's own access; no registry.
 ## Known limits
 
 - A legacy-history exchange can stay doubled in a view the person switches away from while its read is pending, and can show doubled briefly before the completion read returns.
-- A completion read can drop the first streamed chunk of a follow-up sent before that read returns.
+- Text or a plan that streamed before a successful read whose history does not yet hold it (a thread opened mid-reply, a follow-up sent before a completion read returns) is missing from the view until its item completes, and stays missing if the person stops the turn first.
 - A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.
+- Threads in Codex's older (legacy) history format are not supported.
+- Codex's refusals (of a thread it no longer has, or a turn it does not know) reach the person in Codex's words.
+- A draft edited in a just-created thread while its first send is still being accepted can be replaced by the moved draft, and an attachment picked across that moment can land in the project's next new thread.
+- A project's thread listing in flight when a thread is archived can list it again until the next listing.
 
 ## Non-goals
 

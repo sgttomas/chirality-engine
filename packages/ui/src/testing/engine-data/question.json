@@ -485,7 +485,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Done: {\"answers\":{\"colour\":{\"answers\":[\"Blue\"]}}}"
+          "text": ""
         },
         "done": false,
         "id": "msg_ask_done"
@@ -613,5 +613,6 @@
         ]
       }
     }
-  ]
+  ],
+  "workflows": []
 }

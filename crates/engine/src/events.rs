@@ -189,6 +189,15 @@ impl Inner {
     /// Records a thread Codex reports if it belongs to one of the projects.
     /// `read_at`: [`crate::store::Store::renames`] when the reply holding `thread` was asked for.
     pub(crate) fn adopt_thread(&self, thread: &p::Thread, read_at: Option<u64>) -> Option<ThreadId> {
+        self.take_thread(thread, read_at, false)
+    }
+
+    /// What a read says of a thread, for a thread still in the snapshot.
+    pub(crate) fn refresh_thread(&self, thread: &p::Thread, read_at: u64) {
+        self.take_thread(thread, Some(read_at), true);
+    }
+
+    fn take_thread(&self, thread: &p::Thread, read_at: Option<u64>, known_only: bool) -> Option<ThreadId> {
         if let Some(parent) = &thread.parent_thread_id {
             self.store.set_parent(ThreadId(thread.id.clone()), ThreadId(parent.clone()));
             return None;
@@ -199,7 +208,7 @@ impl Inner {
             p::ThreadStatus::Active => thread.turns.iter().rev().find(|t| t.status == p::TurnStatus::InProgress).map(|t| TurnId(t.id.clone())),
             _ => None,
         };
-        self.store.upsert_thread(id.clone(), read_at, |existing| crate::store::ThreadEntry {
+        self.store.upsert_thread(id.clone(), read_at, known_only, |existing| crate::store::ThreadEntry {
             project: project.id,
             cwd: thread.cwd.clone(),
             title: thread.name.clone().or_else(|| existing.and_then(|e| e.title.clone())).or_else(|| mapping::title_from_preview(&thread.preview)),

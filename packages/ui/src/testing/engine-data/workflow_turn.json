@@ -439,7 +439,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Following the workflow."
+          "text": ""
         },
         "done": false,
         "id": "msg_flow"
@@ -575,6 +575,15 @@
           }
         ]
       }
+    }
+  ],
+  "workflows": [
+    {
+      "id": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md",
+      "name": "estimate",
+      "path": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md",
+      "source": "project",
+      "summary": "Estimate the work."
     }
   ]
 }

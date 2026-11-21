@@ -421,7 +421,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "One."
+          "text": ""
         },
         "done": false,
         "id": "msg_one"
@@ -536,7 +536,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Two."
+          "text": ""
         },
         "done": false,
         "id": "msg_two"
@@ -763,5 +763,6 @@
         ]
       }
     }
-  ]
+  ],
+  "workflows": []
 }

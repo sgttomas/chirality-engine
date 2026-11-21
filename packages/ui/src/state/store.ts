@@ -3,8 +3,9 @@
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
 
 import type { EngineClient, Host } from "../engine/client";
-import type { Event, Numbered, ProjectId, ThreadId, ThreadView, TurnId, Workflow } from "../engine/types";
+import type { Event, Numbered, ProjectId, ThreadId, ThreadView, TurnId, TurnSettings, Workflow } from "../engine/types";
 import { useTheme } from "../ui/theme";
+import { afterSend, emptyDraft, messageOf, type Draft } from "./drafts";
 import { applyEvent, applyToView, keepPlan, threadOf, type Model } from "./reduce";
 
 export interface State {
@@ -13,10 +14,15 @@ export interface State {
   thread: ThreadId | null;
   workflows: Record<ProjectId, Workflow[]>;
   error: string | null;
+  /** Each composer's draft, by `draftKey`. */
+  drafts: Record<string, Draft>;
 }
 
+/** The events kept for a thread with no view yet, at most. */
+const EARLY = 2000;
+
 export class Store {
-  private state: State = { model: null, project: null, thread: null, workflows: {}, error: null };
+  private state: State = { model: null, project: null, thread: null, workflows: {}, error: null, drafts: {} };
   private listeners = new Set<() => void>();
   private eventListeners = new Set<(event: Event, before: State) => void>();
   private stop: (() => void) | null = null;
@@ -37,6 +43,10 @@ export class Store {
   /** Each thread's latest read: an earlier one that answers later, or one begun before a disposal, is dropped. */
   private latestRead = new Map<ThreadId, number>();
   private readsBegun = 0;
+  /** Events of each thread that has no view, or one read from before them (a new thread's first
+   * read): applied when a view is read. */
+  private early = new Map<ThreadId, Numbered[]>();
+  private provisional = new Set<ThreadId>();
 
   constructor(
     readonly engine: EngineClient,
@@ -70,6 +80,8 @@ export class Store {
     this.untold.clear();
     this.reads.clear();
     this.latestRead.clear();
+    this.early.clear();
+    this.provisional.clear();
   }
 
   private async follow(generation: number) {
@@ -152,11 +164,14 @@ export class Store {
       const after = this.held.filter((n) => n.seq > snapshot.seq);
       const gap = after.some((n, i) => n.seq !== snapshot.seq + i + 1);
       if (gap || this.marked > snapshot.seq + after.length) continue;
-      model = { snapshot, views: {} };
+      // The view on screen stays until its replacement is read.
+      const shown = this.state.thread ? this.state.model?.views[this.state.thread] : undefined;
+      model = { snapshot, views: shown && snapshot.threads.some((t) => t.id === shown.summary.id) ? { [shown.summary.id]: shown } : {} };
       for (const n of after) model = applyEvent(model, n.event, n.seq);
       break;
     }
     this.held = null;
+    for (const id of [...this.early.keys()]) if (!model.snapshot.threads.some((t) => t.id === id)) this.dropEarly(id);
     const told = [...this.untold].filter(([seq]) => seq > (applied ?? read)).sort(([a], [b]) => a - b);
     this.untold.clear();
     const before = this.state;
@@ -173,6 +188,7 @@ export class Store {
     const before = this.state;
     this.untold.delete(seq);
     this.set({ model: applyEvent(before.model!, event, seq) });
+    this.keepEarly({ seq, event });
     // Codex's history of a completed turn replaces what the view gathered while it ran; a stopped
     // or failed turn keeps it (Codex may not have kept a reply cut short).
     if (event.type === "turnEnded" && event.state.state === "completed" && event.thread === this.state.thread) void this.reload(event.thread, event.turn);
@@ -180,6 +196,23 @@ export class Store {
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
     if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });
     for (const listener of this.eventListeners) listener(event, before);
+  }
+
+  private keepEarly(n: Numbered) {
+    if (n.event.type === "threadRemoved") return this.dropEarly(n.event.thread);
+    const thread = threadOf(n.event);
+    if (!thread) return;
+    if (!this.state.model!.views[thread] || this.provisional.has(thread)) {
+      const kept = this.early.get(thread) ?? [];
+      kept.push(n);
+      if (kept.length > EARLY) kept.shift();
+      this.early.set(thread, kept);
+    }
+  }
+
+  private dropEarly(thread: ThreadId) {
+    this.early.delete(thread);
+    this.provisional.delete(thread);
   }
 
   private set(patch: Partial<State>) {
@@ -202,6 +235,34 @@ export class Store {
     this.set({ error: null });
   }
 
+  draft(key: string): Draft {
+    return this.state.drafts[key] ?? emptyDraft;
+  }
+  editDraft(key: string, change: Partial<Draft> | ((d: Draft) => Partial<Draft>)) {
+    const d = this.draft(key);
+    this.set({ drafts: { ...this.state.drafts, [key]: { ...d, ...(typeof change === "function" ? change(d) : change) } } });
+  }
+  /** Sends the draft of `key` (a thread's, or the project's new thread's), one at a time. Once the
+   * engine has it, what it took leaves the draft; refused, nothing does. A new thread's draft goes
+   * on with the thread, which is selected. */
+  async sendDraft(key: string, project: ProjectId, thread: ThreadId | null, settings: TurnSettings) {
+    const d = this.draft(key);
+    if (d.sending || !d.text.trim()) return;
+    const taken = { text: d.text, attachments: d.attachments, workflow: d.workflow };
+    this.editDraft(key, { sending: true });
+    if (thread) {
+      const ok = await this.attempt(() => this.engine.send(thread, messageOf(d), settings).then(() => true));
+      this.editDraft(key, (now) => (ok ? afterSend(now, taken) : { sending: false }));
+      return;
+    }
+    const id = await this.attempt(() => this.engine.startThread(project, messageOf(d), settings));
+    if (!id) return this.editDraft(key, { sending: false });
+    const drafts = { ...this.state.drafts, [id]: afterSend(this.draft(key), taken) };
+    delete drafts[key];
+    this.set({ drafts });
+    await this.selectThread(id);
+  }
+
   /** Asks the person for a folder, adds it as a project and selects it. */
   async addProjectFolder() {
     const path = await this.host.pickFolder();
@@ -221,43 +282,61 @@ export class Store {
     if (!this.state.model?.views[thread]) await this.reload(thread);
     if (summary?.unread) this.markRead(thread);
   }
-  /** Reads the thread again, with the events after the read applied. The latest read of a thread wins;
-   * one an earlier start began, or a later read overtook, changes nothing, its failure included. After
-   * `completed` ends, the plan the view holds for it is kept: Codex leaves it out of the history. */
+  /** Reads the thread again, with the events after the read applied: those that came during it, and
+   * those kept from before it while the thread had no view. The latest read of a thread wins; an
+   * earlier one still gives a thread with no view its view. After `completed` ends, the plan the view
+   * holds for it is kept: Codex leaves it out of the history. A read that fails leaves the view as
+   * the events made it, and says so only if the thread in view has none. */
   async reload(thread: ThreadId, completed?: TurnId) {
     const ticket = ++this.readsBegun;
     const generation = this.generation;
-    const current = () => generation === this.generation && this.latestRead.get(thread) === ticket;
+    const latest = () => this.latestRead.get(thread) === ticket;
+    const viewless = () => !this.state.model?.views[thread];
     this.latestRead.set(thread, ticket);
+    const began = this.state.model?.snapshot.seq ?? 0;
     const during: Numbered[] = [];
     this.reads.add(during);
     let read: ThreadView;
     try {
       read = await this.engine.readThread(thread);
     } catch (e) {
-      if (current()) this.set({ error: describe(e) });
+      // Said only for the thread in view, and when it is the latest read or the thread has no view.
+      const shown = this.state.thread === thread && ((latest() && !completed) || viewless());
+      if (generation === this.generation && shown) this.set({ error: describe(e) });
       return;
     } finally {
       this.reads.delete(during);
     }
-    if (!this.state.model || !current()) return;
+    if (!this.state.model || generation !== this.generation || (!latest() && !viewless())) return;
     if (this.state.error) this.set({ error: null });
-    const after = during.filter((n) => n.seq > read.seq);
     // A gap: the snapshot is read again, and this thread with it if it is in view.
-    if (after.some((n, i) => n.seq !== read.seq + i + 1)) return;
+    const from = Math.max(read.seq, began);
+    if (during.filter((n) => n.seq > from).some((n, i) => n.seq !== from + i + 1)) return;
     if (!this.state.model.snapshot.threads.some((t) => t.id === thread)) return;
     // The read holds every event through its number; the rest apply on top.
-    let view: ThreadView = completed ? keepPlan(read, this.state.model.views[thread], completed) : read;
+    // Those before the read began are the ones kept while the thread had no view (or a view from before them).
+    const kept = (this.early.get(thread) ?? []).filter((n) => n.seq > read.seq && n.seq <= began);
+    const after = [...kept, ...during.filter((n) => n.seq > read.seq)];
+    // The plan a completed turn had live: in the view, or in the events kept while there was none.
+    const held = this.state.model.views[thread] ?? (this.early.get(thread) ?? []).reduce<ThreadView>((v, n) => applyToView(v, n.event), { ...read, turns: [] });
+    let view: ThreadView = completed ? keepPlan(read, held, completed) : read;
     for (const { seq, event } of after) if (threadOf(event) === thread) view = { ...applyToView(view, event), seq };
     this.set({ model: { ...this.state.model, views: { ...this.state.model.views, [thread]: view } } });
+    // A view read from before what the store had: its events are kept until a later read holds them.
+    if (read.seq < began) this.provisional.add(thread);
+    else {
+      this.provisional.delete(thread);
+      this.early.delete(thread);
+    }
   }
   async loadWorkflows(project: ProjectId) {
     if (this.state.workflows[project]) return;
     const list = await this.attempt(() => this.engine.workflows(project));
     if (list) this.set({ workflows: { ...this.state.workflows, [project]: list } });
   }
+  /** Marks the thread read; its success leaves a shown error be. */
   private markRead(thread: ThreadId) {
-    void this.attempt(() => this.engine.markRead(thread));
+    void this.engine.markRead(thread).catch((e) => this.set({ error: describe(e) }));
   }
 }
 
