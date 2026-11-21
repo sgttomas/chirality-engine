@@ -11,6 +11,7 @@ export const summary: ThreadSummary = {
   status: { state: "working" },
   unread: false,
   forkedFrom: null,
+  subagent: null,
   updatedAt: 1,
   settings: null,
 };

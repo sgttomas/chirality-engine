@@ -86,6 +86,18 @@ function WorkItem({ item }: { item: Item }) {
       );
     case "webSearch":
       return <li className="work-reasoning">{workLine(item)}</li>;
+    case "subagentTool":
+      return (
+        <li className="work-reasoning">
+          {workLine(item)}
+          {b.prompt && (
+            <details className="work-prompt">
+              <summary>Asked</summary>
+              <pre className="work-output">{b.prompt}</pre>
+            </details>
+          )}
+        </li>
+      );
     default:
       return null;
   }

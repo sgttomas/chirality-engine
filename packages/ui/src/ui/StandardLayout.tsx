@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 
-import { markLabel, markOf } from "../state/selectors";
+import { markLabel, markOf, nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Conversation } from "./Conversation";
 import { FirstUse } from "./FirstUse";
@@ -67,6 +67,6 @@ export function useWindowTitle(brand: string) {
   const summary = useStore((s) => s.model?.snapshot.threads.find((t) => t.id === s.thread));
   useEffect(() => {
     const mark = summary && markOf(summary);
-    document.title = summary ? `${summary.title ?? "New thread"}${mark && mark !== "finished" ? ` · ${markLabel[mark]}` : ""}` : brand;
+    document.title = summary ? `${nameOf(summary)}${mark && mark !== "finished" ? ` · ${markLabel[mark]}` : ""}` : brand;
   }, [summary, brand]);
 }

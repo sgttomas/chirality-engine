@@ -9,6 +9,7 @@ use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, too
 use crate::api::*;
 
 pub use super::history::unkept_thread;
+pub use super::subagents::{subagent, subagent_stop};
 
 async fn project(ctx: &Ctx) -> Project {
     ctx.engine.add_project(ctx.run.project()).await.expect("the project is added")

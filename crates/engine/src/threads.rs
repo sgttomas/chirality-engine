@@ -28,17 +28,28 @@ async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result
 }
 
 impl Inner {
-    /// Reads a project's threads from Codex into the snapshot.
+    /// Reads a project's threads from Codex into the snapshot, then each one's
+    /// subagents, which Codex lists only by the thread they descend from.
     pub(crate) async fn list_threads(&self, project: &Project) -> Result<()> {
+        let mut roots = Vec::new();
+        let folder = Some(vec![project.path.display().to_string()]);
+        self.list_pages(|cursor| p::ThreadListParams { cwd: folder.clone(), ancestor_thread_id: None, limit: PAGE, cursor }, &mut roots).await?;
+        for root in roots {
+            let ancestor = Some(root.0);
+            // A thread whose subagents cannot be listed is still listed itself.
+            let _ = self.list_pages(|cursor| p::ThreadListParams { cwd: None, ancestor_thread_id: ancestor.clone(), limit: PAGE, cursor }, &mut Vec::new()).await;
+        }
+        Ok(())
+    }
+
+    /// Takes in every page of a listing; `taken` gets the threads taken in.
+    async fn list_pages(&self, params: impl Fn(Option<String>) -> p::ThreadListParams, taken: &mut Vec<ThreadId>) -> Result<()> {
         let session = self.session()?;
         let mut cursor = None;
         loop {
-            let params = p::ThreadListParams { cwd: vec![project.path.display().to_string()], limit: PAGE, cursor };
             let read_at = self.store.renames();
-            let page: p::ThreadListResponse = session.call("thread/list", params).await?;
-            for thread in &page.data {
-                self.adopt_thread(thread, Some(read_at));
-            }
+            let page: p::ThreadListResponse = session.call("thread/list", params(cursor)).await?;
+            taken.extend(page.data.iter().filter_map(|thread| self.adopt_thread(thread, Some(read_at))));
             match page.next_cursor {
                 Some(next) if !page.data.is_empty() => cursor = Some(next),
                 _ => return Ok(()),

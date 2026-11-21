@@ -101,3 +101,12 @@
 }
 :where(.chirality) .ask-own { display: flex; gap: 6px; }
 :where(.chirality) .ask-own input { flex: 1; min-width: 0; }
+
+:where(.chirality) .composer--subagent { display: flex; align-items: center; padding: 6px; }
+:where(.chirality) .ask-from {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; padding: 0; background: transparent;
+  color: var(--ink-faint); font-size: 12px; font-weight: 400;
+}
+:where(.chirality) .ask-from:hover { color: var(--accent-ink); }

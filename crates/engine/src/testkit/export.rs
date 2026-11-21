@@ -57,6 +57,25 @@ fn collapse(events: Vec<Event>, reads: Vec<(usize, ThreadView)>) -> (Vec<Event>,
     (kept, reads)
 }
 
+/// Consecutive removals with no read between them are put in thread order: a
+/// thread archived with its subagents is removed once Codex answers, and each
+/// subagent when Codex's notice of it is handled, in either order.
+fn order_removals(events: &mut [Event], reads: &[(usize, ThreadView)]) {
+    let removed = |e: &Event| matches!(e, Event::ThreadRemoved { .. });
+    let mut start = 0;
+    while start < events.len() {
+        let mut end = start;
+        while end < events.len() && removed(&events[end]) && (end == start || !reads.iter().any(|(at, _)| *at == end)) {
+            end += 1;
+        }
+        events[start..end].sort_by_key(|e| match e {
+            Event::ThreadRemoved { thread } => thread.0.clone(),
+            _ => String::new(),
+        });
+        start = end.max(start + 1);
+    }
+}
+
 /// The data's own numbering: the snapshot before is 0, each event one more,
 /// the snapshot after the last, a read the events before it. The engine's own
 /// numbers count the start-up events too and skip what `collapse` merged.
@@ -83,12 +102,14 @@ async fn capture(name: &str) -> Value {
         "interrupt" => scenarios::interrupt(&mut ctx).await,
         "fork" => scenarios::fork(&mut ctx).await,
         "app_tool" => scenarios::app_tool(&mut ctx).await,
+        "subagent" => scenarios::subagent(&mut ctx).await,
         other => panic!("no scenario {other}"),
     }
     let after = ctx.engine.snapshot();
     let mut tape = ctx.tape.take().unwrap().into_inner().unwrap();
     tape.drain();
-    let (events, reads) = collapse(tape.events, tape.reads);
+    let (mut events, reads) = collapse(tape.events, tape.reads);
+    order_removals(&mut events, &reads);
     let reads: Vec<Value> = reads.iter().map(|(at, view)| json!({ "afterEvents": at, "view": view })).collect();
     let root = ctx.run.root.display().to_string();
     // Project ids are derived from the run's folder; name them by position instead.
@@ -111,7 +132,7 @@ async fn capture(name: &str) -> Value {
     value
 }
 
-const SCENARIOS: [&str; 8] = ["text_turn", "workflow_turn", "command_approved", "file_change", "question", "interrupt", "fork", "app_tool"];
+const SCENARIOS: [&str; 9] = ["text_turn", "workflow_turn", "command_approved", "file_change", "question", "interrupt", "fork", "app_tool", "subagent"];
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interface_data() {

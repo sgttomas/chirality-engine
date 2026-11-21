@@ -92,7 +92,8 @@ impl Inner {
                         TurnState::Failed { message } => Some(message.clone()),
                         _ => None,
                     };
-                    e.unread = true;
+                    // A subagent's ending is its parent's to tell.
+                    e.unread |= e.subagent.is_none();
                     e.updated_at = now();
                 });
                 if known.is_some() {
@@ -107,6 +108,8 @@ impl Inner {
                     p::ThreadItem::DynamicToolCall { id, .. } if method == "item/completed" => {
                         self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn_id && &place.item == id);
                     }
+                    // Codex announces no subagent's thread: this item is the first the engine hears of one.
+                    p::ThreadItem::SubAgentActivity { agent_thread_id, agent_path, .. } => self.adopt_subagent(&note.thread_id, agent_thread_id, agent_path),
                     _ => {}
                 }
                 let Some(item) = mapping::item(&note.item, method == "item/completed") else { return };
@@ -176,7 +179,7 @@ impl Inner {
         }
         match mapping::request(method, &params, |item| self.store.file_change(item)) {
             Some((thread, request)) => {
-                let thread = self.store.owner(thread);
+                let thread = self.store.shown_on(thread);
                 let request = PendingRequest { id: RequestId(format!("{generation}:{}", rpc_id_text(&id))), thread, request };
                 self.store.add_pending(Pending { request, generation, rpc_id: id, method: method.to_string(), params });
             }
@@ -197,10 +200,43 @@ impl Inner {
         self.take_thread(thread, Some(read_at), true);
     }
 
+    /// A subagent the engine has not seen, started by a thread it has, in that
+    /// thread's project. Until Codex has kept it, a read of it is empty, from
+    /// before it was taken in (as for a thread the engine starts).
+    fn adopt_subagent(&self, parent: &str, child: &str, path: &str) {
+        let (parent, child) = (ThreadId(parent.to_string()), ThreadId(child.to_string()));
+        self.store.set_parent(child.clone(), parent.clone());
+        let (Some(of), None) = (self.store.thread(&parent), self.store.thread(&child)) else { return };
+        let before = self.store.seq();
+        let subagent = Subagent { parent, path: path.to_string(), nickname: None };
+        self.store.upsert_thread(child.clone(), None, false, |existing| match existing {
+            Some(existing) => existing.clone(),
+            None => crate::store::ThreadEntry {
+                project: of.project,
+                cwd: of.cwd,
+                title: None,
+                forked_from: None,
+                updated_at: now(),
+                // The settings of the turn that started it, whether or not Codex's answer to that turn's start is in yet.
+                settings: of.starting.or(of.settings),
+                starting: None,
+                active_turn: None,
+                last_ended: None,
+                unsettled: None,
+                failed: None,
+                unread: false,
+                subagent: Some(subagent),
+            },
+        });
+        if let Ok(session) = self.session() {
+            session.mark_unkept(&child, before);
+        }
+    }
+
     fn take_thread(&self, thread: &p::Thread, read_at: Option<u64>, known_only: bool) -> Option<ThreadId> {
-        if let Some(parent) = &thread.parent_thread_id {
-            self.store.set_parent(ThreadId(thread.id.clone()), ThreadId(parent.clone()));
-            return None;
+        let parent = thread.parent_thread_id.clone().map(ThreadId);
+        if let Some(parent) = &parent {
+            self.store.set_parent(ThreadId(thread.id.clone()), parent.clone());
         }
         let project = self.store.projects().into_iter().find(|p| mapping::same_folder(&thread.cwd, &p.path))?;
         let id = ThreadId(thread.id.clone());
@@ -224,6 +260,11 @@ impl Inner {
             unsettled: existing.and_then(|e| e.unsettled.clone()),
             failed: existing.and_then(|e| e.failed.clone()),
             unread: existing.is_some_and(|e| e.unread),
+            subagent: parent.clone().map(|parent| Subagent {
+                parent,
+                path: thread.agent_path().or_else(|| existing.and_then(|e| e.subagent.as_ref().map(|s| s.path.clone()))).unwrap_or_default(),
+                nickname: thread.agent_nickname.clone().or_else(|| existing.and_then(|e| e.subagent.as_ref().and_then(|s| s.nickname.clone()))),
+            }),
         });
         Some(id)
     }

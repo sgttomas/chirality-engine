@@ -181,6 +181,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": "STUB[flow] Estimate this",
         "unread": true,
         "updatedAt": 1795000000
@@ -376,6 +377,7 @@
         "status": {
           "state": "working"
         },
+        "subagent": null,
         "title": null,
         "unread": false,
         "updatedAt": 1795000000
@@ -482,6 +484,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": null,
         "unread": true,
         "updatedAt": 1795000000
@@ -509,6 +512,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": "STUB[flow] Estimate this",
         "unread": true,
         "updatedAt": 1795000000
@@ -533,6 +537,7 @@
           "status": {
             "state": "idle"
           },
+          "subagent": null,
           "title": "STUB[flow] Estimate this",
           "unread": true,
           "updatedAt": 1795000000

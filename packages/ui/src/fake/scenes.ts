@@ -13,7 +13,7 @@ export interface Scene {
   panel?: PanelTab;
 }
 
-export const sceneNames = ["firstUse", "empty", "running", "approval", "question", "diff", "fork", "home"] as const;
+export const sceneNames = ["firstUse", "empty", "running", "approval", "question", "diff", "fork", "subagents", "home"] as const;
 export type SceneName = (typeof sceneNames)[number];
 
 const settings: TurnSettings = { model: "gpt-5.5", effort: "high", access: "ask" };
@@ -88,6 +88,14 @@ export async function buildScene(name: SceneName): Promise<Scene> {
       await engine.send(thread, classAsk, settings);
       await flush();
       await engine.markRead(thread);
+      live();
+      return { engine, thread };
+    }
+    case "subagents": {
+      // One subagent has finished; the other waits on the person, and its parent waits on it.
+      engine.options.autoAnswer = () => null;
+      const thread = await engine.startThread(bridge.id, msg("Check the pile lengths and the deck takeoff in parallel, with a subagent each."), settings);
+      for (let i = 0; i < 20; i++) await flush();
       live();
       return { engine, thread };
     }

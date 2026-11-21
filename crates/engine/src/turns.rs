@@ -69,6 +69,9 @@ impl Inner {
     async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
+        if entry.subagent.is_some() {
+            return Err(EngineError::Invalid { message: "A subagent takes its messages from the agent that started it.".into() });
+        }
         let project = self.project(&entry.project)?;
         let workflow = match &message.workflow {
             Some(id) => Some(crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?),

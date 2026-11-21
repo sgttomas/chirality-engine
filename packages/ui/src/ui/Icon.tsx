@@ -19,6 +19,7 @@ const paths = {
   check: "M5 12l5 5L20 7",
   at: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1",
   more: "M5 12h.01M12 12h.01M19 12h.01",
+  subagent: "M6 4v7a3 3 0 0 0 3 3h9M15 11l3 3-3 3",
 } as const;
 
 export type IconName = keyof typeof paths;

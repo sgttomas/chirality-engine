@@ -1,14 +1,15 @@
 import { useState, type ReactNode } from "react";
 
 import type { Project, ProjectId, ThreadSummary } from "../engine/types";
-import { ago, markLabel, markOf, treeOf } from "../state/selectors";
+import { ago, markLabel, markOf, nameOf, strongestMark, treeOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Icon } from "./Icon";
+import { SubagentGroup } from "./Subagents";
 import { applyTheme, storedTheme, type Theme } from "./theme";
 import "./styles/navigator.css";
 
-/** Projects, each with its threads (forks under their parents); new thread, search, add a
- * project, and the account. */
+/** Projects, each with its threads (forks and subagents under their parents); new thread, search,
+ * add a project, and the account. */
 export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
   const store = useStoreHandle();
   const snapshot = useStore((s) => s.model!.snapshot);
@@ -20,7 +21,7 @@ export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
   const addProject = () => void store.addProjectFolder();
 
   const q = query.trim().toLowerCase();
-  const matches = (t: ThreadSummary) => !q || (t.title ?? "").toLowerCase().includes(q);
+  const matches = (t: ThreadSummary) => !q || nameOf(t).toLowerCase().includes(q);
 
   return (
     <nav className="nav" aria-label="Projects">
@@ -37,6 +38,7 @@ export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
             key={project.id}
             project={project}
             rows={treeOf(snapshot.threads, project.id).filter((r) => matches(r.thread))}
+            all={snapshot.threads.filter((t) => t.project === project.id)}
             open={!closed[project.id] || !!q}
             current={current === project.id && !selected}
             selected={selected}
@@ -57,6 +59,8 @@ export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
 function ProjectGroup(props: {
   project: Project;
   rows: { thread: ThreadSummary; depth: number }[];
+  /** Every thread of the project, subagents too. */
+  all: ThreadSummary[];
   open: boolean;
   current: boolean;
   selected: string | null;
@@ -64,8 +68,7 @@ function ProjectGroup(props: {
 }) {
   const store = useStoreHandle();
   const { project, rows, open } = props;
-  const marks = rows.map((r) => markOf(r.thread));
-  const strongest = (["waiting", "failed", "finished", "running"] as const).find((m) => marks.includes(m));
+  const strongest = strongestMark(props.all);
   return (
     <section className="nav-group">
       <div className={`nav-project ${props.current ? "nav-project--current" : ""}`}>
@@ -85,12 +88,12 @@ function ProjectGroup(props: {
   );
 }
 
-/** A project's threads, newest first, each fork under its parent; `query` filters by title. */
+/** A project's threads, newest first, each fork and subagent under its parent; `query` filters by name. */
 export function ThreadList({ project, query = "" }: { project: ProjectId; query?: string }) {
   const threads = useStore((s) => s.model!.snapshot.threads);
   const selected = useStore((s) => s.thread);
   const q = query.trim().toLowerCase();
-  const rows = treeOf(threads, project).filter((r) => !q || (r.thread.title ?? "").toLowerCase().includes(q));
+  const rows = treeOf(threads, project).filter((r) => !q || nameOf(r.thread).toLowerCase().includes(q));
   return <ThreadRows rows={rows} selected={selected} />;
 }
 
@@ -98,9 +101,19 @@ function ThreadRows({ rows, selected }: { rows: { thread: ThreadSummary; depth: 
   return (
     <ul className="nav-threads">
       {rows.map(({ thread, depth }) => (
-        <ThreadRow key={thread.id} thread={thread} depth={depth} selected={thread.id === selected} />
+        <ThreadAndSubagents key={thread.id} thread={thread} depth={depth} selected={selected} />
       ))}
     </ul>
+  );
+}
+
+function ThreadAndSubagents({ thread, depth, selected }: { thread: ThreadSummary; depth: number; selected: string | null }) {
+  const row = (t: ThreadSummary, d: number) => <ThreadRow key={t.id} thread={t} depth={d} selected={t.id === selected} />;
+  return (
+    <>
+      {row(thread, depth)}
+      <SubagentGroup parent={thread} depth={depth} row={row} />
+    </>
   );
 }
 
@@ -116,8 +129,10 @@ function ThreadRow({ thread, depth, selected }: { thread: ThreadSummary; depth: 
         style={{ paddingLeft: 26 + depth * 14 }}
         onClick={() => store.selectThread(thread.id)}
       >
-        {depth > 0 && <Icon name="fork" className="nav-fork" />}
-        <span className="nav-thread-title">{thread.title ?? "New thread"}</span>
+        {thread.subagent ? <Icon name="subagent" className="nav-fork" /> : depth > 0 && <Icon name="fork" className="nav-fork" />}
+        <span className="nav-thread-title" title={thread.subagent ? [thread.subagent.nickname, thread.subagent.path].filter(Boolean).join(" · ") : undefined}>
+          {nameOf(thread)}
+        </span>
         {mark ? <span className={`mark mark--${mark}`} title={markLabel[mark]} aria-label={markLabel[mark]} /> : <span className="nav-when">{ago(thread.updatedAt)}</span>}
       </button>
     </li>

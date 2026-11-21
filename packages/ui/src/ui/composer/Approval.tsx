@@ -5,6 +5,7 @@ import { shortPath } from "../../state/selectors";
 import { useProjectRoot, useStoreHandle } from "../../state/store";
 import { Diff, DiffStat } from "../Diff";
 import { Icon } from "../Icon";
+import { RequestFrom } from "./RequestFrom";
 
 const headings = { command: "Run this command?", fileChange: "Make these changes?", permissions: "Allow more access?" } as const;
 
@@ -35,7 +36,10 @@ export function Approval({ pending }: { pending: PendingRequest }) {
   if (request.kind === "question") return null;
   return (
     <div className="ask ask--approval" role="dialog" aria-label={headings[request.kind]}>
-      <div className="ask-head">{headings[request.kind]}</div>
+      <div className="ask-head">
+        {headings[request.kind]}
+        <RequestFrom pending={pending} />
+      </div>
       {request.reason && <div className="ask-reason">{request.reason}</div>}
       {request.kind === "command" && (
         <pre className="ask-command">

@@ -1,0 +1,1356 @@
+{
+  "after": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "project",
+        "path": "/work/run/project"
+      }
+    ],
+    "seq": 54,
+    "threads": [
+      {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[lead] delegate the piles",
+        "unread": false,
+        "updatedAt": 0
+      },
+      {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": "Hypatia",
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 0
+      },
+      {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000007",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": "Hume",
+          "parent": "00000000-0000-0000-0000-000000000005",
+          "path": "/root/worker/inner"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 0
+      }
+    ]
+  },
+  "before": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [],
+    "seq": 0,
+    "threads": []
+  },
+  "events": [
+    {
+      "projects": [
+        {
+          "id": "project-1",
+          "name": "project",
+          "path": "/work/run/project"
+        }
+      ],
+      "type": "projects"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "kind": "userMessage",
+          "text": "STUB[lead] delegate the piles",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000004"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "kind": "userMessage",
+          "text": "STUB[lead] delegate the piles",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000004"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "started",
+          "kind": "subagent",
+          "path": "/root/worker",
+          "thread": "00000000-0000-0000-0000-000000000005"
+        },
+        "done": false,
+        "id": "call_spawn"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "started",
+          "kind": "subagent",
+          "path": "/root/worker",
+          "thread": "00000000-0000-0000-0000-000000000005"
+        },
+        "done": true,
+        "id": "call_spawn"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "subagentTool",
+          "prompt": null,
+          "status": "running",
+          "threads": [],
+          "tool": "wait"
+        },
+        "done": false,
+        "id": "call_wait"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "command": "/bin/zsh -lc 'printf ok > piles.txt'",
+          "cwd": "/work/run/project",
+          "exitCode": null,
+          "kind": "command",
+          "output": ""
+        },
+        "done": false,
+        "id": "call_piles"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "request": {
+        "id": "1:0",
+        "request": {
+          "command": "/bin/zsh -lc 'printf ok > piles.txt'",
+          "cwd": "/work/run/project",
+          "kind": "command",
+          "reason": "Run the invented fixture command?"
+        },
+        "thread": "00000000-0000-0000-0000-000000000005"
+      },
+      "type": "pending"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "needsApproval"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "request": "1:0",
+      "type": "resolved"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "item": {
+        "body": {
+          "command": "/bin/zsh -lc 'printf ok > piles.txt'",
+          "cwd": "/work/run/project",
+          "exitCode": 0,
+          "kind": "command",
+          "output": ""
+        },
+        "done": true,
+        "id": "call_piles"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000007",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000005",
+          "path": "/root/worker/inner"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "started",
+          "kind": "subagent",
+          "path": "/root/worker/inner",
+          "thread": "00000000-0000-0000-0000-000000000007"
+        },
+        "done": false,
+        "id": "call_inner"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "started",
+          "kind": "subagent",
+          "path": "/root/worker/inner",
+          "thread": "00000000-0000-0000-0000-000000000007"
+        },
+        "done": true,
+        "id": "call_inner"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000007",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000005",
+          "path": "/root/worker/inner"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000007",
+      "turn": "00000000-0000-0000-0000-000000000008",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "subagentTool",
+          "prompt": null,
+          "status": "running",
+          "threads": [],
+          "tool": "wait"
+        },
+        "done": false,
+        "id": "call_inner_wait"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_inner_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000007",
+      "turn": "00000000-0000-0000-0000-000000000008",
+      "type": "item"
+    },
+    {
+      "item": "msg_inner_done",
+      "kind": "agentMessage",
+      "text": "Inner done.",
+      "thread": "00000000-0000-0000-0000-000000000007",
+      "turn": "00000000-0000-0000-0000-000000000008",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Inner done."
+        },
+        "done": true,
+        "id": "msg_inner_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000007",
+      "turn": "00000000-0000-0000-0000-000000000008",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000007",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000005",
+          "path": "/root/worker/inner"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000007",
+      "turn": "00000000-0000-0000-0000-000000000008",
+      "type": "turnEnded"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "finished",
+          "kind": "subagent",
+          "path": "/root/worker/inner",
+          "thread": "00000000-0000-0000-0000-000000000007"
+        },
+        "done": false,
+        "id": "subagent-completed-00000000-0000-0000-0000-000000000008"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "finished",
+          "kind": "subagent",
+          "path": "/root/worker/inner",
+          "thread": "00000000-0000-0000-0000-000000000007"
+        },
+        "done": true,
+        "id": "subagent-completed-00000000-0000-0000-0000-000000000008"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "subagentTool",
+          "prompt": null,
+          "status": "completed",
+          "threads": [],
+          "tool": "wait"
+        },
+        "done": true,
+        "id": "call_inner_wait"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_worker_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": "msg_worker_done",
+      "kind": "agentMessage",
+      "text": "Worker done.",
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Worker done."
+        },
+        "done": true,
+        "id": "msg_worker_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "finished",
+          "kind": "subagent",
+          "path": "/root/worker",
+          "thread": "00000000-0000-0000-0000-000000000005"
+        },
+        "done": false,
+        "id": "subagent-completed-00000000-0000-0000-0000-000000000006"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": null,
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "turnEnded"
+    },
+    {
+      "item": {
+        "body": {
+          "activity": "finished",
+          "kind": "subagent",
+          "path": "/root/worker",
+          "thread": "00000000-0000-0000-0000-000000000005"
+        },
+        "done": true,
+        "id": "subagent-completed-00000000-0000-0000-0000-000000000006"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "subagentTool",
+          "prompt": null,
+          "status": "completed",
+          "threads": [],
+          "tool": "wait"
+        },
+        "done": true,
+        "id": "call_wait"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_lead_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": "msg_lead_done",
+      "kind": "agentMessage",
+      "text": "Lead done.",
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Lead done."
+        },
+        "done": true,
+        "id": "msg_lead_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[lead] delegate the piles",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": "Hypatia",
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "projects": [],
+      "type": "projects"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "type": "threadRemoved"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "type": "threadRemoved"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000007",
+      "type": "threadRemoved"
+    },
+    {
+      "projects": [
+        {
+          "id": "project-1",
+          "name": "project",
+          "path": "/work/run/project"
+        }
+      ],
+      "type": "projects"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[lead] delegate the piles",
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000007",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": "Hume",
+          "parent": "00000000-0000-0000-0000-000000000005",
+          "path": "/root/worker/inner"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": "Hypatia",
+          "parent": "00000000-0000-0000-0000-000000000002",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    }
+  ],
+  "reads": [
+    {
+      "afterEvents": 45,
+      "view": {
+        "seq": 45,
+        "summary": {
+          "forkedFrom": null,
+          "id": "00000000-0000-0000-0000-000000000002",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "subagent": null,
+          "title": "STUB[lead] delegate the piles",
+          "unread": true,
+          "updatedAt": 1795000000
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "kind": "userMessage",
+                  "text": "STUB[lead] delegate the piles",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000004"
+              },
+              {
+                "body": {
+                  "activity": "started",
+                  "kind": "subagent",
+                  "path": "/root/worker",
+                  "thread": "00000000-0000-0000-0000-000000000005"
+                },
+                "done": true,
+                "id": "call_spawn"
+              },
+              {
+                "body": {
+                  "activity": "finished",
+                  "kind": "subagent",
+                  "path": "/root/worker",
+                  "thread": "00000000-0000-0000-0000-000000000005"
+                },
+                "done": true,
+                "id": "subagent-completed-00000000-0000-0000-0000-000000000006"
+              },
+              {
+                "body": {
+                  "kind": "subagentTool",
+                  "prompt": null,
+                  "status": "completed",
+                  "threads": [],
+                  "tool": "wait"
+                },
+                "done": true,
+                "id": "call_wait"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "Lead done."
+                },
+                "done": true,
+                "id": "msg_lead_done"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "afterEvents": 46,
+      "view": {
+        "seq": 46,
+        "summary": {
+          "forkedFrom": null,
+          "id": "00000000-0000-0000-0000-000000000005",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "subagent": {
+            "nickname": "Hypatia",
+            "parent": "00000000-0000-0000-0000-000000000002",
+            "path": "/root/worker"
+          },
+          "title": null,
+          "unread": true,
+          "updatedAt": 1795000000
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000006",
+            "items": [
+              {
+                "body": {
+                  "command": "/bin/zsh -lc 'printf ok > piles.txt'",
+                  "cwd": "/work/run/project",
+                  "exitCode": 0,
+                  "kind": "command",
+                  "output": ""
+                },
+                "done": true,
+                "id": "call_piles"
+              },
+              {
+                "body": {
+                  "activity": "started",
+                  "kind": "subagent",
+                  "path": "/root/worker/inner",
+                  "thread": "00000000-0000-0000-0000-000000000007"
+                },
+                "done": true,
+                "id": "call_inner"
+              },
+              {
+                "body": {
+                  "activity": "finished",
+                  "kind": "subagent",
+                  "path": "/root/worker/inner",
+                  "thread": "00000000-0000-0000-0000-000000000007"
+                },
+                "done": true,
+                "id": "subagent-completed-00000000-0000-0000-0000-000000000008"
+              },
+              {
+                "body": {
+                  "kind": "subagentTool",
+                  "prompt": null,
+                  "status": "completed",
+                  "threads": [],
+                  "tool": "wait"
+                },
+                "done": true,
+                "id": "call_inner_wait"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "Worker done."
+                },
+                "done": true,
+                "id": "msg_worker_done"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "workflows": []
+}

@@ -181,6 +181,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": "STUB[one] go",
         "unread": true,
         "updatedAt": 1795000000
@@ -376,6 +377,7 @@
         "status": {
           "state": "working"
         },
+        "subagent": null,
         "title": null,
         "unread": false,
         "updatedAt": 1795000000
@@ -464,6 +466,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": null,
         "unread": true,
         "updatedAt": 1795000000
@@ -491,6 +494,7 @@
         "status": {
           "state": "working"
         },
+        "subagent": null,
         "title": null,
         "unread": true,
         "updatedAt": 1795000000
@@ -579,6 +583,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": null,
         "unread": true,
         "updatedAt": 1795000000
@@ -606,6 +611,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": "STUB[one] go",
         "unread": false,
         "updatedAt": 0
@@ -625,6 +631,7 @@
         "status": {
           "state": "idle"
         },
+        "subagent": null,
         "title": "STUB[one] go",
         "unread": true,
         "updatedAt": 1795000000
@@ -653,6 +660,7 @@
           "status": {
             "state": "idle"
           },
+          "subagent": null,
           "title": "STUB[one] go",
           "unread": false,
           "updatedAt": 0
@@ -703,6 +711,7 @@
           "status": {
             "state": "idle"
           },
+          "subagent": null,
           "title": "STUB[one] go",
           "unread": true,
           "updatedAt": 1795000000

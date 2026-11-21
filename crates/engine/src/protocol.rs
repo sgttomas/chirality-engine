@@ -115,6 +115,18 @@ pub struct Thread {
     pub name: Option<String>,
     #[serde(default)]
     pub turns: Vec<Turn>,
+    /// A subagent's nickname, as Codex gives it.
+    pub agent_nickname: Option<String>,
+    /// Where the thread came from; a subagent's names its task path.
+    #[serde(default)]
+    pub source: Value,
+}
+
+impl Thread {
+    /// A subagent's task path (`/root/worker`).
+    pub fn agent_path(&self) -> Option<String> {
+        self.source.pointer("/subAgent/thread_spawn/agent_path").and_then(Value::as_str).map(str::to_string)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -192,7 +204,11 @@ pub struct ThreadStartParams {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListParams {
-    pub cwd: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<Vec<String>>,
+    /// Every subagent below this thread, at any depth (a project's listing has none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestor_thread_id: Option<String>,
     pub limit: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
@@ -232,6 +248,19 @@ pub enum ThreadItem {
         content_items: Option<Vec<Value>>,
     },
     WebSearch { id: String, query: String },
+    /// The agent started a subagent, messaged one, stopped one, or one finished.
+    #[serde(rename_all = "camelCase")]
+    SubAgentActivity { id: String, kind: String, agent_thread_id: String, agent_path: String },
+    /// One of the agent's own tools for its subagents (a wait, a failed start).
+    #[serde(rename_all = "camelCase")]
+    CollabAgentToolCall {
+        id: String,
+        tool: String,
+        status: String,
+        #[serde(default)]
+        receiver_thread_ids: Vec<String>,
+        prompt: Option<String>,
+    },
     #[serde(other)]
     Other,
 }

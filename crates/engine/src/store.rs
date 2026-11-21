@@ -29,6 +29,7 @@ pub(crate) struct ThreadEntry {
     pub unsettled: Option<TurnId>,
     pub failed: Option<String>,
     pub unread: bool,
+    pub subagent: Option<Subagent>,
 }
 
 /// A request Codex waits on, with what is needed to answer it.
@@ -51,7 +52,7 @@ struct State {
     pending: Vec<Pending>,
     /// File changes by Codex item id, for the approval that names only the item.
     file_changes: HashMap<String, Vec<FileDiff>>,
-    /// Subagent threads, by the thread that started them.
+    /// Each subagent's parent, the engine's or not.
     parents: HashMap<ThreadId, ThreadId>,
     /// Counts renames, so a read sent before one does not undo it.
     renames: u64,
@@ -250,7 +251,21 @@ impl Store {
         self.state.lock().unwrap().parents.insert(child, parent);
     }
 
-    /// The thread a subagent's requests are shown on: its root ancestor.
+    /// The thread a request is shown on: its own, or for a subagent the engine
+    /// does not have, the nearest ancestor it has.
+    pub fn shown_on(&self, thread: ThreadId) -> ThreadId {
+        let state = self.state.lock().unwrap();
+        let mut current = thread;
+        while !state.threads.contains_key(&current) {
+            match state.parents.get(&current) {
+                Some(parent) => current = parent.clone(),
+                None => break,
+            }
+        }
+        current
+    }
+
+    /// The thread an application's tool call shows on: its root ancestor.
     pub fn owner(&self, thread: ThreadId) -> ThreadId {
         let state = self.state.lock().unwrap();
         let mut current = thread;
@@ -299,6 +314,7 @@ fn summary(state: &State, id: &ThreadId) -> ThreadSummary {
         status,
         unread: entry.unread,
         forked_from: entry.forked_from.clone(),
+        subagent: entry.subagent.clone(),
         updated_at: entry.updated_at,
         settings: entry.starting.clone().or_else(|| entry.settings.clone()),
     }

@@ -5,6 +5,7 @@ import { draftKey, emptyDraft, type Draft } from "../../state/drafts";
 import { isRunning, pendingFor, shortPath } from "../../state/selectors";
 import { remember, remembered, resolveSettings } from "../../state/settings";
 import { useProjectRoot, useStore, useStoreHandle } from "../../state/store";
+import { SubagentControls } from "../Subagents";
 import { Icon } from "../Icon";
 import { Approval } from "./Approval";
 import { Controls } from "./Controls";
@@ -21,7 +22,9 @@ const imageExt = /\.(png|jpe?g|gif|webp|heic|tiff?)$/i;
  * approval or question waiting on the person. */
 export function Composer() {
   const key = useStore((s) => s.thread ?? s.project);
-  return key ? <ThreadComposer key={key} /> : null;
+  const subagent = useStore((s) => !!s.model!.snapshot.threads.find((t) => t.id === s.thread)?.subagent);
+  if (!key) return null;
+  return subagent ? <SubagentControls key={key} /> : <ThreadComposer key={key} />;
 }
 
 function ThreadComposer() {

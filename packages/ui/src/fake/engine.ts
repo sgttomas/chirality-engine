@@ -25,7 +25,10 @@ import type {
   TurnSettings,
 } from "../engine/types";
 import { files, libraryWorkflows, models, projectWorkflow } from "./fixtures";
-import { scriptFor, type Run } from "./scripts";
+import { scriptFor, type Run, type Script } from "./scripts";
+
+/** Names Codex gives subagents. */
+const nicknames = ["Noether", "Hopper", "Lovelace", "Turing"];
 
 export interface FakeOptions {
   /** Every wait resolves at once: for seeding scenes and for tests. */
@@ -163,6 +166,7 @@ export class FakeEngine implements EngineClient {
       status: { state: "idle" },
       unread: false,
       forkedFrom: null,
+      subagent: null,
       updatedAt: now(),
       settings,
     };
@@ -172,8 +176,30 @@ export class FakeEngine implements EngineClient {
     this.startTurn(summary.id, message, settings);
     return summary.id;
   }
+
+  /** A subagent of `parent`, as Codex makes one; its turn is its task, which Codex keeps in
+   * neither thread. */
+  private spawn(parent: ThreadId, task: string) {
+    const of = this.summary(parent);
+    const path = `${of.subagent?.path ?? "/root"}/${task}`;
+    const summary: ThreadSummary = {
+      ...structuredClone(of),
+      id: this.id("t"),
+      title: null,
+      status: { state: "idle" },
+      unread: false,
+      forkedFrom: null,
+      subagent: { parent, path, nickname: nicknames[this.next % nicknames.length] },
+      updatedAt: now(),
+    };
+    this.snap.threads.unshift(summary);
+    this.views.set(summary.id, { summary, turns: [], seq: 0 });
+    this.emitThread(summary.id);
+    return { id: summary.id, path };
+  }
   async send(thread: ThreadId, message: Message, settings: TurnSettings) {
     if (!this.views.has(thread)) return fail({ kind: "notFound", what: `thread ${thread}` });
+    if (this.summary(thread).subagent) return fail({ kind: "invalid", message: "A subagent takes its messages from the agent that started it." });
     const running = this.running.get(thread);
     if (!running) return this.startTurn(thread, message, settings);
     running.steers.push(message);
@@ -250,20 +276,21 @@ export class FakeEngine implements EngineClient {
 
   // Turns.
 
-  private startTurn(thread: ThreadId, message: Message, settings: TurnSettings) {
+  /** A turn from the person's `message`, or a subagent's from its task (`script`). */
+  private startTurn(thread: ThreadId, message: Message | null, settings: TurnSettings, given?: Script) {
     const view = this.views.get(thread)!;
     const turn: Turn = { id: this.id("turn"), items: [], state: { state: "running" } };
-    const script = scriptFor(message);
+    const script = given ?? scriptFor(message!);
     view.turns.push(turn);
     const summary = view.summary;
     summary.settings = settings;
-    if (!summary.title) summary.title = titleOf(message.text);
+    if (!summary.title && message) summary.title = titleOf(message.text);
     const running: Running = { turn, stopped: false, steers: [], done: Promise.resolve() };
     this.running.set(thread, running);
     this.emit({ type: "turnStarted", thread, turn: turn.id });
-    this.addItem(thread, turn, this.userItem(message));
+    if (message) this.addItem(thread, turn, this.userItem(message));
     this.refresh(thread);
-    const run = this.run(thread, running, message, settings.access !== "fullAccess");
+    const run = this.run(thread, running, message ?? { text: "", attachments: [], workflow: null }, settings);
     running.done = script(run)
       .then(() => this.answerSteers(run, running))
       .then(
@@ -281,12 +308,13 @@ export class FakeEngine implements EngineClient {
     this.running.delete(thread);
     this.emit({ type: "turnEnded", thread, turn: running.turn.id, state });
     const summary = this.summary(thread);
-    summary.unread = true;
+    summary.unread = !summary.subagent;
     summary.updatedAt = now();
     this.refresh(thread);
   }
 
-  private run(thread: ThreadId, running: Running, message: Message, asks: boolean): Run {
+  private run(thread: ThreadId, running: Running, message: Message, settings: TurnSettings): Run {
+    const asks = settings.access !== "fullAccess";
     const check = () => {
       if (running.stopped) throw new Stopped();
     };
@@ -341,6 +369,24 @@ export class FakeEngine implements EngineClient {
         if (given.kind === "cancel") running.stopped = true;
         check();
         return given;
+      },
+      delegate: (task, script) => {
+        check();
+        const child = this.spawn(thread, task);
+        run.item({ kind: "subagent", thread: child.id, path: child.path, activity: "started" }, true);
+        this.startTurn(child.id, null, settings, script);
+        return child.id;
+      },
+      waitFor: async (children) => {
+        const id = run.item({ kind: "subagentTool", tool: "wait", status: "running", threads: [], prompt: null });
+        for (const child of children) {
+          await this.settled(child);
+          check();
+          // One the person stopped is not reported to its parent, as with Codex.
+          const ended = this.views.get(child)?.turns.at(-1)?.state.state;
+          if (ended === "completed") run.item({ kind: "subagent", thread: child, path: this.summary(child).subagent!.path, activity: "finished" }, true);
+        }
+        run.update(id, { kind: "subagentTool", tool: "wait", status: "completed", threads: [], prompt: null }, true);
       },
       mark: async (label) => {
         if (label !== this.stopAt) return;

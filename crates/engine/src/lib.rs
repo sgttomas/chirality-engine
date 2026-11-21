@@ -153,11 +153,13 @@ impl Engine {
         self.inner.start_thread(project, message, settings).await
     }
 
-    /// Sends a message; starts a turn, or steers the running one.
+    /// Sends a message; starts a turn, or steers the running one. A subagent
+    /// takes none: Codex takes its messages only from its parent's agent.
     pub async fn send(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
         self.inner.send(thread, message, settings).await
     }
 
+    /// Stops the thread's running turn; a subagent's too (its parent's agent is not told).
     pub async fn interrupt(&self, thread: &ThreadId) -> Result<()> {
         self.inner.interrupt(thread).await
     }
@@ -177,6 +179,7 @@ impl Engine {
         self.inner.rename(thread, title).await
     }
 
+    /// Archives the thread; Codex archives its subagents with it.
     pub async fn archive(&self, thread: &ThreadId) -> Result<()> {
         self.inner.archive(thread).await
     }

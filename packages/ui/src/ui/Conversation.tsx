@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 
-import { isRunning } from "../state/selectors";
+import { isRunning, nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Composer } from "./composer/Composer";
 import { ThreadTitle } from "./conversation/ThreadTitle";
@@ -49,18 +49,19 @@ export function ConversationHeader({ actions }: { actions?: ReactNode }) {
   );
 }
 
-/** The selected thread's title, renamed in place, and a way back to the thread it was forked from. */
+/** The selected thread's title, renamed in place, and a way back to the thread it was forked from,
+ * or to the thread whose agent started it. */
 export function ThreadHeading() {
   const store = useStoreHandle();
   const summary = useStore((s) => s.model!.snapshot.threads.find((t) => t.id === s.thread));
-  const parent = useStore((s) => s.model!.snapshot.threads.find((t) => t.id === summary?.forkedFrom));
+  const parent = useStore((s) => s.model!.snapshot.threads.find((t) => t.id === (summary?.subagent?.parent ?? summary?.forkedFrom)));
   if (!summary) return <h1>New thread</h1>;
   return (
     <>
       <ThreadTitle thread={summary} />
       {parent && (
         <button className="conv-parent" onClick={() => store.selectThread(parent.id)}>
-          <Icon name="fork" /> {parent.title ?? "Parent thread"}
+          <Icon name={summary.subagent ? "subagent" : "fork"} /> {nameOf(parent)}
         </button>
       )}
     </>
@@ -96,7 +97,7 @@ export function Turns() {
     >
       <div className="conv-turns">
         {view?.turns.map((turn) => (
-          <TurnView key={turn.id} thread={view.summary.id} turn={turn} workflows={workflows} canAct={!running} />
+          <TurnView key={turn.id} thread={view.summary.id} turn={turn} workflows={workflows} canAct={!running && !view.summary.subagent} />
         ))}
         {!threadId && projectId && <div className="conv-empty" />}
       </div>
