@@ -3,9 +3,9 @@
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
 
 import type { EngineClient, Host } from "../engine/client";
-import type { Event, Numbered, ProjectId, ThreadId, ThreadView, Workflow } from "../engine/types";
+import type { Event, Numbered, ProjectId, ThreadId, ThreadView, TurnId, Workflow } from "../engine/types";
 import { useTheme } from "../ui/theme";
-import { applyEvent, applyToView, threadOf, type Model } from "./reduce";
+import { applyEvent, applyToView, keepPlan, threadOf, type Model } from "./reduce";
 
 export interface State {
   model: Model | null;
@@ -175,7 +175,7 @@ export class Store {
     this.set({ model: applyEvent(before.model!, event, seq) });
     // Codex's history of a completed turn replaces what the view gathered while it ran; a stopped
     // or failed turn keeps it (Codex may not have kept a reply cut short).
-    if (event.type === "turnEnded" && event.state.state === "completed" && event.thread === this.state.thread) void this.reload(event.thread);
+    if (event.type === "turnEnded" && event.state.state === "completed" && event.thread === this.state.thread) void this.reload(event.thread, event.turn);
     if (event.type === "thread" && event.thread.id === this.state.thread && event.thread.unread) this.markRead(event.thread.id);
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
     if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });
@@ -221,20 +221,33 @@ export class Store {
     if (!this.state.model?.views[thread]) await this.reload(thread);
     if (summary?.unread) this.markRead(thread);
   }
-  /** Reads the thread again, with the events after the read applied. The latest read of a thread wins. */
-  async reload(thread: ThreadId) {
+  /** Reads the thread again, with the events after the read applied. The latest read of a thread wins;
+   * one an earlier start began, or a later read overtook, changes nothing, its failure included. After
+   * `completed` ends, the plan the view holds for it is kept: Codex leaves it out of the history. */
+  async reload(thread: ThreadId, completed?: TurnId) {
     const ticket = ++this.readsBegun;
+    const generation = this.generation;
+    const current = () => generation === this.generation && this.latestRead.get(thread) === ticket;
     this.latestRead.set(thread, ticket);
     const during: Numbered[] = [];
     this.reads.add(during);
-    const read = await this.attempt(() => this.engine.readThread(thread)).finally(() => this.reads.delete(during));
-    if (!read || !this.state.model || this.latestRead.get(thread) !== ticket) return;
+    let read: ThreadView;
+    try {
+      read = await this.engine.readThread(thread);
+    } catch (e) {
+      if (current()) this.set({ error: describe(e) });
+      return;
+    } finally {
+      this.reads.delete(during);
+    }
+    if (!this.state.model || !current()) return;
+    if (this.state.error) this.set({ error: null });
     const after = during.filter((n) => n.seq > read.seq);
     // A gap: the snapshot is read again, and this thread with it if it is in view.
     if (after.some((n, i) => n.seq !== read.seq + i + 1)) return;
     if (!this.state.model.snapshot.threads.some((t) => t.id === thread)) return;
     // The read holds every event through its number; the rest apply on top.
-    let view: ThreadView = read;
+    let view: ThreadView = completed ? keepPlan(read, this.state.model.views[thread], completed) : read;
     for (const { seq, event } of after) if (threadOf(event) === thread) view = { ...applyToView(view, event), seq };
     this.set({ model: { ...this.state.model, views: { ...this.state.model.views, [thread]: view } } });
   }

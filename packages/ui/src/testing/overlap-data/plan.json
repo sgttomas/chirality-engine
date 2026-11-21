@@ -1,0 +1,475 @@
+{
+  "firstRead": {
+    "seq": 17,
+    "summary": {
+      "forkedFrom": null,
+      "id": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+      "project": "17936e3f20de54c3",
+      "settings": {
+        "access": "ask",
+        "effort": "low",
+        "model": "gpt-6.2-sol"
+      },
+      "status": {
+        "state": "idle"
+      },
+      "title": "STUB[before_plan] go",
+      "unread": true,
+      "updatedAt": 1795279102
+    },
+    "turns": [
+      {
+        "id": "01a1fef9-1fe0-7a20-9361-58eda06d89e6",
+        "items": [
+          {
+            "body": {
+              "attachments": [],
+              "kind": "userMessage",
+              "text": "STUB[before_plan] go",
+              "workflow": null
+            },
+            "done": true,
+            "id": "01a1fef9-2032-7d73-aa19-0032baa49711"
+          },
+          {
+            "body": {
+              "kind": "agentMessage",
+              "text": "Ready."
+            },
+            "done": true,
+            "id": "msg_before_plan"
+          }
+        ],
+        "state": {
+          "state": "completed"
+        }
+      }
+    ]
+  },
+  "frames": [
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+          "project": "17936e3f20de54c3",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "working"
+          },
+          "title": "STUB[before_plan] go",
+          "unread": true,
+          "updatedAt": 1795279102
+        },
+        "type": "thread"
+      },
+      "seq": 19
+    },
+    {
+      "event": {
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "turnStarted"
+      },
+      "seq": 20
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "attachments": [],
+            "kind": "userMessage",
+            "text": "STUB[review_plan] go",
+            "workflow": null
+          },
+          "done": false,
+          "id": "01a1fef9-204c-7ff0-bfa8-03f649643641"
+        },
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "item"
+      },
+      "seq": 21
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "attachments": [],
+            "kind": "userMessage",
+            "text": "STUB[review_plan] go",
+            "workflow": null
+          },
+          "done": true,
+          "id": "01a1fef9-204c-7ff0-bfa8-03f649643641"
+        },
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "item"
+      },
+      "seq": 22
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "plan",
+            "steps": [
+              {
+                "status": "completed",
+                "text": "Prepare estimate"
+              }
+            ]
+          },
+          "done": true,
+          "id": "plan-01a1fef9-2043-7bb1-897e-67b1b951351a"
+        },
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "item"
+      },
+      "seq": 23
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "agentMessage",
+            "text": "Done: Plan updated"
+          },
+          "done": false,
+          "id": "msg_review_plan_done"
+        },
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "item"
+      },
+      "seq": 24
+    },
+    {
+      "event": {
+        "item": "msg_review_plan_done",
+        "kind": "agentMessage",
+        "text": "Done: Plan updated",
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "itemDelta"
+      },
+      "seq": 25
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "agentMessage",
+            "text": "Done: Plan updated"
+          },
+          "done": true,
+          "id": "msg_review_plan_done"
+        },
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "item"
+      },
+      "seq": 26
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+          "project": "17936e3f20de54c3",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": "STUB[before_plan] go",
+          "unread": true,
+          "updatedAt": 1795279102
+        },
+        "type": "thread"
+      },
+      "seq": 27
+    },
+    {
+      "event": {
+        "state": {
+          "state": "completed"
+        },
+        "thread": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "turn": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "type": "turnEnded"
+      },
+      "seq": 28
+    }
+  ],
+  "initial": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [
+      {
+        "id": "17936e3f20de54c3",
+        "name": "project",
+        "path": "/work/project"
+      }
+    ],
+    "seq": 18,
+    "threads": [
+      {
+        "forkedFrom": null,
+        "id": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+        "project": "17936e3f20de54c3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": "STUB[before_plan] go",
+        "unread": true,
+        "updatedAt": 1795279102
+      }
+    ]
+  },
+  "view": {
+    "seq": 28,
+    "summary": {
+      "forkedFrom": null,
+      "id": "01a1fef9-1fc7-7a10-adb5-e3014e3434ba",
+      "project": "17936e3f20de54c3",
+      "settings": {
+        "access": "ask",
+        "effort": "low",
+        "model": "gpt-6.2-sol"
+      },
+      "status": {
+        "state": "idle"
+      },
+      "title": "STUB[before_plan] go",
+      "unread": true,
+      "updatedAt": 1795279102
+    },
+    "turns": [
+      {
+        "id": "01a1fef9-1fe0-7a20-9361-58eda06d89e6",
+        "items": [
+          {
+            "body": {
+              "attachments": [],
+              "kind": "userMessage",
+              "text": "STUB[before_plan] go",
+              "workflow": null
+            },
+            "done": true,
+            "id": "01a1fef9-2032-7d73-aa19-0032baa49711"
+          },
+          {
+            "body": {
+              "kind": "agentMessage",
+              "text": "Ready."
+            },
+            "done": true,
+            "id": "msg_before_plan"
+          }
+        ],
+        "state": {
+          "state": "completed"
+        }
+      },
+      {
+        "id": "01a1fef9-2043-7bb1-897e-67b1b951351a",
+        "items": [
+          {
+            "body": {
+              "attachments": [],
+              "kind": "userMessage",
+              "text": "STUB[review_plan] go",
+              "workflow": null
+            },
+            "done": true,
+            "id": "01a1fef9-204c-7ff0-bfa8-03f649643641"
+          },
+          {
+            "body": {
+              "kind": "agentMessage",
+              "text": "Done: Plan updated"
+            },
+            "done": true,
+            "id": "msg_review_plan_done"
+          }
+        ],
+        "state": {
+          "state": "completed"
+        }
+      }
+    ]
+  }
+}

@@ -76,6 +76,20 @@ export function applyToView(view: ThreadView, event: Event): ThreadView {
   }
 }
 
+/** `read` with the plan `held` has for `turn`, where it was among that turn's items, if `read` lacks it. */
+export function keepPlan(read: ThreadView, held: ThreadView | undefined, turn: string): ThreadView {
+  const before = held?.turns.find((t) => t.id === turn)?.items ?? [];
+  const plans = before.filter((i) => i.body.kind === "plan");
+  if (!plans.length) return read;
+  const turns = read.turns.map((t) => {
+    if (t.id !== turn) return t;
+    const items = [...t.items];
+    for (const plan of plans) if (!items.some((i) => i.id === plan.id)) items.splice(Math.min(before.indexOf(plan), items.length), 0, plan);
+    return { ...t, items };
+  });
+  return { ...read, turns };
+}
+
 export const threadOf = (event: Event): ThreadId | null => {
   switch (event.type) {
     case "thread":

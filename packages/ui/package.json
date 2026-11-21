@@ -17,6 +17,8 @@
     "src",
     "!src/**/*.test.ts",
     "!src/**/*.test.tsx",
+    "!src/**/*.test-helpers.ts",
+    "!src/testing/overlap-data",
     "!src/test-setup.ts",
     "LICENSE"
   ],

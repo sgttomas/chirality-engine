@@ -67,7 +67,7 @@ give it another home.
 - **Application tools:** the application gives the agent its own tools (in its own namespace: name, description, JSON Schema of the arguments) and its handler answers every call; Codex keeps a thread's tools with it through resume and fork.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
-- **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds. A read is Codex's history, numbered from before the read: every event after that number applies to it (an item it has as done stays done; text for an item it lacks begins that item), and when a turn of the thread in view completes, the thread is read again. The engine keeps no copy of the conversation: text Codex did not keep (of a reply a Stop cut short) is in the live view, and not in the thread read again.
+- **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds. A read is Codex's history, numbered from before the read: every event after that number applies to it (an item it has as done stays done; text for an item it lacks begins that item), and when a turn of the thread in view completes, the thread is read again (keeping that turn's plan, which Codex leaves out of history). The engine keeps no copy of the conversation: text Codex did not keep (of a reply a Stop cut short) is in the live view, and not in the thread read again.
 
 The API is Rust types. Bindings for an application's interface are generated
 from them (TypeScript, in the interface package); nothing crosses as
@@ -102,6 +102,12 @@ together. An application pins one engine revision for all of them.
 An application consumes both from this repository at a pinned revision (a git
 dependency in Cargo, and `#<revision>::path:packages/ui` in npm), fetched with
 the developer's own access; no registry.
+
+## Known limits
+
+- A legacy-history exchange can stay doubled in a view the person switches away from while its read is pending, and can show doubled briefly before the completion read returns.
+- A completion read can drop the first streamed chunk of a follow-up sent before that read returns.
+- A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.
 
 ## Non-goals
 
