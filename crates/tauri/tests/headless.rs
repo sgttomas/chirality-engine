@@ -1,9 +1,11 @@
 //! The adapter against the real engine and the pinned Codex, with no window and
 //! no application: Tauri's mock runtime carries each call through IPC as the
 //! interface would. Codex runs in a scratch home with every outside host
-//! unreachable; no sign-in, no model turn. Skipped when the pinned Codex is absent.
+//! unreachable; no sign-in, no model turn. `CHIRALITY_TEST_CODEX` names the
+//! pinned Codex (skipped without it); `CHIRALITY_TEST_SCRATCH` the folder for
+//! the run (a folder in the system's temporary directory by default).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,8 +17,6 @@ use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop
 use tauri::webview::InvokeRequest;
 use tauri::{Listener, WebviewWindow, WebviewWindowBuilder};
 
-const CODEX: &str = "/Users/ryan/dev/chirality-t3/scratch/engine/supplier/rust-v0.171.0/pkg/bin/codex";
-const SCRATCH: &str = "/Users/ryan/dev/chirality-t3/scratch/engine/tauri/headless";
 
 fn call(webview: &WebviewWindow<tauri::test::MockRuntime>, cmd: &str, args: Value) -> Result<Value, Value> {
     let request = InvokeRequest {
@@ -33,11 +33,12 @@ fn call(webview: &WebviewWindow<tauri::test::MockRuntime>, cmd: &str, args: Valu
 
 #[test]
 fn the_interface_reaches_the_real_engine_without_a_window() {
-    if !Path::new(CODEX).is_file() {
-        eprintln!("skipped: the pinned Codex is not at {CODEX}");
+    let Some(codex) = std::env::var_os("CHIRALITY_TEST_CODEX").map(PathBuf::from).filter(|p| p.is_file()) else {
+        eprintln!("skipped: set CHIRALITY_TEST_CODEX to the pinned Codex");
         return;
-    }
-    let root = PathBuf::from(SCRATCH).join(format!("run-{}", std::process::id()));
+    };
+    let scratch = std::env::var_os("CHIRALITY_TEST_SCRATCH").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("chirality-engine-tests"));
+    let root = scratch.join(format!("tauri-headless-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     for dir in ["home", "state", "project/notes"] {
         std::fs::create_dir_all(root.join(dir)).unwrap();
@@ -48,7 +49,7 @@ fn the_interface_reaches_the_real_engine_without_a_window() {
         unsafe { std::env::set_var(name, "http://127.0.0.1:9") };
     }
     let config = EngineConfig {
-        codex_bin: CODEX.into(),
+        codex_bin: codex,
         codex_home: Some(root.join("home")),
         state_dir: root.join("state"),
         workflow_roots: Vec::new(),

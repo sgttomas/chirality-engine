@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "The Chirality engine's interface parts: its client, generated types, state and components.",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

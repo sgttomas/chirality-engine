@@ -47,7 +47,23 @@ produced from recorded Codex sessions and a transport that replays it.
 ## Checks
 
 ```sh
-cargo test --workspace          # engine replays; the adapter headless against the pinned Codex
+cargo test --workspace          # engine replays; with the variables below, also against the pinned Codex
 cd packages/ui && npm ci && npm run typecheck && npm test
 npm run bindings                # regenerates the TypeScript bindings from the engine's types
 ```
+
+The tests that run the pinned Codex, or read a Library edition, are skipped
+unless these name them:
+
+| Variable | What it names |
+| --- | --- |
+| `CHIRALITY_TEST_CODEX` | The pinned `codex` binary (see the Supplier in `SPEC.md`) |
+| `CHIRALITY_TEST_LIBRARY` | A Chirality Library edition's `workflows` folder |
+| `CHIRALITY_TEST_SCRATCH` | Where those runs keep their folders; a folder in the system's temporary directory by default |
+
+Recording the transcripts again (`cargo test -p chirality-engine record_transcripts -- --ignored`)
+needs `CHIRALITY_TEST_CODEX`.
+
+## Licence
+
+MIT; see [LICENSE](LICENSE).

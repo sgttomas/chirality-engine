@@ -1,7 +1,7 @@
 # How T3 Code wraps the Codex app-server, and what to take from it
 
 Prior-art notes for the Rust engine (Codex app-server over JSON-RPC stdio) and the thin Tauri + React wrapper.
-Source: T3 Code shallow clone at `scratch/engine/ref/t3code` (MIT). Protocol at our pin: `scratch/engine/supplier/rust-v0.171.0/schema-ts` and `schema-json`.
+Source: T3 Code (`github.com/pingdotgg/t3code`, MIT licence, Copyright (c) 2026 T3 Tools Inc.; see [Attribution](#attribution)), read at commit `be9176761ce2f6597013678b4538c772ae507400`. Protocol at our pin: generated from the pinned Codex `rust-v0.171.0` (`codex app-server generate-ts` and `generate-json-schema`).
 Paths below are relative to the T3 Code root unless they start with `pin:` (which means `rust-v0.171.0/schema-ts/`).
 This is read-only research: T3 Code and Codex were not run.
 
@@ -333,3 +333,30 @@ Recommendation: copy the status priority, approvals and questions in the compose
 - **Hand-tuned heuristics** that exist because of the many providers or legacy recordings, for example the regexes that guess elicitation persistence and legacy inbound upgrades. Record fresh fixtures at our pin instead.
 
 Recommendation: copy the **protocol client, the replay transport and recorder, the turn policy mapping and the UI patterns**. Build the engine as a lean Rust core: one process manager, one JSON-RPC client, a thread, turn and item state machine, and a pending-request registry. Expose a narrow event stream to the Tauri wrapper.
+
+## Attribution
+
+The file names, identifiers, settings and argument shapes quoted in these notes
+come from T3 Code (`github.com/pingdotgg/t3code`), used under its licence:
+
+> MIT License
+>
+> Copyright (c) 2026 T3 Tools Inc.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.

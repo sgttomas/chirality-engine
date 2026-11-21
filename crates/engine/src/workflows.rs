@@ -90,22 +90,22 @@ impl crate::session::Inner {
 mod tests {
     use super::*;
 
-    pub(crate) const LIBRARY: &str = "/Users/ryan/dev/chirality-library-releases/library-v3.4.0/workflows";
-
     #[test]
     fn the_library_and_a_projects_own_workflows_are_listed() {
         let project = std::env::temp_dir().join(format!("chirality-workflows-{}", std::process::id()));
         let own = project.join(PROJECT_FOLDER).join("estimate");
         std::fs::create_dir_all(&own).unwrap();
         std::fs::write(own.join(FILE), "# Estimate\nSteps.\n").unwrap();
-        let roots = [PathBuf::from(LIBRARY)];
+        // A Library edition when `CHIRALITY_TEST_LIBRARY` names one.
+        let library = crate::testkit::harness::library();
+        let roots: Vec<PathBuf> = library.iter().cloned().collect();
         let all = list(&roots, &project);
         let local = all.iter().find(|w| w.source == PROJECT_SOURCE).unwrap();
         assert_eq!((local.name.as_str(), local.summary.as_str()), ("estimate", "Estimate"));
-        if Path::new(LIBRARY).is_dir() {
+        if let Some(library) = &library {
             let review = all.iter().find(|w| w.name == "coordinated-knowledge-work").unwrap();
             assert!(review.summary.starts_with("Use when related contributions"));
-            assert_eq!(review.source, LIBRARY);
+            assert_eq!(review.source, library.display().to_string());
             let picked = pick(&review.id, &roots, &project).unwrap();
             assert!(picked.body.contains("# Coordinated knowledge work"));
         }
