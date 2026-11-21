@@ -12,8 +12,10 @@ import "./styles/conversation.css";
 /** The selected thread (or a new one in the selected project): heading, turns and composer. */
 export function Conversation({ actions, className }: { actions?: ReactNode; className?: string }) {
   const projectId = useStore((s) => s.project);
+  // A project's new thread: the composer sits under the middle of the page, not at its foot.
+  const fresh = useStore((s) => !!s.project && !s.thread);
   return (
-    <main className={`conv ${className ?? ""}`}>
+    <main className={`conv ${fresh ? "conv--new" : ""} ${className ?? ""}`}>
       <ConversationHeader actions={actions} />
       <Turns />
       {projectId && <Composer />}
