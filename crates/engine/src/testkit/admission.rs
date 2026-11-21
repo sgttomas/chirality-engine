@@ -15,7 +15,7 @@ use crate::api::*;
 
 fn thread(cwd: &Path, name: &str) -> Value {
     json!({"id": "t", "forkedFromId": null, "parentThreadId": null, "preview": "", "model": "m", "reasoningEffort": null,
-           "updatedAt": 1, "status": {"type": "idle"}, "cwd": cwd.display().to_string(), "name": name, "turns": [], "historyMode": "paginated"})
+           "updatedAt": 1, "status": {"type": "idle"}, "cwd": cwd.display().to_string(), "name": name, "turns": []})
 }
 
 fn turn(id: &str) -> Value {

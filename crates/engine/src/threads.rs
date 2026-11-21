@@ -44,40 +44,40 @@ impl Inner {
             return Ok(());
         }
         let entry = self.known_thread(thread)?;
-        let _: p::ThreadResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
+        let _: p::ThreadResponse = self.thread_call(session, thread, "thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
         self.tool_calls.reopen_thread(&thread.0);
         session.mark_loaded(thread);
         Ok(())
     }
 
-    pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
-        let session = self.session()?;
-        self.known_thread(thread)?;
-        let read_at = self.store.renames();
-        let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
-        self.adopt_thread(&read.thread, Some(read_at));
-        // Every event after `seq` is applied to the view; one before it, the history holds.
-        let (turns, seq) = crate::history::read(&session, thread, read.thread.history_mode, || self.store.seq()).await?;
-        let summary = self.store.summary(thread).ok_or_else(|| EngineError::NotFound { what: format!("thread {}", thread.0) })?;
-        Ok(ThreadView { summary, turns, seq })
-    }
-
     pub(crate) async fn start_thread(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings) -> Result<ThreadId> {
         let project = self.project(project)?;
         let session = self.session()?;
+        // A first message that cannot be made makes no thread.
+        if let Some(id) = &message.workflow {
+            crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?;
+        }
         let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: self.config.tools.as_ref().map(crate::tools::specs) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
         let id = self.adopt_thread(&started.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
         session.mark_loaded(&id);
-        self.send(&id, message, settings).await?;
+        session.mark_fresh(&id);
+        if let Err(e) = self.send(&id, message, settings).await {
+            // No turn started, so Codex has not kept the thread: it is not listed.
+            self.forget_thread(&session, &id);
+            return Err(e);
+        }
         Ok(id)
     }
 
     pub(crate) async fn fork(&self, thread: &ThreadId, through: &TurnId) -> Result<ThreadId> {
         let session = self.session()?;
+        if self.known_thread(thread)?.active_turn.as_ref() == Some(through) {
+            return Err(EngineError::Invalid { message: "A turn can be forked once it has ended.".into() });
+        }
         self.ensure_loaded(&session, thread).await?;
         let params = json!({ "threadId": thread.0, "lastTurnId": through.0, "excludeTurns": true });
-        let forked: p::ThreadResponse = session.call("thread/fork", params).await?;
+        let forked: p::ThreadResponse = self.thread_call(&session, thread, "thread/fork", params).await?;
         let id = self.adopt_thread(&forked.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex forked the thread into another folder".into() })?;
         let parent = self.store.thread(thread);
         self.store.update_thread(&id, |e| {
@@ -95,13 +95,8 @@ impl Inner {
 
     pub(crate) async fn revert(&self, thread: &ThreadId, from: &TurnId) -> Result<()> {
         let session = self.session()?;
-        self.known_thread(thread)?;
-        let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
-        if read.thread.history_mode == p::HistoryMode::Legacy {
-            return Err(EngineError::Unsupported { message: "Codex can't remove turns from a thread kept in its older format.".into() });
-        }
         self.ensure_loaded(&session, thread).await?;
-        let _: p::ThreadResponse = session.call("thread/revert", json!({ "threadId": thread.0, "beforeTurnId": from.0 })).await?;
+        let _: p::ThreadResponse = self.thread_call(&session, thread, "thread/revert", json!({ "threadId": thread.0, "beforeTurnId": from.0 })).await?;
         self.store.update_thread(thread, |e| e.updated_at = crate::store::now());
         Ok(())
     }
@@ -110,7 +105,7 @@ impl Inner {
         let session = self.session()?;
         self.known_thread(thread)?;
         self.store.renamed();
-        session.call_value("thread/name/set", json!({ "threadId": thread.0, "name": title })).await?;
+        let _: serde_json::Value = self.thread_call(&session, thread, "thread/name/set", json!({ "threadId": thread.0, "name": title })).await?;
         self.store.update_thread(thread, |e| e.title = Some(title));
         Ok(())
     }
@@ -118,10 +113,12 @@ impl Inner {
     pub(crate) async fn archive(&self, thread: &ThreadId) -> Result<()> {
         let session = self.session()?;
         self.known_thread(thread)?;
-        session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
-        self.store.remove_thread(thread);
-        self.tool_calls.close_thread(&thread.0, false);
-        session.forget_loaded(thread);
+        match self.thread_call::<serde_json::Value>(&session, thread, "thread/archive", json!({ "threadId": thread.0 })).await {
+            // A thread Codex does not have is gone, as asked.
+            Ok(_) | Err(EngineError::NotFound { .. }) => {}
+            Err(e) => return Err(e),
+        }
+        self.forget_thread(&session, thread);
         Ok(())
     }
 

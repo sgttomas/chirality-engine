@@ -152,6 +152,15 @@ impl Ctx {
     /// Live, with `app_tools` in place of the scenario's own; the engine's
     /// start-up check of them is skipped, so Codex's own can be seen.
     pub async fn live_with(name: &str, record: bool, app_tools: Option<AppTools>) -> Ctx {
+        Ctx::live_inner(name, record, app_tools, None).await
+    }
+
+    /// Live, with `watch` seeing every frame between the engine and Codex.
+    pub async fn live_watched(name: &str, watch: crate::rpc::Tap) -> Ctx {
+        Ctx::live_inner(name, false, None, Some(watch)).await
+    }
+
+    async fn live_inner(name: &str, record: bool, app_tools: Option<AppTools>, watch: Option<crate::rpc::Tap>) -> Ctx {
         let run = Run::new(&scratch(), name);
         let stub = Stub::start().await;
         let tools = apptools::for_scenario(name);
@@ -164,7 +173,7 @@ impl Ctx {
         let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings, env: Some(run.environment()), cwd: Some(run.project()) };
         let recorder = record.then(Recorder::new);
         let mut connector: Arc<dyn crate::transport::Connector> = Arc::new(ProcessConnector { launch });
-        let mut tap = None;
+        let mut tap = watch;
         if let Some(recorder) = &recorder {
             connector = recorder.connector(connector);
             tap = Some(recorder.tap());

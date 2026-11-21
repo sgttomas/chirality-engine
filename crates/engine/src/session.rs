@@ -64,6 +64,9 @@ pub(crate) struct Session {
     stopper: Arc<dyn Stopper>,
     /// Threads this process has started, resumed or forked.
     loaded: Mutex<HashSet<ThreadId>>,
+    /// Threads the engine started in this process and has not yet read: Codex
+    /// may not have kept their first message.
+    fresh: Mutex<HashSet<ThreadId>>,
 }
 
 impl Session {
@@ -78,6 +81,21 @@ impl Session {
     /// Codex has unloaded the thread; the next turn resumes it.
     pub fn forget_loaded(&self, thread: &ThreadId) {
         self.loaded.lock().unwrap().remove(thread);
+        self.fresh.lock().unwrap().remove(thread);
+    }
+
+    /// The engine has just started the thread in this process.
+    pub fn mark_fresh(&self, thread: &ThreadId) {
+        self.fresh.lock().unwrap().insert(thread.clone());
+    }
+
+    pub fn is_fresh(&self, thread: &ThreadId) -> bool {
+        self.fresh.lock().unwrap().contains(thread)
+    }
+
+    /// The thread has been read: Codex has kept it.
+    pub fn mark_read(&self, thread: &ThreadId) {
+        self.fresh.lock().unwrap().remove(thread);
     }
 
     pub async fn call<R: DeserializeOwned>(&self, method: &str, params: impl Serialize) -> Result<R> {
@@ -287,7 +305,7 @@ impl Inner {
                 stopper.kill();
                 Some(stopper.reaped())
             } else {
-                *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+                *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default(), fresh: Mutex::default() }));
                 self.tool_calls.open(generation);
                 self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
                 None

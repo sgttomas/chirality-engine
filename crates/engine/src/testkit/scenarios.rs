@@ -8,7 +8,7 @@ use super::harness::{Ctx, library, settings, text};
 use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, tool_call};
 use crate::api::*;
 
-pub use super::history::{legacy_thread, unkept_thread};
+pub use super::history::unkept_thread;
 
 async fn project(ctx: &Ctx) -> Project {
     ctx.engine.add_project(ctx.run.project()).await.expect("the project is added")
