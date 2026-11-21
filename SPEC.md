@@ -103,6 +103,80 @@ An application consumes both from this repository at a pinned revision (a git
 dependency in Cargo, and `#<revision>::path:packages/ui` in npm), fetched with
 the developer's own access; no registry.
 
+## Proposed: assignment between threads
+
+Not built. For the owner to question before it is.
+
+Codex's subagents are the agent's own helpers: they run inside its turn, and
+the person can watch and stop them, but Codex refuses a message from the
+person to one. Assignment is the other relation T3 Code has: one thread gives
+work to another, ordinary thread; the two exchange messages; the person can
+open, talk to and direct either. Codex does not offer it, so the engine
+provides it, with tools of its own given to the agent as an application's are.
+
+**What the agent can do.** Engine tools in the namespace `chirality`, on every
+thread the engine starts, beside the application's tools:
+
+- `assign`: start a new thread in the same project with a title and a brief,
+  optionally a workflow picked into the brief, and a model and reasoning level
+  from those Codex lists. Returns the new thread's id. Its access level is the
+  assigner's, or a lower one the call names; never higher.
+- `message`: send text to a thread this one assigned or was assigned by.
+- `assignments`: those threads, each with its title and whether it is running,
+  idle or waiting on the person.
+- `close`: end an assignment this thread made; no more reports come from it.
+
+**What happens.**
+
+- The brief is the assigned thread's first message, marked as from the
+  assigning thread. A `message` is the same: a message in the receiving
+  thread, marked with the sender's id and title, which the interface shows as
+  from that thread, not from the person.
+- When a turn of the assigned thread that its assigner started (by the brief
+  or a message) ends, its last reply is delivered to the assigner as a
+  message, with how the turn ended (completed, stopped, failed). Turns the
+  person starts in the assigned thread report nothing unless its agent sends a
+  `message`.
+- A message to an idle thread starts a turn in it; to a running one it waits
+  until that turn ends (it does not steer). Messages to a thread are delivered
+  in order.
+- A run of turns started by deliveries, with nothing from the person in
+  between, stops after a bound: further deliveries wait, and the threads
+  concerned wait on the person, who lets them go on or not.
+- Approvals and questions in an assigned thread go to the person on that
+  thread, as on any thread. Its assigner is not told; it hears when the turn
+  ends.
+- Archiving either thread ends the assignment. A subagent does not get these
+  tools (as with the application's), so it cannot assign.
+
+**What the person sees.** Assigned threads are ordinary threads, at the same
+level in the list. Each shows which thread assigned it; the assigner's
+conversation shows each `assign` and `message` as an item that opens the other
+thread. The person can open, send to and stop either, at any time.
+
+**What the engine keeps.** Nothing Codex does not. The relation is read from
+the assigned thread's first message, which names its assigner (Codex's thread
+listing carries it as the preview). Reports and messages are messages in
+Codex's history. Deliveries waiting for a running turn, and the run of
+automatic turns, are held in memory: a delivery waiting when the app quits is
+not made, and the person finds the result in the assigned thread.
+
+**To establish at the pin first.** That the listing's preview carries the
+marker whole; that the engine can start a turn on another thread while
+answering a tool call, and answer the call without waiting for that turn; that
+a thread started before the engine had these tools cannot assign (Codex gives
+a thread its tools at start, and a fork keeps them).
+
+**Open for the owner.**
+
+1. Whether turns the person starts in an assigned thread report back too
+   (proposed: no).
+2. The bound on automatic turns (proposed: twenty, across the threads
+   concerned), and whether an application may set it.
+3. Whether the assigning agent may choose the assigned thread's model
+   (proposed: yes, from Codex's list) and access (proposed: equal or lower).
+4. Whether an assignment may cross projects (proposed: no, the same folder).
+
 ## Known limits
 
 - A legacy-history exchange can stay doubled in a view the person switches away from while its read is pending, and can show doubled briefly before the completion read returns.
