@@ -26,9 +26,10 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 :where(.chirality) .chip--workflow { border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); color: var(--accent-ink); }
-:where(.chirality) .chip-x { border: 0; padding: 0 0 0 2px; background: transparent; color: var(--ink-faint); display: inline-grid; }
-:where(.chirality) .chip-x:hover { color: var(--ink) !important; }
-:where(.chirality) .chip-x .icon { width: 11px; height: 11px; }
+:where(.chirality) .chip-x, :where(.chirality) .chip-pin { border: 0; padding: 0 0 0 2px; background: transparent; color: var(--ink-faint); display: inline-grid; }
+:where(.chirality) .chip-x:hover, :where(.chirality) .chip-pin:hover { color: var(--ink) !important; }
+:where(.chirality) .chip-pin[aria-pressed="true"] { color: var(--accent-ink); }
+:where(.chirality) .chip-x .icon, :where(.chirality) .chip-pin .icon { width: 11px; height: 11px; }
 
 :where(.chirality) .icon { flex: none; vertical-align: -2px; }
 :where(.chirality) button.is-on { background: var(--selected); color: var(--ink); }

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 
-import type { Attachment, Message, TurnSettings, Workflow } from "../../engine/types";
+import type { Attachment, Message, ThreadId, TurnSettings, Workflow } from "../../engine/types";
 import { isRunning, pendingFor, shortPath } from "../../state/selectors";
 import { remember, remembered, resolveSettings } from "../../state/settings";
 import { useProjectRoot, useStore, useStoreHandle } from "../../state/store";
@@ -20,10 +20,14 @@ const imageExt = /\.(png|jpe?g|gif|webp|heic|tiff?)$/i;
  * approval or question waiting on the person. */
 export function Composer() {
   const key = useStore((s) => s.thread ?? s.project);
-  return key ? <ThreadComposer key={key} /> : null;
+  const kept = useRef<Kept | null>(null);
+  return key ? <ThreadComposer key={key} kept={kept} /> : null;
 }
 
-function ThreadComposer() {
+/** A workflow kept attached when its message started a thread, for that thread's composer. */
+type Kept = { thread: ThreadId; workflow: Workflow };
+
+function ThreadComposer({ kept }: { kept: RefObject<Kept | null> }) {
   const store = useStoreHandle();
   const thread = useStore((s) => s.thread);
   const project = useStore((s) => s.project)!;
@@ -37,7 +41,10 @@ function ThreadComposer() {
 
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [workflow, setWorkflow] = useState<Workflow | null>(null);
+  const carried = kept.current?.thread === thread ? kept.current.workflow : null;
+  const [workflow, setWorkflow] = useState<Workflow | null>(carried);
+  // A picked workflow goes with the next message only, unless the person keeps it attached.
+  const [keep, setKeep] = useState(carried !== null);
   const [settings, setSettings] = useState<TurnSettings>(() => resolveSettings(models, summary?.settings ?? remembered()));
   const [mention, setMention] = useState<Mention | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -45,6 +52,9 @@ function ThreadComposer() {
   useEffect(() => {
     if (!pending) input.current?.focus();
   }, [pending]);
+  useEffect(() => {
+    if (kept.current?.thread === thread) kept.current = null;
+  }, [kept, thread]);
 
   const choose = (next: TurnSettings) => {
     setSettings(next);
@@ -57,13 +67,20 @@ function ThreadComposer() {
     const message: Message = { text: body, attachments, workflow: workflow?.id ?? null };
     setText("");
     setAttachments([]);
+    if (!keep) setWorkflow(null);
     setMention(null);
     if (thread) {
       await store.attempt(() => store.engine.send(thread, message, settings));
     } else {
       const id = await store.attempt(() => store.engine.startThread(project, message, settings));
+      if (id && keep && workflow) kept.current = { thread: id, workflow };
       if (id) await store.selectThread(id);
     }
+  };
+
+  const pick = (next: Workflow | null) => {
+    setWorkflow(next);
+    if (!next) setKeep(false);
   };
 
   const stop = () => thread && store.attempt(() => store.engine.interrupt(thread));
@@ -103,7 +120,10 @@ function ThreadComposer() {
             {workflow && (
               <span className="chip chip--workflow">
                 <Icon name="book" /> {workflow.name}
-                <button className="chip-x" aria-label={`Remove ${workflow.name}`} onClick={() => setWorkflow(null)}>
+                <button className="chip-pin" aria-label="Keep attached" title="Keep attached" aria-pressed={keep} onClick={() => setKeep((k) => !k)}>
+                  <Icon name="pin" />
+                </button>
+                <button className="chip-x" aria-label={`Remove ${workflow.name}`} onClick={() => pick(null)}>
                   <Icon name="x" />
                 </button>
               </span>
@@ -140,7 +160,7 @@ function ThreadComposer() {
           <button className="quiet" aria-label="Reference a file" title="Reference a file" onClick={() => onChange(`${text}@`, text.length + 1)}>
             <Icon name="at" />
           </button>
-          <WorkflowPicker workflows={workflows} picked={workflow} onPick={setWorkflow} />
+          <WorkflowPicker workflows={workflows} picked={workflow} onPick={pick} />
           <Controls models={models} settings={settings} onChange={choose} />
           <span className="composer-spacer" />
           {running && text.trim() === "" ? (

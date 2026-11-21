@@ -131,6 +131,48 @@ describe("a conversation", () => {
     expect(screen.getByRole("heading", { name: "Basis of estimate" })).toBeInTheDocument();
   });
 
+  const pickBasis = async () => {
+    await userEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    await userEvent.click(screen.getByRole("option", { name: /Basis of estimate/ }));
+  };
+  const userMessages = (store: Awaited<ReturnType<typeof mount>>["store"]) =>
+    store.get().model!.views[store.get().thread!].turns.flatMap((t) => t.items.map((i) => i.body).filter((b) => b.kind === "userMessage"));
+
+  it("sends a picked workflow with one message", async () => {
+    const { store } = await mount(fakeEngine({ autoAnswer: () => ({ kind: "allow" }) }));
+    await type("Look at the deck.");
+    await enter();
+    await pickBasis();
+    await type("Write the basis for the deck.");
+    await enter();
+    expect(screen.queryByLabelText("Remove Basis of estimate")).not.toBeInTheDocument();
+    await type("Now the piles.");
+    await enter();
+    expect(userMessages(store).map((m) => (m as { workflow: string | null }).workflow)).toEqual([null, "wf-basis", null]);
+  });
+
+  it("keeps a pinned workflow attached to every message", async () => {
+    const { store } = await mount(fakeEngine({ autoAnswer: () => ({ kind: "allow" }) }));
+    await pickBasis();
+    await userEvent.click(screen.getByRole("button", { name: "Keep attached" }));
+    expect(screen.getByRole("button", { name: "Keep attached" })).toHaveAttribute("aria-pressed", "true");
+    await type("Write the basis for the deck.");
+    await enter();
+    expect(screen.getByRole("button", { name: "Keep attached" })).toHaveAttribute("aria-pressed", "true");
+    await type("Now the piles.");
+    await enter();
+    expect(userMessages(store).map((m) => (m as { workflow: string | null }).workflow)).toEqual(["wf-basis", "wf-basis"]);
+  });
+
+  it("unpins a workflow when it is removed", async () => {
+    await mount(fakeEngine());
+    await pickBasis();
+    await userEvent.click(screen.getByRole("button", { name: "Keep attached" }));
+    await userEvent.click(screen.getByLabelText("Remove Basis of estimate"));
+    await pickBasis();
+    expect(screen.getByRole("button", { name: "Keep attached" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("remembers the last model, reasoning level and access", async () => {
     const first = await mount(fakeEngine());
     await userEvent.click(screen.getByRole("button", { name: "GPT-5.5" }));
