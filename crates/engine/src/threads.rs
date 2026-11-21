@@ -7,26 +7,9 @@ use serde_json::json;
 
 use crate::api::*;
 use crate::protocol as p;
-use crate::rpc::RpcError;
-use crate::session::{Inner, Session, engine_error};
+use crate::session::{Inner, Session};
 
 const PAGE: u32 = 100;
-const METHOD_NOT_FOUND: i64 = -32601;
-
-async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
-    let mut turns = Vec::new();
-    let mut cursor: Option<String> = None;
-    loop {
-        let params = json!({ "threadId": thread.0, "cursor": cursor, "limit": PAGE, "sortDirection": "asc", "itemsView": "full" });
-        let page: p::TurnsListResponse = session.client.request("thread/turns/list", params).await?;
-        let empty = page.data.is_empty();
-        turns.extend(page.data.iter().map(crate::mapping::turn));
-        match page.next_cursor {
-            Some(next) if !empty => cursor = Some(next),
-            _ => return Ok(turns),
-        }
-    }
-}
 
 impl Inner {
     /// Reads a project's threads from Codex into the snapshot.
@@ -70,19 +53,11 @@ impl Inner {
     pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
         let session = self.session()?;
         self.known_thread(thread)?;
-        // Every event after this is applied to the view; one before it, the history holds.
-        let seq = self.store.seq();
         let read_at = self.store.renames();
         let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
         self.adopt_thread(&read.thread, Some(read_at));
-        let turns = match list_turns(&session, thread).await {
-            Err(RpcError::Server { code: METHOD_NOT_FOUND, .. }) => {
-                // Threads kept in Codex's older history format cannot be paged; read them whole.
-                let whole: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0, "includeTurns": true })).await?;
-                whole.thread.turns.iter().map(crate::mapping::turn).collect()
-            }
-            other => other.map_err(engine_error)?,
-        };
+        // Every event after `seq` is applied to the view; one before it, the history holds.
+        let (turns, seq) = crate::history::read(&session, thread, read.thread.history_mode, || self.store.seq()).await?;
         let summary = self.store.summary(thread).ok_or_else(|| EngineError::NotFound { what: format!("thread {}", thread.0) })?;
         Ok(ThreadView { summary, turns, seq })
     }
@@ -120,6 +95,11 @@ impl Inner {
 
     pub(crate) async fn revert(&self, thread: &ThreadId, from: &TurnId) -> Result<()> {
         let session = self.session()?;
+        self.known_thread(thread)?;
+        let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
+        if read.thread.history_mode == p::HistoryMode::Legacy {
+            return Err(EngineError::Unsupported { message: "Codex can't remove turns from a thread kept in its older format.".into() });
+        }
         self.ensure_loaded(&session, thread).await?;
         let _: p::ThreadResponse = session.call("thread/revert", json!({ "threadId": thread.0, "beforeTurnId": from.0 })).await?;
         self.store.update_thread(thread, |e| e.updated_at = crate::store::now());

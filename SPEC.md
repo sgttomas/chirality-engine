@@ -108,6 +108,7 @@ the developer's own access; no registry.
 - A legacy-history exchange can stay doubled in a view the person switches away from while its read is pending, and can show doubled briefly before the completion read returns.
 - A completion read can drop the first streamed chunk of a follow-up sent before that read returns.
 - A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.
+- Codex cannot revert a thread kept in its legacy history format (older threads, and those made by other Codex clients).
 
 ## Non-goals
 

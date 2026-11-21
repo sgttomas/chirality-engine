@@ -3,4 +3,4 @@
 /**
  * Why an engine call failed, in words an interface can show.
  */
-export type EngineError = { "kind": "codexUnavailable", message: string, } | { "kind": "codex", message: string, } | { "kind": "notFound", what: string, } | { "kind": "invalid", message: string, };
+export type EngineError = { "kind": "codexUnavailable", message: string, } | { "kind": "codex", message: string, } | { "kind": "notFound", what: string, } | { "kind": "invalid", message: string, } | { "kind": "unsupported", message: string, } | { "kind": "notReady", message: string, };

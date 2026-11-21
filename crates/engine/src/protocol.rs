@@ -115,6 +115,19 @@ pub struct Thread {
     pub name: Option<String>,
     #[serde(default)]
     pub turns: Vec<Turn>,
+    /// How Codex keeps the thread's history; Codex's own default is legacy.
+    #[serde(default)]
+    pub history_mode: HistoryMode,
+}
+
+/// Paginated threads are read a page of turns at a time; legacy ones (older
+/// threads, and those made by other Codex clients) only whole.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryMode {
+    #[default]
+    Legacy,
+    Paginated,
 }
 
 #[derive(Clone, Debug, Deserialize)]

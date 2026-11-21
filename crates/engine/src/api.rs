@@ -525,6 +525,13 @@ pub enum EngineError {
     NotFound { what: String },
     #[error("{message}")]
     Invalid { message: String },
+    /// Codex cannot do this with this thread.
+    #[error("{message}")]
+    Unsupported { message: String },
+    /// Codex cannot do this yet; it can once Codex has caught up (a new
+    /// thread's history, before Codex has kept its first message).
+    #[error("{message}")]
+    NotReady { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

@@ -8,6 +8,7 @@ pub mod api;
 mod account;
 mod calls;
 mod events;
+mod history;
 mod mapping;
 mod projects;
 mod protocol;
