@@ -117,6 +117,35 @@ describe("a view and the turn running in it", () => {
     expect(shown.items[1]).toEqual(plan.type === "item" && plan.item);
   });
 
+  it.each([true, false])("keeps a read held open, and the plan, when the completion read overtaking it succeeds: %s (finding 2)", async (succeeds) => {
+    const { initial, firstRead, view, frames } = overlap("plan") as Overlap & { firstRead: ThreadView };
+    const thread = view.summary.id;
+    let reads = 0;
+    let answerFirst = (_: ThreadView) => {};
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return initial;
+      if (command !== "read_thread") return [];
+      if (reads++ === 0) return new Promise((resolve) => (answerFirst = resolve));
+      if (succeeds) return view;
+      throw { kind: "codex", message: "read failed" };
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    const selecting = store.selectThread(thread);
+    await tick();
+    for (const n of frames) wire.emit(n.seq, n.event);
+    await tick();
+    answerFirst(firstRead);
+    await selecting;
+    await tick();
+    const kinds = store.get().model!.views[thread]?.turns.at(-1)?.items.map((i) => i.body.kind);
+    const error = store.get().error;
+    store.dispose();
+    expect(reads).toBe(2);
+    expect(kinds).toEqual(["userMessage", "plan", "agentMessage"]);
+    expect(error).toBeNull();
+  });
+
   it("streams text into a thread opened mid-reply, and settles on the turn's end", async () => {
     const { initial, view, frames } = overlap("streaming");
     let reads = 0;

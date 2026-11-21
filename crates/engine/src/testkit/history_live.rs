@@ -1,71 +1,38 @@
-//! Live races between a read and Codex keeping a new thread's history,
-//! each synchronised on Codex's refusal seen on the wire.
+//! Live: a new thread read before Codex has kept its first message, and the
+//! interface's own start-then-read, rebuilt from the read and the events after
+//! its number, are item for item what Codex keeps once the turn is done.
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use serde_json::{Value, json};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 use super::harness::{Ctx, codex_present, settings, text};
 use super::history::{codex_thread, reply};
 use crate::api::*;
-use crate::rpc::{Direction, Tap};
 
-/// A watcher that tells, by the thread it named, each history read Codex refused.
-fn refusals() -> (Tap, mpsc::UnboundedReceiver<String>) {
-    let (tx, rx) = mpsc::unbounded_channel();
-    let asked: Arc<Mutex<Vec<(i64, String)>>> = Arc::default();
-    let tap: Tap = Arc::new(move |direction, line| {
-        let Ok(frame) = serde_json::from_str::<Value>(line) else { return };
-        let id = frame["id"].as_i64();
-        match direction {
-            Direction::Out if frame["method"] == "thread/turns/list" || frame["params"]["includeTurns"] == true => {
-                asked.lock().unwrap().push((id.unwrap_or(-1), frame["params"]["threadId"].as_str().unwrap_or("").to_string()));
-            }
-            Direction::In if frame.get("error").is_some() && frame.get("method").is_none() => {
-                if let Some((_, thread)) = asked.lock().unwrap().iter().find(|(asked, _)| Some(*asked) == id) {
-                    let _ = tx.send(thread.clone());
+/// A view with the events after its number applied, as an interface applies them:
+/// an item replaces the one with its id (or is added), streamed text extends it.
+fn rebuilt(view: &ThreadView, events: &[Numbered]) -> Vec<(String, ItemBody)> {
+    let mut items: Vec<(String, ItemBody)> = view.turns.iter().flat_map(|t| &t.items).map(|i| (i.id.0.clone(), i.body.clone())).collect();
+    for n in events.iter().filter(|n| n.seq > view.seq) {
+        match &n.event {
+            Event::Item { thread, item, .. } if thread == &view.summary.id => match items.iter_mut().find(|(id, _)| id == &item.id.0) {
+                Some(found) => found.1 = item.body.clone(),
+                None => items.push((item.id.0.clone(), item.body.clone())),
+            },
+            Event::ItemDelta { thread, item, kind: TextKind::AgentMessage, text, .. } if thread == &view.summary.id => {
+                match items.iter_mut().find(|(id, _)| id == &item.0) {
+                    Some((_, ItemBody::AgentMessage { text: shown })) => shown.push_str(text),
+                    Some(_) => {}
+                    None => items.push((item.0.clone(), ItemBody::AgentMessage { text: text.clone() })),
                 }
             }
             _ => {}
         }
-    });
-    (tap, rx)
+    }
+    items
 }
 
-async fn refused(rx: &mut mpsc::UnboundedReceiver<String>, thread: &ThreadId) {
-    let wait = async {
-        while let Some(t) = rx.recv().await {
-            if t == thread.0 {
-                return;
-            }
-        }
-    };
-    tokio::time::timeout(Duration::from_secs(10), wait).await.expect("Codex refuses the read before the first message");
-}
-
-/// The texts a view shows once the events after its number are applied: the
-/// items it holds, and the items and streamed text of those events.
-fn shown(view: &ThreadView, events: &[Numbered]) -> HashSet<String> {
-    let mut texts = HashSet::new();
-    let mut bodies: Vec<&ItemBody> = view.turns.iter().flat_map(|t| &t.items).map(|i| &i.body).collect();
-    for n in events.iter().filter(|n| n.seq > view.seq) {
-        match &n.event {
-            Event::Item { thread, item, .. } if thread == &view.summary.id => bodies.push(&item.body),
-            Event::ItemDelta { thread, text, kind: TextKind::AgentMessage, .. } if thread == &view.summary.id => {
-                texts.insert(text.clone());
-            }
-            _ => {}
-        }
-    }
-    for body in bodies {
-        if let ItemBody::UserMessage { text, .. } | ItemBody::AgentMessage { text } = body {
-            texts.insert(text.clone());
-        }
-    }
-    texts
+fn kept(view: &ThreadView) -> Vec<(String, ItemBody)> {
+    view.turns.iter().flat_map(|t| &t.items).map(|i| (i.id.0.clone(), i.body.clone())).collect()
 }
 
 fn drain(rx: &mut broadcast::Receiver<Numbered>, into: &mut Vec<Numbered>) {
@@ -74,67 +41,36 @@ fn drain(rx: &mut broadcast::Receiver<Numbered>, into: &mut Vec<Numbered>) {
     }
 }
 
-/// A read that reaches Codex before it has kept a new thread's first message,
-/// as the interface's read of a thread it has just started can: once Codex
-/// has kept it, the read and the events after its number show the message
-/// and the reply streamed during the wait.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_read_racing_a_first_message_loses_nothing() {
+async fn a_new_threads_first_turn_is_whole_from_its_first_read_and_events() {
     if !codex_present() {
         eprintln!("skipped: CHIRALITY_TEST_CODEX names the pinned Codex");
         return;
     }
-    let (tap, mut refusals) = refusals();
-    let mut ctx = Ctx::live_watched("first_message_race", tap).await;
+    let mut ctx = Ctx::live("first_read", false).await;
     let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
     let mut events = ctx.engine.subscribe();
     let mut seen = Vec::new();
 
-    let thread = codex_thread(&ctx, &project).await;
-    let reading = tokio::spawn({
-        let (engine, thread) = (ctx.engine.clone(), thread.clone());
-        async move { engine.read_thread(&thread).await }
-    });
-    refused(&mut refusals, &thread).await;
+    // Read before Codex has the first message: empty, numbered from before the thread started.
+    let (thread, _) = codex_thread(&ctx, &project).await;
+    let early = ctx.engine.read_thread(&thread).await.unwrap();
+    assert!(early.turns.is_empty());
     reply(&mut ctx, &thread, "one").await;
-    let view = reading.await.unwrap().expect("the read waits for Codex to keep the message");
     drain(&mut events, &mut seen);
-    let texts = shown(&view, &seen);
-    assert!(texts.contains("STUB[one] go") && texts.contains("one"), "{texts:?}, view {view:?}");
+    let whole = kept(&ctx.engine.read_thread(&thread).await.unwrap());
+    assert_eq!(whole.len(), 2, "{whole:?}");
+    assert_eq!(rebuilt(&early, &seen), whole);
 
     // The interface's own way: start the thread, then read it at once.
     for key in ["a", "b", "c", "d", "e"] {
         ctx.script(key, super::stub::says(key, &format!("reply {key}")));
         let thread = ctx.engine.start_thread(&project.id, text(&format!("STUB[{key}] go")), settings(Access::Ask)).await.unwrap();
-        let view = ctx.engine.read_thread(&thread).await.expect("the new thread reads");
+        let first = ctx.engine.read_thread(&thread).await.expect("the new thread reads");
         ctx.turn_ended(&thread).await;
         drain(&mut events, &mut seen);
-        let texts = shown(&view, &seen);
-        assert!(texts.contains(&format!("STUB[{key}] go")) && texts.contains(&format!("reply {key}")), "{texts:?}, view {view:?}");
+        let whole = kept(&ctx.engine.read_thread(&thread).await.unwrap());
+        assert_eq!(rebuilt(&first, &seen), whole, "thread {key}");
     }
-    ctx.finish("first_message_race").await;
-}
-
-/// A thread deleted while a read waits for its first message is not found.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_thread_deleted_while_a_read_waits_is_not_found() {
-    if !codex_present() {
-        eprintln!("skipped: CHIRALITY_TEST_CODEX names the pinned Codex");
-        return;
-    }
-    let (tap, mut refusals) = refusals();
-    let ctx = Ctx::live_watched("deleted_while_waiting", tap).await;
-    let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
-    let thread = codex_thread(&ctx, &project).await;
-    let reading = tokio::spawn({
-        let (engine, thread) = (ctx.engine.clone(), thread.clone());
-        async move { engine.read_thread(&thread).await }
-    });
-    refused(&mut refusals, &thread).await;
-    let session = ctx.engine.inner().session().unwrap();
-    session.client.request_value("thread/delete", json!({ "threadId": thread.0 })).await.expect("Codex deletes the thread");
-    let e = reading.await.unwrap().unwrap_err();
-    assert!(matches!(e, EngineError::NotFound { .. }), "{e:?}");
-    assert!(ctx.engine.snapshot().threads.iter().all(|t| t.id != thread));
-    ctx.finish("deleted_while_waiting").await;
+    ctx.finish("first_read").await;
 }

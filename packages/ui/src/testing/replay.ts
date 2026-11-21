@@ -123,6 +123,8 @@ export class ReplayTransport implements Transport {
     if (read) return structuredClone(read.view);
     const summary = [...this.data.events.slice(0, this.at)].reverse().find((e) => e.type === "thread" && e.thread.id === thread);
     if (summary?.type !== "thread") throw { kind: "notFound", what: thread };
-    return { summary: structuredClone(summary.thread), turns: [], seq: this.data.before.seq + this.at };
+    // As the engine reads a thread it started that Codex has not kept yet: numbered from before its first event.
+    const first = this.data.events.findIndex((e) => threadOf(e) === thread);
+    return { summary: structuredClone(summary.thread), turns: [], seq: this.data.before.seq + first };
   }
 }

@@ -99,7 +99,7 @@ impl Inner {
         // every summary the turn causes has them; they are kept only once Codex
         // has taken the turn.
         self.store.update_thread(thread, |e| e.starting = Some(settings));
-        let started: p::TurnResponse = match self.thread_call(&session, thread, "turn/start", serde_json::to_value(params).expect("turn/start params")).await {
+        let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {
                 self.store.update_thread(thread, |entry| entry.starting = None);

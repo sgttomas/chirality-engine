@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Message } from "../engine/types";
-import { mount, settle } from "../testing/render";
+import { mount, settle, testHost } from "../testing/render";
 import { engineData, ReplayTransport } from "../testing/replay";
 
 const estimate = engineData("workflow_turn").workflows[0];
@@ -171,10 +171,90 @@ describe("a workflow in the composer", () => {
   });
 });
 
+/** Holds the engine's answers to `call` until released, counting the calls. */
+function hold<K extends "send" | "startThread">(engine: ReplayTransport, call: K) {
+  const answer = engine.client[call] as (...args: unknown[]) => Promise<unknown>;
+  const held = { calls: 0, release: () => {} };
+  (engine.client as unknown as Record<string, unknown>)[call] = (...args: unknown[]) => {
+    held.calls++;
+    return new Promise((resolve) => (held.release = () => resolve(answer(...args))));
+  };
+  return held;
+}
+
+describe("a draft while its message is with the engine (finding 1)", () => {
+  it("keeps what was typed while a new thread started, for that thread, and sends once", async () => {
+    const { engine, store } = await inNewThread();
+    const start = hold(engine, "startThread");
+    await type("First");
+    await enter();
+    await type("Second");
+    await enter();
+    await act(async () => start.release());
+    await settle();
+    expect(start.calls).toBe(1);
+    expect(engine.sent.map((s) => (s.args.message as Message).text)).toEqual(["First"]);
+    expect(store.get().thread).not.toBeNull();
+    expect(composer().value).toBe("Second");
+  });
+
+  it("keeps an attachment added while a message was sending, and only that one goes next", async () => {
+    const { engine } = await inThread();
+    const send = hold(engine, "send");
+    const pickFiles = testHost.pickFiles;
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Attach files" }));
+      await type("With A.");
+      await enter();
+      testHost.pickFiles = async () => ["/Users/person/Desktop/plan-b.pdf"];
+      await userEvent.click(screen.getByRole("button", { name: "Attach files" }));
+      await act(async () => send.release());
+      await settle();
+      await type("With B.");
+      await enter();
+      await act(async () => send.release());
+      await settle();
+    } finally {
+      testHost.pickFiles = pickFiles;
+    }
+    const carried = engine.sent.map((s) => (s.args.message as Message).attachments.map((a) => a.path));
+    expect(carried).toEqual([["/Users/person/Desktop/site-photo.jpg"], ["/Users/person/Desktop/plan-b.pdf"]]);
+  });
+
+  it("does not send a second message from a thread left and come back to while the first is pending", async () => {
+    const { engine, store, thread } = await inThread();
+    const send = hold(engine, "send");
+    await type("One.");
+    await enter();
+    await act(async () => store.selectProject(store.get().model!.snapshot.projects[0].id));
+    await settle();
+    await act(() => store.selectThread(thread));
+    await settle();
+    await type("Two.");
+    await enter();
+    expect(send.calls).toBe(1);
+    expect(composer().value).toBe("Two.");
+  });
+});
+
+describe("a new thread read before Codex kept it (finding 5)", () => {
+  it("shows the first reply streamed before the thread was read", async () => {
+    const engine = recording();
+    const { store } = await mount(engine.client);
+    await act(async () => void engine.play((e) => e.type === "itemDelta"));
+    await act(() => store.selectThread(store.get().model!.snapshot.threads[0].id));
+    await settle();
+    const view = store.get().model!.views[store.get().thread!];
+    expect(view.turns[0].items.map((i) => i.body.kind)).toEqual(["userMessage", "agentMessage"]);
+    expect(screen.getByText("STUB[flow] Estimate this")).toBeInTheDocument();
+    expect(screen.getByText(/^Following the workflow\./)).toBeInTheDocument();
+  });
+});
+
 describe("errors in the conversation", () => {
   it("keeps a refused revert's error shown", async () => {
     const { engine } = await inThread();
-    engine.refuse.set("revert", { kind: "unsupported", message: "Codex can't remove these turns." });
+    engine.refuse.set("revert", { kind: "codex", message: "Codex can't remove these turns." });
     await userEvent.click(screen.getByRole("button", { name: /Revert/ }));
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     await settle();

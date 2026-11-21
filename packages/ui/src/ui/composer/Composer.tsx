@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { Attachment, Message, TurnSettings, Workflow } from "../../engine/types";
+import type { Attachment, TurnSettings, Workflow } from "../../engine/types";
+import { draftKey, emptyDraft, type Draft } from "../../state/drafts";
 import { isRunning, pendingFor, shortPath } from "../../state/selectors";
 import { remember, remembered, resolveSettings } from "../../state/settings";
 import { useProjectRoot, useStore, useStoreHandle } from "../../state/store";
@@ -23,9 +24,6 @@ export function Composer() {
   return key ? <ThreadComposer key={key} /> : null;
 }
 
-/** A picked workflow, and whether the person keeps it attached to every message. */
-type Picked = { workflow: Workflow | null; keep: boolean };
-
 function ThreadComposer() {
   const store = useStoreHandle();
   const thread = useStore((s) => s.thread);
@@ -37,23 +35,14 @@ function ThreadComposer() {
   const workflows = useStore((s) => s.workflows[project]) ?? [];
   const running = isRunning(view);
   const root = useProjectRoot();
-  // The pin is kept with its thread (or the project's new thread) for the session.
-  const pinKey = thread ?? `new:${project}`;
+  // The draft lives in the store, with its thread (or the project's new thread).
+  const key = draftKey(thread, project);
+  const { text, attachments, workflow, keep } = useStore((s) => s.drafts[key] ?? emptyDraft);
+  const edit = (change: Partial<Draft> | ((d: Draft) => Partial<Draft>)) => store.editDraft(key, change);
 
-  const [text, setText] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  // A picked workflow goes with the next message only, unless the person keeps it attached.
-  const [picked, setPicked] = useState<Picked>(() => {
-    const kept = store.pinned(pinKey);
-    return { workflow: kept ?? null, keep: kept !== undefined };
-  });
-  // The selection as it is now, for a send that resolves after the person changed it.
-  const current = useRef(picked);
-  const sending = useRef(false);
   const [settings, setSettings] = useState<TurnSettings>(() => resolveSettings(models, summary?.settings ?? remembered()));
   const [mention, setMention] = useState<Mention | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const { workflow, keep } = picked;
 
   useEffect(() => {
     if (!pending) input.current?.focus();
@@ -64,47 +53,11 @@ function ThreadComposer() {
     remember(next);
   };
 
-  const select = (next: Workflow | null, keepIt: boolean) => {
-    const value = { workflow: next, keep: next !== null && keepIt };
-    current.current = value;
-    setPicked(value);
-    store.pin(pinKey, value.keep ? next : null);
-  };
+  const select = (next: Workflow | null, keepIt: boolean) => edit({ workflow: next, keep: next !== null && keepIt });
 
-  /** What a message took, once the engine has it: the text and attachments it carried, and its
-   * workflow unless kept attached; anything the person changed meanwhile stays. */
-  const sent = (draft: string, carried: Attachment[], workflowSent: Workflow | null) => {
-    setText((t) => (t === draft ? "" : t));
-    setAttachments((a) => (a === carried ? [] : a));
-    if (!current.current.keep && current.current.workflow === workflowSent) select(null, false);
-  };
-
-  const send = async () => {
-    const body = text.trim();
-    if (!body || sending.current) return;
-    const message: Message = { text: body, attachments, workflow: workflow?.id ?? null };
-    const draft = { text, attachments, workflow };
-    sending.current = true;
+  const send = () => {
     setMention(null);
-    try {
-      if (thread) {
-        const ok = await store.attempt(async () => {
-          await store.engine.send(thread, message, settings);
-          return true;
-        });
-        if (ok) sent(draft.text, draft.attachments, draft.workflow);
-      } else {
-        const id = await store.attempt(() => store.engine.startThread(project, message, settings));
-        if (!id) return;
-        // A kept workflow moves to the thread its message started.
-        if (current.current.keep) store.pin(id, current.current.workflow);
-        store.pin(pinKey, null);
-        sent(draft.text, draft.attachments, draft.workflow);
-        await store.selectThread(id);
-      }
-    } finally {
-      sending.current = false;
-    }
+    return store.sendDraft(key, project, thread, settings);
   };
 
   const stop = () => thread && store.attempt(() => store.engine.interrupt(thread));
@@ -112,11 +65,11 @@ function ThreadComposer() {
   const attach = async () => {
     const paths = await store.host.pickFiles();
     const added = paths.map((path): Attachment => (imageExt.test(path) ? { kind: "image", path } : { kind: "file", path }));
-    setAttachments((a) => [...a, ...added.filter((n) => !a.some((x) => x.path === n.path))]);
+    edit((d) => ({ attachments: [...d.attachments, ...added.filter((n) => !d.attachments.some((x) => x.path === n.path))] }));
   };
 
   const onChange = (value: string, caret: number) => {
-    setText(value);
+    edit({ text: value });
     setMention(mentionAt(value, caret));
   };
 
@@ -124,8 +77,10 @@ function ThreadComposer() {
     if (!mention) return;
     const before = text.slice(0, mention.start);
     const after = text.slice(mention.end);
-    setText(`${before}@${shortPath(path, root)} ${after.replace(/^\s/, "")}`);
-    setAttachments((a) => (a.some((x) => x.path === path) ? a : [...a, { kind: "file", path }]));
+    edit((d) => ({
+      text: `${before}@${shortPath(path, root)} ${after.replace(/^\s/, "")}`,
+      attachments: d.attachments.some((x) => x.path === path) ? d.attachments : [...d.attachments, { kind: "file", path }],
+    }));
     setMention(null);
     input.current?.focus();
   };
@@ -155,7 +110,7 @@ function ThreadComposer() {
             {attachments.map((a) => (
               <span key={a.path} className="chip" title={shortPath(a.path, root)}>
                 <Icon name={a.kind === "image" ? "file" : "paperclip"} /> {a.path.split("/").pop()}
-                <button className="chip-x" aria-label={`Remove ${shortPath(a.path, root)}`} onClick={() => setAttachments((all) => all.filter((x) => x !== a))}>
+                <button className="chip-x" aria-label={`Remove ${shortPath(a.path, root)}`} onClick={() => edit((d) => ({ attachments: d.attachments.filter((x) => x.path !== a.path) }))}>
                   <Icon name="x" />
                 </button>
               </span>

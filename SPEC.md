@@ -109,6 +109,7 @@ the developer's own access; no registry.
 - A completion read can drop the first streamed chunk of a follow-up sent before that read returns.
 - A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.
 - Threads in Codex's older (legacy) history format are not supported.
+- Codex's refusals (of a thread it no longer has, or a turn it does not know) reach the person in Codex's words.
 
 ## Non-goals
 
