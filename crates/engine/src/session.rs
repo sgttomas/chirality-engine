@@ -40,6 +40,11 @@ impl Session {
         self.loaded.lock().unwrap().insert(thread.clone());
     }
 
+    /// Codex has unloaded the thread; the next turn resumes it.
+    pub fn forget_loaded(&self, thread: &ThreadId) {
+        self.loaded.lock().unwrap().remove(thread);
+    }
+
     pub async fn call<R: DeserializeOwned>(&self, method: &str, params: impl Serialize) -> Result<R> {
         self.client.request(method, params).await.map_err(engine_error)
     }
@@ -64,8 +69,12 @@ pub(crate) struct Inner {
     current: Mutex<Option<Arc<Session>>>,
     generation: AtomicU64,
     shutting_down: AtomicBool,
+    /// Connection attempts under way, which shutdown waits for.
+    attempts: tokio::sync::watch::Sender<usize>,
     /// The ChatGPT sign-in under way, to cancel it.
     pub login: Mutex<Option<String>>,
+    /// The application's tool calls being answered.
+    pub tool_calls: crate::calls::Calls,
 }
 
 impl Inner {
@@ -79,7 +88,9 @@ impl Inner {
             current: Mutex::new(None),
             generation: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
+            attempts: tokio::sync::watch::channel(0).0,
             login: Mutex::new(None),
+            tool_calls: Default::default(),
         });
         inner.store.set_projects(projects);
         let incoming = inner.open().await?;
@@ -101,12 +112,32 @@ impl Inner {
         })
     }
 
+    /// Stops Codex. Returns, to every caller, once no connection attempt is
+    /// under way (one that finishes after this ends its Codex at once) and no
+    /// application tool call of any session is still running. Under the same
+    /// lock as a session's publication and an attempt's start.
     pub async fn shutdown(&self) {
-        self.shutting_down.store(true, Ordering::SeqCst);
-        if let Some(session) = self.current.lock().unwrap().take() {
-            session.client.close();
-            session.stopper.stop();
+        {
+            let mut current = self.current.lock().unwrap();
+            self.shutting_down.store(true, Ordering::SeqCst);
+            if let Some(session) = current.take() {
+                session.client.close();
+                session.stopper.stop();
+            }
+            self.tool_calls.close();
         }
+        let _ = self.attempts.subscribe().wait_for(|n| *n == 0).await;
+        self.tool_calls.idle().await;
+    }
+
+    /// A connection attempt, counted until it ends; none starts after shutdown.
+    fn begin_attempt(&self) -> Result<Attempt<'_>> {
+        let _current = self.current.lock().unwrap();
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+        }
+        self.attempts.send_modify(|n| *n += 1);
+        Ok(Attempt(&self.attempts))
     }
 
     /// Ends the Codex process as if it had died.
@@ -118,13 +149,18 @@ impl Inner {
     }
 
     async fn open(&self) -> Result<mpsc::UnboundedReceiver<Incoming>> {
+        let _attempt = self.begin_attempt()?;
         self.store.set_codex(CodexStatus::Starting);
         let failed = |message: String| {
             self.store.set_codex(CodexStatus::Failed { message: message.clone() });
             EngineError::CodexUnavailable { message }
         };
         let connection = self.connector.connect().await.map_err(failed)?;
-        let (client, incoming, stopper) = RpcClient::start(connection, self.tap.clone());
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // Requests the connection delivered before ending are taken from no more.
+        let calls = self.tool_calls.clone();
+        let on_end: Box<dyn FnOnce() + Send> = Box::new(move || calls.close_session(generation));
+        let (client, incoming, stopper) = RpcClient::start(connection, self.tap.clone(), Some(on_end));
         let params = p::InitializeParams {
             client_info: p::ClientInfo { name: "chirality", title: "Chirality", version: env!("CARGO_PKG_VERSION") },
             capabilities: p::Capabilities { experimental_api: true, request_attestation: false, opt_out_notification_methods: vec!["turn/diff/updated"] },
@@ -142,8 +178,16 @@ impl Inner {
             }
         };
         client.notify("initialized", None).map_err(|e| failed(e.to_string()))?;
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        *self.current.lock().unwrap() = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+        {
+            let mut current = self.current.lock().unwrap();
+            if self.shutting_down.load(Ordering::SeqCst) {
+                client.close();
+                stopper.kill();
+                return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            }
+            *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+            self.tool_calls.open(generation);
+        }
         self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
         Ok(incoming)
     }
@@ -180,6 +224,7 @@ impl Inner {
     /// its running turns have ended.
     fn after_death(&self, generation: u64) {
         self.store.resolve(|p| p.generation == generation);
+        self.tool_calls.close();
         let message = "Codex stopped during this turn".to_string();
         for id in self.store.thread_ids() {
             let ended = self.store.update_thread(&id, |entry| {
@@ -216,6 +261,14 @@ impl Inner {
             }
         }
         self.store.set_models(models);
+    }
+}
+
+struct Attempt<'a>(&'a tokio::sync::watch::Sender<usize>);
+
+impl Drop for Attempt<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|n| *n -= 1);
     }
 }
 

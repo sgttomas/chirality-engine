@@ -116,6 +116,7 @@ fn config(app: &tauri::App) -> std::result::Result<EngineConfig, Box<dyn std::er
         state_dir: app.path().app_data_dir()?,
         workflow_roots,
         codex_settings: Vec::new(),
+        tools: None,
     })
 }
 

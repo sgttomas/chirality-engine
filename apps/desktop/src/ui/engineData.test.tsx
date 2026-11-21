@@ -102,6 +102,17 @@ describe("over the real engine's data", () => {
     expect(screen.getByTitle("scope.md")).toBeInTheDocument();
   });
 
+  it("shows the application's tool calls with their answers, and the failed one as failed", async () => {
+    const { engine } = await open("app_tool");
+    await act(async () => void engine.play());
+    await settle();
+    expect(screen.getAllByText("estimate · check_estimate")).toHaveLength(2);
+    expect(screen.getByText("The estimate of 120 checks out.")).toBeInTheDocument();
+    const failed = screen.getByText("The estimate has no total.", { selector: "pre" }).closest("li")!;
+    expect(within(failed).getByText("failed")).toBeInTheDocument();
+    expect(screen.getAllByText("failed")).toHaveLength(1);
+  });
+
   it("shows a fork under its parent with only the history it was forked with, and removes it when archived", async () => {
     const { engine, store } = await open("fork");
     const fork = await act(async () => engine.play((e) => e.type === "thread" && e.thread.forkedFrom !== null));

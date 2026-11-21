@@ -6,6 +6,7 @@
 pub mod api;
 
 mod account;
+mod calls;
 mod events;
 mod mapping;
 mod projects;
@@ -14,6 +15,7 @@ mod rpc;
 mod session;
 mod store;
 mod threads;
+mod tools;
 mod transport;
 mod turns;
 mod workflows;
@@ -40,7 +42,10 @@ pub struct Engine {
 impl Engine {
     /// Starts Codex and reads the account, models, projects and threads.
     pub async fn start(config: EngineConfig) -> Result<Engine> {
-        let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings: config.codex_settings.clone(), env: None, cwd: None };
+        if let Some(tools) = &config.tools {
+            tools::validate(tools)?;
+        }
+        let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings: transport::settings(&config), env: None, cwd: None };
         Engine::start_with(config, Arc::new(ProcessConnector { launch }), None).await
     }
 

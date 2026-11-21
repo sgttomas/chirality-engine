@@ -57,14 +57,17 @@ pub(crate) struct RpcClient {
     next_id: AtomicI64,
     pending: Arc<Mutex<HashMap<i64, Reply>>>,
     tap: Option<Tap>,
+    ended: crate::transport::Ended,
 }
 
 impl RpcClient {
-    /// Starts reading the connection. The returned receiver ends when Codex does.
-    pub fn start(connection: Connection, tap: Option<Tap>) -> (Arc<RpcClient>, mpsc::UnboundedReceiver<Incoming>, Box<dyn crate::transport::Stopper>) {
-        let Connection { outgoing, mut incoming, stopper } = connection;
+    /// Starts reading the connection. The returned receiver ends when Codex
+    /// does; `on_end` runs as soon as the connection ends, before any waiting
+    /// caller is released or a request still queued is handled.
+    pub fn start(connection: Connection, tap: Option<Tap>, on_end: Option<Box<dyn FnOnce() + Send>>) -> (Arc<RpcClient>, mpsc::UnboundedReceiver<Incoming>, Box<dyn crate::transport::Stopper>) {
+        let Connection { outgoing, mut incoming, stopper, ended } = connection;
         let pending: Arc<Mutex<HashMap<i64, Reply>>> = Arc::default();
-        let client = Arc::new(RpcClient { out: Mutex::new(Some(outgoing)), next_id: AtomicI64::new(1), pending: pending.clone(), tap: tap.clone() });
+        let client = Arc::new(RpcClient { out: Mutex::new(Some(outgoing)), next_id: AtomicI64::new(1), pending: pending.clone(), tap: tap.clone(), ended: ended.clone() });
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(line) = incoming.recv().await {
@@ -73,6 +76,10 @@ impl RpcClient {
                 }
                 let Ok(frame) = serde_json::from_str::<Value>(&line) else { continue };
                 route(frame, &pending, &events_tx);
+            }
+            ended.mark();
+            if let Some(on_end) = on_end {
+                on_end();
             }
             for (_, reply) in pending.lock().unwrap().drain() {
                 let _ = reply.send(Err(RpcError::Closed));
@@ -110,6 +117,11 @@ impl RpcClient {
 
     pub fn respond_error(&self, id: Value, code: i64, message: &str) -> Result<(), RpcError> {
         self.send(json!({ "id": id, "error": { "code": code, "message": message } }))
+    }
+
+    /// Whether the connection's source has ended, even if lines it delivered before still wait.
+    pub fn has_ended(&self) -> bool {
+        self.ended.is_set()
     }
 
     /// Closes Codex's input, which asks it to end.
@@ -179,7 +191,7 @@ mod tests {
     fn pair() -> (Arc<RpcClient>, mpsc::UnboundedReceiver<Incoming>, mpsc::UnboundedReceiver<String>, mpsc::UnboundedSender<String>) {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let (in_tx, in_rx) = mpsc::unbounded_channel();
-        let (client, events, _) = RpcClient::start(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(NoStop) }, None);
+        let (client, events, _) = RpcClient::start(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(NoStop), ended: Default::default() }, None, None);
         (client, events, out_rx, in_tx)
     }
 

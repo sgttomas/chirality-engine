@@ -105,7 +105,7 @@ impl Connector for RecordingConnector {
     fn connect(&self) -> ConnectFuture {
         let (inner, log, stopping) = (self.inner.clone(), self.log.clone(), self.stopping.clone());
         Box::pin(async move {
-            let Connection { outgoing, mut incoming, stopper } = inner.connect().await?;
+            let Connection { outgoing, mut incoming, stopper, ended } = inner.connect().await?;
             let (tx, rx) = mpsc::unbounded_channel();
             tokio::spawn(async move {
                 while let Some(line) = incoming.recv().await {
@@ -117,7 +117,7 @@ impl Connector for RecordingConnector {
                     log.lock().unwrap().entries.push(Entry::RuntimeExit);
                 }
             });
-            Ok(Connection { outgoing, incoming: rx, stopper })
+            Ok(Connection { outgoing, incoming: rx, stopper, ended })
         })
     }
 }
@@ -169,7 +169,7 @@ impl Connector for Replay {
             let (out_tx, out_rx) = mpsc::unbounded_channel();
             let (in_tx, in_rx) = mpsc::unbounded_channel();
             tokio::spawn(play(cursor, places, out_rx, in_tx));
-            Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(NoProcess) })
+            Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(NoProcess), ended: Default::default() })
         })
     }
 }

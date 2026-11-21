@@ -2,6 +2,7 @@
 import type { Attachment } from "./Attachment";
 import type { FileDiff } from "./FileDiff";
 import type { PlanStep } from "./PlanStep";
+import type { ToolCallStatus } from "./ToolCallStatus";
 import type { WorkflowId } from "./WorkflowId";
 
-export type ItemBody = { "kind": "userMessage", text: string, attachments: Array<Attachment>, workflow: WorkflowId | null, } | { "kind": "agentMessage", text: string, } | { "kind": "reasoning", summary: string, } | { "kind": "plan", steps: Array<PlanStep>, } | { "kind": "command", command: string, cwd: string, output: string, exitCode: number | null, } | { "kind": "fileChange", files: Array<FileDiff>, } | { "kind": "toolCall", server: string | null, tool: string, arguments: string, result: string | null, } | { "kind": "webSearch", query: string, } | { "kind": "error", message: string, };
+export type ItemBody = { "kind": "userMessage", text: string, attachments: Array<Attachment>, workflow: WorkflowId | null, } | { "kind": "agentMessage", text: string, } | { "kind": "reasoning", summary: string, } | { "kind": "plan", steps: Array<PlanStep>, } | { "kind": "command", command: string, cwd: string, output: string, exitCode: number | null, } | { "kind": "fileChange", files: Array<FileDiff>, } | { "kind": "toolCall", server: string | null, tool: string, arguments: string, status: ToolCallStatus, result: string | null, images: Array<string>, } | { "kind": "webSearch", query: string, } | { "kind": "error", message: string, };

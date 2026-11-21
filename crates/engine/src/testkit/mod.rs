@@ -8,7 +8,11 @@
 //! - `live_main_path`: the main path against the real Codex, not recorded;
 //!   skipped when the binary is absent.
 
+mod apptools;
+pub(crate) mod catalog;
 mod export;
+mod fake;
+mod tool_calls;
 mod harness;
 mod record;
 mod scenarios;
@@ -47,7 +51,7 @@ macro_rules! scenarios {
     };
 }
 
-scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart);
+scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_main_path() {

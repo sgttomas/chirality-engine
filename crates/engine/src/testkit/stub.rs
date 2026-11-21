@@ -17,6 +17,8 @@ use tokio::net::{TcpListener, TcpStream};
 /// stub made since the last user message, by call id.
 pub struct Request {
     pub outputs: HashMap<String, String>,
+    /// The whole request, which declares the tools Codex offers the model.
+    pub body: Value,
 }
 
 pub enum Reply {
@@ -83,7 +85,7 @@ async fn serve(mut stream: TcpStream, scripts: Arc<Mutex<HashMap<String, Script>
     let key = text.split_once("STUB[").and_then(|(_, rest)| rest.split_once(']')).map(|(k, _)| k.to_string());
     let script = key.as_ref().and_then(|k| scripts.lock().unwrap().get(k).cloned());
     let reply = match script {
-        Some(script) => script(&Request { outputs }),
+        Some(script) => script(&Request { outputs, body: body.clone() }),
         None => Reply::Items(vec![message("msg_unscripted", "No script for this turn.")]),
     };
     let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
@@ -203,6 +205,11 @@ pub fn patch_call(call_id: &str, patch: &str) -> Value {
 
 pub fn question_call(call_id: &str, questions: Value) -> Value {
     json!({"type": "function_call", "name": "request_user_input", "call_id": call_id, "id": format!("fc_{call_id}"), "arguments": json!({"questions": questions}).to_string()})
+}
+
+/// A call to one of the application's tools.
+pub fn tool_call(call_id: &str, namespace: &str, name: &str, arguments: Value) -> Value {
+    json!({"type": "function_call", "namespace": namespace, "name": name, "call_id": call_id, "id": format!("fc_{call_id}"), "arguments": arguments.to_string()})
 }
 
 /// A reply of `text`.

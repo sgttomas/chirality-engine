@@ -26,6 +26,7 @@ export type { ThreadId } from "./bindings/ThreadId";
 export type { ThreadStatus } from "./bindings/ThreadStatus";
 export type { ThreadSummary } from "./bindings/ThreadSummary";
 export type { ThreadView } from "./bindings/ThreadView";
+export type { ToolCallStatus } from "./bindings/ToolCallStatus";
 export type { Turn } from "./bindings/Turn";
 export type { TurnId } from "./bindings/TurnId";
 export type { TurnSettings } from "./bindings/TurnSettings";

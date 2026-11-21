@@ -52,6 +52,7 @@ fn the_interface_reaches_the_real_engine_without_a_window() {
         state_dir: root.join("state"),
         workflow_roots: Vec::new(),
         codex_settings: vec!["analytics.enabled=false".into()],
+        tools: None,
     };
 
     let app = super::commands(mock_builder()).build(mock_context(noop_assets())).unwrap();
