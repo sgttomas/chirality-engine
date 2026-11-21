@@ -18,15 +18,50 @@ use crate::store::Store;
 use crate::transport::{Connector, Stopper};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long shutdown waits for Codex to be reaped: its two seconds to end, then the kill.
+const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 /// More deaths than this within [`DEATH_WINDOW`] and the engine stops restarting.
 const MAX_DEATHS: usize = 3;
 const DEATH_WINDOW: Duration = Duration::from_secs(60);
+/// The engine's status, and what it says to every request, once it has shut down.
+const SHUT_DOWN: &str = "the engine has shut down";
+
+/// Work the engine does once, as its own task; every caller waits for the same result.
+pub(crate) struct Once<T>(Mutex<Option<tokio::sync::watch::Receiver<Option<T>>>>);
+
+impl<T> Default for Once<T> {
+    fn default() -> Self {
+        Once(Mutex::new(None))
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> Once<T> {
+    /// The result of `work`, begun by the first caller; `None` if its task ended without one.
+    pub async fn run<F: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce() -> F) -> Option<T> {
+        let mut done = {
+            let mut slot = self.0.lock().unwrap();
+            match &*slot {
+                Some(done) => done.clone(),
+                None => {
+                    let (tx, done) = tokio::sync::watch::channel(None);
+                    let work = work();
+                    tokio::spawn(async move {
+                        let _ = tx.send(Some(work.await));
+                    });
+                    *slot = Some(done.clone());
+                    done
+                }
+            }
+        };
+        done.wait_for(Option::is_some).await.ok().and_then(|v| v.clone())
+    }
+}
 
 /// One connection to one Codex process.
 pub(crate) struct Session {
     pub client: Arc<RpcClient>,
     pub generation: u64,
-    stopper: Box<dyn Stopper>,
+    stopper: Arc<dyn Stopper>,
     /// Threads this process has started, resumed or forked.
     loaded: Mutex<HashSet<ThreadId>>,
 }
@@ -67,6 +102,10 @@ pub(crate) struct Inner {
     connector: Arc<dyn Connector>,
     tap: Option<Tap>,
     current: Mutex<Option<Arc<Session>>>,
+    /// The Codex being started, before it answers `initialize`: shutdown ends it.
+    opening: Mutex<Option<Arc<dyn Stopper>>>,
+    connected: Once<Result<()>>,
+    shut: Once<()>,
     generation: AtomicU64,
     shutting_down: AtomicBool,
     /// Connection attempts under way, which shutdown waits for.
@@ -75,10 +114,12 @@ pub(crate) struct Inner {
     pub login: Mutex<Option<String>>,
     /// The application's tool calls being answered.
     pub tool_calls: crate::calls::Calls,
+    pub admission: crate::turns::Admission,
 }
 
 impl Inner {
-    pub async fn start(config: EngineConfig, connector: Arc<dyn Connector>, tap: Option<Tap>) -> Result<Arc<Inner>> {
+    /// The engine with its projects, before Codex: [`Inner::connect`] starts it.
+    pub fn new(config: EngineConfig, connector: Arc<dyn Connector>, tap: Option<Tap>) -> Result<Arc<Inner>> {
         let projects = crate::projects::load(&config.state_dir)?;
         let inner = Arc::new(Inner {
             store: Store::new(),
@@ -86,21 +127,39 @@ impl Inner {
             connector,
             tap,
             current: Mutex::new(None),
+            opening: Mutex::new(None),
+            connected: Once::default(),
+            shut: Once::default(),
             generation: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
             attempts: tokio::sync::watch::channel(0).0,
             login: Mutex::new(None),
             tool_calls: Default::default(),
+            admission: Default::default(),
         });
         inner.store.set_projects(projects);
-        let incoming = inner.open().await?;
-        inner.read_account().await;
-        inner.read_models().await;
-        for project in inner.store.projects() {
-            let _ = inner.list_threads(&project).await;
-        }
-        tokio::spawn(inner.clone().run(incoming));
         Ok(inner)
+    }
+
+    /// Starts Codex and reads the account, models and each project's threads,
+    /// once: every caller waits for the same start.
+    pub async fn connect(self: &Arc<Self>) -> Result<()> {
+        let inner = self.clone();
+        let started = self.connected.run(|| async move {
+            let incoming = inner.open().await?;
+            inner.read_account().await;
+            inner.read_models().await;
+            for project in inner.store.projects() {
+                let _ = inner.list_threads(&project).await;
+            }
+            if inner.shutting_down.load(Ordering::SeqCst) {
+                // Shut down while it read: not started.
+                return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
+            }
+            tokio::spawn(inner.clone().run(incoming));
+            Ok(())
+        });
+        started.await.unwrap_or_else(|| Err(EngineError::CodexUnavailable { message: "the engine's start ended".into() }))
     }
 
     pub fn session(&self) -> Result<Arc<Session>> {
@@ -112,32 +171,58 @@ impl Inner {
         })
     }
 
-    /// Stops Codex. Returns, to every caller, once no connection attempt is
-    /// under way (one that finishes after this ends its Codex at once) and no
-    /// application tool call of any session is still running. Under the same
-    /// lock as a session's publication and an attempt's start.
-    pub async fn shutdown(&self) {
-        {
+    /// Stops Codex, once; every caller waits for the same shutdown. It ends
+    /// the running Codex and one still starting (each has two seconds, then is
+    /// killed), and returns once no connection attempt is under way, no
+    /// application tool call of any session is still running, and each Codex
+    /// has been reaped (waiting at most [`REAP_TIMEOUT`] for that). Under the
+    /// same lock as a session's publication and an attempt's start.
+    pub async fn shutdown(self: &Arc<Self>) {
+        let inner = self.clone();
+        self.shut.run(|| async move { inner.shut_down().await }).await;
+    }
+
+    async fn shut_down(&self) {
+        let reaped = {
             let mut current = self.current.lock().unwrap();
             self.shutting_down.store(true, Ordering::SeqCst);
+            self.store.set_codex(CodexStatus::Failed { message: SHUT_DOWN.into() });
+            let mut reaped = Vec::new();
             if let Some(session) = current.take() {
                 session.client.close();
                 session.stopper.stop();
+                reaped.push(session.stopper.reaped());
+            }
+            if let Some(opening) = self.opening.lock().unwrap().take() {
+                opening.stop();
+                reaped.push(opening.reaped());
             }
             self.tool_calls.close();
-        }
+            reaped
+        };
         let _ = self.attempts.subscribe().wait_for(|n| *n == 0).await;
         self.tool_calls.idle().await;
+        for reaped in reaped {
+            let _ = tokio::time::timeout(REAP_TIMEOUT, reaped).await;
+        }
     }
 
     /// A connection attempt, counted until it ends; none starts after shutdown.
     fn begin_attempt(&self) -> Result<Attempt<'_>> {
         let _current = self.current.lock().unwrap();
         if self.shutting_down.load(Ordering::SeqCst) {
-            return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
         }
         self.attempts.send_modify(|n| *n += 1);
         Ok(Attempt(&self.attempts))
+    }
+
+    /// Sets Codex's status unless the engine has shut down, whose status is the last.
+    fn set_status(&self, status: CodexStatus) {
+        let _current = self.current.lock().unwrap();
+        if !self.shutting_down.load(Ordering::SeqCst) {
+            self.store.set_codex(status);
+        }
     }
 
     /// Ends the Codex process as if it had died.
@@ -150,9 +235,9 @@ impl Inner {
 
     async fn open(&self) -> Result<mpsc::UnboundedReceiver<Incoming>> {
         let _attempt = self.begin_attempt()?;
-        self.store.set_codex(CodexStatus::Starting);
+        self.set_status(CodexStatus::Starting);
         let failed = |message: String| {
-            self.store.set_codex(CodexStatus::Failed { message: message.clone() });
+            self.set_status(CodexStatus::Failed { message: message.clone() });
             EngineError::CodexUnavailable { message }
         };
         let connection = self.connector.connect().await.map_err(failed)?;
@@ -161,6 +246,23 @@ impl Inner {
         let calls = self.tool_calls.clone();
         let on_end: Box<dyn FnOnce() + Send> = Box::new(move || calls.close_session(generation));
         let (client, incoming, stopper) = RpcClient::start(connection, self.tap.clone(), Some(on_end));
+        let stopper: Arc<dyn Stopper> = Arc::from(stopper);
+        let refused = {
+            let _current = self.current.lock().unwrap();
+            let refused = self.shutting_down.load(Ordering::SeqCst);
+            if !refused {
+                *self.opening.lock().unwrap() = Some(stopper.clone());
+            }
+            refused
+        };
+        if refused {
+            // Shutdown began as this Codex was spawned; it waits for this attempt, so for the reaping too.
+            client.close();
+            stopper.kill();
+            let _ = tokio::time::timeout(REAP_TIMEOUT, stopper.reaped()).await;
+            return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
+        }
+        let _opening = Opening(&self.opening);
         let params = p::InitializeParams {
             client_info: p::ClientInfo { name: "chirality", title: "Chirality", version: env!("CARGO_PKG_VERSION") },
             capabilities: p::Capabilities { experimental_api: true, request_attestation: false, opt_out_notification_methods: vec!["turn/diff/updated"] },
@@ -178,17 +280,24 @@ impl Inner {
             }
         };
         client.notify("initialized", None).map_err(|e| failed(e.to_string()))?;
-        {
+        let refused = {
             let mut current = self.current.lock().unwrap();
             if self.shutting_down.load(Ordering::SeqCst) {
                 client.close();
                 stopper.kill();
-                return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+                Some(stopper.reaped())
+            } else {
+                *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+                self.tool_calls.open(generation);
+                self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
+                None
             }
-            *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
-            self.tool_calls.open(generation);
+        };
+        if let Some(reaped) = refused {
+            // Shutdown waits for this attempt, so for this Codex to be reaped too.
+            let _ = tokio::time::timeout(REAP_TIMEOUT, reaped).await;
+            return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
         }
-        self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
         Ok(incoming)
     }
 
@@ -210,7 +319,7 @@ impl Inner {
             deaths.retain(|at| at.elapsed() < DEATH_WINDOW);
             deaths.push(Instant::now());
             if deaths.len() > MAX_DEATHS {
-                self.store.set_codex(CodexStatus::Failed { message: "Codex keeps stopping".into() });
+                self.set_status(CodexStatus::Failed { message: "Codex keeps stopping".into() });
                 return;
             }
             match self.open().await {
@@ -261,6 +370,15 @@ impl Inner {
             }
         }
         self.store.set_models(models);
+    }
+}
+
+/// Clears the Codex being started when its start ends, however it ends.
+struct Opening<'a>(&'a Mutex<Option<Arc<dyn Stopper>>>);
+
+impl Drop for Opening<'_> {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().take();
     }
 }
 

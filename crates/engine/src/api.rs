@@ -176,6 +176,9 @@ pub struct Snapshot {
     pub projects: Vec<Project>,
     pub threads: Vec<ThreadSummary>,
     pub pending: Vec<PendingRequest>,
+    /// The [`Numbered::seq`] of the last event it includes (0 before any).
+    #[ts(type = "number")]
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
@@ -307,6 +310,17 @@ pub enum Attachment {
 pub struct ThreadView {
     pub summary: ThreadSummary,
     pub turns: Vec<Turn>,
+    /// The [`Numbered::seq`] of the last event before the read began: the
+    /// view is Codex's history, which holds that and every event before it.
+    /// Apply each event after it: an item the view has as done stays done,
+    /// with its text whole, and text for an item it lacks begins that item.
+    /// History lacks a reply still streaming, and can name the items of a turn
+    /// that ended while it was read differently from its events: when a turn
+    /// of the thread in view completes, read it again. Text Codex has not kept
+    /// (of a reply a Stop cut short) is in no read: a stopped turn's view keeps
+    /// it until the thread is read again later.
+    #[ts(type = "number")]
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -464,10 +478,38 @@ pub enum Event {
     TurnEnded { thread: ThreadId, turn: TurnId, state: TurnState },
     /// An item appeared or changed; the whole item, so no state is lost.
     Item { thread: ThreadId, turn: TurnId, item: Item },
-    /// Text appended to an item while it streams.
-    ItemDelta { thread: ThreadId, turn: TurnId, item: ItemId, text: String },
+    /// Text appended to an item while it streams; `kind` is what the text is,
+    /// so a view that does not have the item yet can begin it.
+    ItemDelta { thread: ThreadId, turn: TurnId, item: ItemId, kind: TextKind, text: String },
     Pending { request: PendingRequest },
     Resolved { request: RequestId },
+}
+
+/// What streamed text extends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum TextKind {
+    /// An agent message's text.
+    AgentMessage,
+    /// A reasoning summary.
+    Reasoning,
+    /// A command's output.
+    Command,
+    /// A plan's text, which the plan's steps replace.
+    Plan,
+}
+
+/// An [`Event`] with its place in the engine's stream: numbered from 1, each
+/// one more than the one before. A gap means events were missed: read the
+/// snapshot (and any thread shown) again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct Numbered {
+    #[ts(type = "number")]
+    pub seq: u64,
+    pub event: Event,
 }
 
 /// Why an engine call failed, in words an interface can show.

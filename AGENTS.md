@@ -1,7 +1,7 @@
 # Working in chirality-engine
 
-Read `SPEC.md` first. It says what the engine and the wrapper are for, what
-they must do, and what they must not become. When the spec and the code
+Read `SPEC.md` first. It says what the engine and the parts applications build
+on are for, what they must do, and what they must not become. When the spec and the code
 disagree, either the code is wrong or the spec needs changing: say which.
 
 ## How to work

@@ -1,0 +1,28 @@
+# The Chirality engine's commands, for an application with its own ACL manifest
+# (`tauri_build::AppManifest`): copy this file into its `src-tauri/permissions/`
+# and grant `allow-engine` in its capability.
+
+[[permission]]
+identifier = "allow-engine"
+description = "The Chirality engine's commands."
+commands.allow = [
+  "engine:snapshot",
+  "engine:sign_in",
+  "engine:cancel_sign_in",
+  "engine:sign_out",
+  "engine:add_project",
+  "engine:remove_project",
+  "engine:workflows",
+  "engine:read_thread",
+  "engine:start_thread",
+  "engine:send",
+  "engine:interrupt",
+  "engine:fork",
+  "engine:revert",
+  "engine:rename",
+  "engine:archive",
+  "engine:mark_read",
+  "engine:answer",
+  "engine:read_file",
+  "engine:find_files",
+]

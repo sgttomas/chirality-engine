@@ -71,7 +71,7 @@ pub fn cases() -> Vec<(&'static str, &'static str, Value, bool)> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "runs the pinned Codex"]
 async fn the_catalog_check_matches_codex() {
-    assert!(codex_present(), "the pinned Codex is needed");
+    assert!(codex_present(), "set CHIRALITY_TEST_CODEX to the pinned Codex");
     let mut differ = Vec::new();
     for (namespace, tool, schema, expected) in cases() {
         let tools = catalog(namespace, tool, schema.clone());

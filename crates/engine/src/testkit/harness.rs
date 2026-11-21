@@ -16,12 +16,26 @@ use crate::api::*;
 use crate::transport::{Launch, ProcessConnector};
 use crate::Engine;
 
-pub const CODEX: &str = "/Users/ryan/dev/chirality-t3/scratch/engine/supplier/rust-v0.171.0/pkg/bin/codex";
-pub const SCRATCH: &str = "/Users/ryan/dev/chirality-t3/scratch/engine/core/runs";
-pub const LIBRARY: &str = "/Users/ryan/dev/chirality-library-releases/library-v3.4.0/workflows";
+/// The pinned Codex, named by `CHIRALITY_TEST_CODEX`; the tests that run it
+/// are skipped without it.
+pub fn codex() -> Option<PathBuf> {
+    std::env::var_os("CHIRALITY_TEST_CODEX").map(PathBuf::from).filter(|p| p.is_file())
+}
 
 pub fn codex_present() -> bool {
-    Path::new(CODEX).is_file()
+    codex().is_some()
+}
+
+/// Where runs against the pinned Codex keep their folders:
+/// `CHIRALITY_TEST_SCRATCH`, or a folder in the system's temporary directory.
+pub fn scratch() -> PathBuf {
+    std::env::var_os("CHIRALITY_TEST_SCRATCH").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("chirality-engine-tests"))
+}
+
+/// A Chirality Library edition's `workflows` folder, named by
+/// `CHIRALITY_TEST_LIBRARY`; the tests that read it are skipped without it.
+pub fn library() -> Option<PathBuf> {
+    std::env::var_os("CHIRALITY_TEST_LIBRARY").map(PathBuf::from).filter(|p| p.is_dir())
 }
 
 /// A fresh root holding the project, the Codex home, the engine's state,
@@ -49,10 +63,10 @@ impl Run {
 
     fn config(&self, tools: Option<&Arc<TestTools>>) -> EngineConfig {
         EngineConfig {
-            codex_bin: PathBuf::from(CODEX),
+            codex_bin: codex().unwrap_or_else(|| PathBuf::from("codex")),
             codex_home: Some(self.root.join("home")),
             state_dir: self.root.join("state"),
-            workflow_roots: vec![PathBuf::from(LIBRARY)],
+            workflow_roots: library().into_iter().collect(),
             codex_settings: Vec::new(),
             tools: tools.map(|t| t.app_tools()),
         }
@@ -64,8 +78,10 @@ impl Run {
             ("<project>".to_string(), path(self.project())),
             ("<codex-home>".to_string(), path(self.root.join("home"))),
             ("<root>".to_string(), path(self.root.clone())),
-            ("<library>".to_string(), LIBRARY.to_string()),
         ];
+        if let Some(library) = library() {
+            pairs.push(("<library>".to_string(), path(library)));
+        }
         if stub_port != 0 {
             pairs.push(("<stub>".to_string(), format!("127.0.0.1:{stub_port}")));
         }
@@ -98,7 +114,7 @@ enum Mode {
 /// What a scenario works with.
 pub struct Ctx {
     pub engine: Engine,
-    pub events: broadcast::Receiver<Event>,
+    pub events: broadcast::Receiver<Numbered>,
     pub run: Run,
     /// When set, keeps every event and each thread view the scenario reads.
     pub tape: Option<std::sync::Mutex<Tape>>,
@@ -110,7 +126,7 @@ pub struct Ctx {
 
 /// The events since taping began, and each view read with how many events preceded it.
 pub struct Tape {
-    pub rx: broadcast::Receiver<Event>,
+    pub rx: broadcast::Receiver<Numbered>,
     pub events: Vec<Event>,
     pub reads: Vec<(usize, ThreadView)>,
 }
@@ -119,7 +135,7 @@ impl Tape {
     pub fn drain(&mut self) {
         loop {
             match self.rx.try_recv() {
-                Ok(event) => self.events.push(event),
+                Ok(numbered) => self.events.push(numbered.event),
                 Err(broadcast::error::TryRecvError::Lagged(n)) => panic!("{n} events lost"),
                 Err(_) => return,
             }
@@ -136,7 +152,7 @@ impl Ctx {
     /// Live, with `app_tools` in place of the scenario's own; the engine's
     /// start-up check of them is skipped, so Codex's own can be seen.
     pub async fn live_with(name: &str, record: bool, app_tools: Option<AppTools>) -> Ctx {
-        let run = Run::new(Path::new(SCRATCH), name);
+        let run = Run::new(&scratch(), name);
         let stub = Stub::start().await;
         let tools = apptools::for_scenario(name);
         let mut config = run.config(tools.as_ref());
@@ -211,7 +227,7 @@ impl Ctx {
             }
             let step = (tokio::time::Instant::now() + Duration::from_millis(200)).min(deadline);
             let event = match tokio::time::timeout_at(step, self.events.recv()).await {
-                Ok(Ok(event)) => event,
+                Ok(Ok(numbered)) => numbered.event,
                 Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
                 Ok(Err(e)) => panic!("events ended waiting for {what}: {e}"),
                 Err(_) if tokio::time::Instant::now() < deadline => continue,

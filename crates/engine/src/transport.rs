@@ -57,6 +57,10 @@ pub(crate) trait Stopper: Send + Sync {
     fn stop(&self);
     /// Ends the process at once, as if it had died.
     fn kill(&self);
+    /// Resolves once the process has ended and been reaped (at once without a process).
+    fn reaped(&self) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async {})
+    }
 }
 
 pub(crate) type ConnectFuture = std::pin::Pin<Box<dyn Future<Output = Result<Connection, String>> + Send>>;
@@ -187,8 +191,13 @@ fn spawn(launch: &Launch) -> Result<Connection, String> {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(_)) = lines.next_line().await {}
     });
-    tokio::spawn(supervise(child, stop_rx));
-    Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(ProcessStopper(Arc::new(std::sync::Mutex::new(Some(stop_tx))))), ended })
+    let (reaped_tx, reaped) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        supervise(child, stop_rx).await;
+        let _ = reaped_tx.send(true);
+    });
+    let stopper = ProcessStopper { stop: Arc::new(std::sync::Mutex::new(Some(stop_tx))), reaped };
+    Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(stopper), ended })
 }
 
 /// Waits for the child; on a stop request, gives it two seconds after its
@@ -207,18 +216,27 @@ async fn supervise(mut child: Child, stop: oneshot::Receiver<bool>) {
     }
 }
 
-struct ProcessStopper(Arc<std::sync::Mutex<Option<oneshot::Sender<bool>>>>);
+struct ProcessStopper {
+    stop: Arc<std::sync::Mutex<Option<oneshot::Sender<bool>>>>,
+    reaped: tokio::sync::watch::Receiver<bool>,
+}
 
 impl Stopper for ProcessStopper {
     fn stop(&self) {
-        if let Some(tx) = self.0.lock().unwrap().take() {
+        if let Some(tx) = self.stop.lock().unwrap().take() {
             let _ = tx.send(true);
         }
     }
     fn kill(&self) {
-        if let Some(tx) = self.0.lock().unwrap().take() {
+        if let Some(tx) = self.stop.lock().unwrap().take() {
             let _ = tx.send(false);
         }
+    }
+    fn reaped(&self) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        let mut reaped = self.reaped.clone();
+        Box::pin(async move {
+            let _ = reaped.wait_for(|done| *done).await;
+        })
     }
 }
 
@@ -249,6 +267,35 @@ mod tests {
             lines += 1;
         }
         assert_eq!(lines, 512, "every line written is still there to read after the end is marked");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A process that takes a moment to end after it is asked to: reaped is
+    /// only once it has, not when the request is made.
+    #[tokio::test]
+    async fn reaped_is_once_the_process_has_ended() {
+        let dir = std::env::temp_dir().join(format!("chirality-reaped-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (script, pid_file) = (dir.join("slow.sh"), dir.join("pid"));
+        std::fs::write(&script, format!("#!/bin/sh\necho $$ > {}\nexec sleep 1\n", pid_file.display())).unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let launch = Launch { bin: script, home: None, settings: Vec::new(), env: Some(vec![("PATH".into(), "/usr/bin:/bin".into())]), cwd: None };
+        let connection = spawn(&launch).unwrap();
+        let mut pid = String::new();
+        for _ in 0..200 {
+            pid = std::fs::read_to_string(&pid_file).unwrap_or_default().trim().to_string();
+            if !pid.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let alive = || std::process::Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().unwrap().success();
+        let started = std::time::Instant::now();
+        connection.stopper.stop();
+        assert!(alive(), "still running just after the request");
+        tokio::time::timeout(Duration::from_secs(5), connection.stopper.reaped()).await.expect("reaped in time");
+        assert!(started.elapsed() >= Duration::from_millis(500), "reaped only after it ended");
+        assert!(!alive(), "gone once reaped");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

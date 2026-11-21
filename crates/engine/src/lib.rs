@@ -39,18 +39,54 @@ pub struct Engine {
     inner: Arc<Inner>,
 }
 
+/// An engine still starting that no caller has yet: shut down if dropped so.
+struct Unowned(Option<Engine>);
+
+impl Drop for Unowned {
+    fn drop(&mut self) {
+        if let Some(engine) = self.0.take()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            runtime.spawn(async move { engine.shutdown().await });
+        }
+    }
+}
+
 impl Engine {
-    /// Starts Codex and reads the account, models, projects and threads.
+    /// Starts Codex and reads the account, models, projects and threads:
+    /// [`Engine::new`], then [`Engine::connect`].
     pub async fn start(config: EngineConfig) -> Result<Engine> {
+        Engine::new(config)?.connected().await
+    }
+
+    /// Connects, and hands the engine over once it has; an engine never handed
+    /// over (its start failed, or the caller gave up on it) is shut down.
+    async fn connected(self) -> Result<Engine> {
+        let mut unowned = Unowned(Some(self.clone()));
+        self.connect().await?;
+        unowned.0 = None;
+        Ok(self)
+    }
+
+    /// The engine with its projects, before Codex has started: it can be
+    /// shut down from here on, which ends a Codex still starting.
+    pub fn new(config: EngineConfig) -> Result<Engine> {
         if let Some(tools) = &config.tools {
             tools::validate(tools)?;
         }
         let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings: transport::settings(&config), env: None, cwd: None };
-        Engine::start_with(config, Arc::new(ProcessConnector { launch }), None).await
+        Ok(Engine { inner: Inner::new(config, Arc::new(ProcessConnector { launch }), None)? })
     }
 
+    /// Starts Codex and reads the account, models and threads, once: every
+    /// caller waits for the same start, and has its result.
+    pub async fn connect(&self) -> Result<()> {
+        self.inner.connect().await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn start_with(config: EngineConfig, connector: Arc<dyn transport::Connector>, tap: Option<rpc::Tap>) -> Result<Engine> {
-        Ok(Engine { inner: Inner::start(config, connector, tap).await? })
+        Engine { inner: Inner::new(config, connector, tap)? }.connected().await
     }
 
     #[cfg(test)]
@@ -58,7 +94,8 @@ impl Engine {
         &self.inner
     }
 
-    /// Ends Codex and every turn in it.
+    /// Ends Codex (one still starting too) and every turn in it, once; every
+    /// caller returns when that is done.
     pub async fn shutdown(&self) {
         self.inner.shutdown().await
     }
@@ -67,8 +104,9 @@ impl Engine {
         self.inner.store.snapshot()
     }
 
-    /// Every change from now on, in order.
-    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+    /// Every change from now on, in order and numbered ([`Numbered`]); a
+    /// receiver that lags has missed some and reads the snapshot again.
+    pub fn subscribe(&self) -> broadcast::Receiver<Numbered> {
         self.inner.store.subscribe()
     }
 

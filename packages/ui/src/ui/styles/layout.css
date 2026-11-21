@@ -1,0 +1,12 @@
+:where(.chirality) .app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  background: var(--surface);
+}
+:where(.chirality) .app--panel { grid-template-columns: 260px minmax(0, 1fr) minmax(320px, 36%); }
+@media (max-width: 1180px) {
+  :where(.chirality) .app { grid-template-columns: 228px minmax(0, 1fr); }
+  :where(.chirality) .app--panel { grid-template-columns: 228px minmax(0, 1fr) minmax(300px, 38%); }
+}
+:where(.chirality) .app-loading { height: 100%; background: var(--ground); }

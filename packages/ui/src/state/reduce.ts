@@ -1,0 +1,157 @@
+// Keeps the interface's copy of the engine's state current, one event at a time.
+import type { Event, Item, ItemBody, Snapshot, TextKind, ThreadId, ThreadView, Turn } from "../engine/types";
+
+export interface Model {
+  /** Its `seq` is the last event applied (when `applyEvent` is given the event's number). */
+  snapshot: Snapshot;
+  /** The threads read so far, kept current from events. */
+  views: Record<ThreadId, ThreadView>;
+}
+
+const upsert = <T extends { id: unknown }>(list: T[], value: T) => {
+  const at = list.findIndex((v) => v.id === value.id);
+  return at < 0 ? [...list, value] : list.map((v, i) => (i === at ? value : v));
+};
+
+/** A finished item is not replaced by an unfinished update of it. */
+const withItem = (items: Item[], item: Item) => {
+  const held = items.find((i) => i.id === item.id);
+  return held?.done && !item.done ? items : upsert(items, item);
+};
+
+/** The item streamed text begins, when the view does not have it yet (a plan's text has none). */
+const begun = (id: string, kind: TextKind, text: string): Item | null => {
+  const body: ItemBody | null =
+    kind === "agentMessage"
+      ? { kind, text }
+      : kind === "reasoning"
+        ? { kind, summary: text }
+        : kind === "command"
+          ? { kind, command: "", cwd: "", output: text, exitCode: null }
+          : null;
+  return body && { id, body, done: false };
+};
+
+const withTurn = (view: ThreadView, id: string, change: (turn: Turn) => Turn): ThreadView => {
+  const exists = view.turns.some((t) => t.id === id);
+  const turns = exists ? view.turns : [...view.turns, { id, items: [], state: { state: "running" as const } }];
+  return { ...view, turns: turns.map((t) => (t.id === id ? change(t) : t)) };
+};
+
+const appended = (body: ItemBody, text: string): ItemBody => {
+  switch (body.kind) {
+    case "agentMessage":
+      return { ...body, text: body.text + text };
+    case "reasoning":
+      return { ...body, summary: body.summary + text };
+    case "command":
+      return { ...body, output: body.output + text };
+    default:
+      return body;
+  }
+};
+
+/** A thread's view with one of that thread's events applied. */
+export function applyToView(view: ThreadView, event: Event): ThreadView {
+  switch (event.type) {
+    case "thread":
+      return { ...view, summary: event.thread };
+    case "turnStarted":
+      return withTurn(view, event.turn, (t) => t);
+    case "turnEnded":
+      return withTurn(view, event.turn, (t) => ({ ...t, state: event.state }));
+    case "item":
+      return withTurn(view, event.turn, (t) => ({ ...t, items: withItem(t.items, event.item) }));
+    case "itemDelta":
+      return withTurn(view, event.turn, (t) => {
+        if (!t.items.some((i) => i.id === event.item)) {
+          const item = begun(event.item, event.kind, event.text);
+          return item ? { ...t, items: [...t.items, item] } : t;
+        }
+        // A done item's text is whole.
+        return { ...t, items: t.items.map((i) => (i.id === event.item && !i.done ? { ...i, body: appended(i.body, event.text) } : i)) };
+      });
+    default:
+      return view;
+  }
+}
+
+/** `read` with the plan `held` has for `turn`, where it was among that turn's items, if `read` lacks it. */
+export function keepPlan(read: ThreadView, held: ThreadView | undefined, turn: string): ThreadView {
+  const before = held?.turns.find((t) => t.id === turn)?.items ?? [];
+  const plans = before.filter((i) => i.body.kind === "plan");
+  if (!plans.length) return read;
+  const turns = read.turns.map((t) => {
+    if (t.id !== turn) return t;
+    const items = [...t.items];
+    for (const plan of plans) if (!items.some((i) => i.id === plan.id)) items.splice(Math.min(before.indexOf(plan), items.length), 0, plan);
+    return { ...t, items };
+  });
+  return { ...read, turns };
+}
+
+export const threadOf = (event: Event): ThreadId | null => {
+  switch (event.type) {
+    case "thread":
+      return event.thread.id;
+    case "turnStarted":
+    case "turnEnded":
+    case "item":
+    case "itemDelta":
+      return event.thread;
+    default:
+      return null;
+  }
+};
+
+/** The model with `event` applied. Given its number `seq`, a view already
+ * current to it (read after it) is left as it is, and the model is numbered. */
+export function applyEvent(model: Model, event: Event, seq?: number): Model {
+  const applied = apply(model, event, seq);
+  return seq === undefined ? applied : { ...applied, snapshot: { ...applied.snapshot, seq } };
+}
+
+function apply(model: Model, event: Event, seq: number | undefined): Model {
+  const snapshot = applyToSnapshot(model.snapshot, event);
+  let views = model.views;
+  const thread = threadOf(event);
+  const view = thread ? views[thread] : undefined;
+  if (thread && view && (seq === undefined || seq > view.seq)) {
+    views = { ...views, [thread]: { ...applyToView(view, event), ...(seq === undefined ? {} : { seq }) } };
+  }
+  if (event.type === "threadRemoved" && views[event.thread]) {
+    views = { ...views };
+    delete views[event.thread];
+  }
+  return snapshot === model.snapshot && views === model.views ? model : { snapshot, views };
+}
+
+function applyToSnapshot(s: Snapshot, event: Event): Snapshot {
+  switch (event.type) {
+    case "codex":
+      return { ...s, codex: event.status };
+    case "account":
+      return { ...s, account: event.account };
+    case "models":
+      return { ...s, models: event.models };
+    case "projects":
+      return { ...s, projects: event.projects };
+    case "thread": {
+      const known = s.threads.some((t) => t.id === event.thread.id);
+      const threads = known ? s.threads.map((t) => (t.id === event.thread.id ? event.thread : t)) : [event.thread, ...s.threads];
+      return { ...s, threads };
+    }
+    case "threadRemoved":
+      return {
+        ...s,
+        threads: s.threads.filter((t) => t.id !== event.thread),
+        pending: s.pending.filter((p) => p.thread !== event.thread),
+      };
+    case "pending":
+      return { ...s, pending: upsert(s.pending, event.request) };
+    case "resolved":
+      return { ...s, pending: s.pending.filter((p) => p.id !== event.request) };
+    default:
+      return s;
+  }
+}

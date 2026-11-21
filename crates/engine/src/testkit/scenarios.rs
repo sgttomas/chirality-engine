@@ -4,7 +4,7 @@
 use serde_json::json;
 
 use super::apptools::{CHECK, NAMESPACE, WAIT};
-use super::harness::{Ctx, LIBRARY, settings, text};
+use super::harness::{Ctx, library, settings, text};
 use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, tool_call};
 use crate::api::*;
 
@@ -186,6 +186,9 @@ pub async fn interrupt(ctx: &mut Ctx) {
     ctx.engine.interrupt(&thread).await.unwrap();
     assert_eq!(ctx.turn_ended(&thread).await.1, TurnState::Interrupted);
     assert_eq!(status(ctx, &thread).status, ThreadStatus::Idle);
+    let turns = turns(ctx, &thread).await;
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].state, TurnState::Interrupted);
 }
 
 pub async fn fork(ctx: &mut Ctx) {
@@ -317,7 +320,8 @@ pub async fn app_tool_cancelled(ctx: &mut Ctx) {
 pub async fn main_path(ctx: &mut Ctx) {
     let project = project(ctx).await;
     let workflows = ctx.engine.workflows(&project.id).await.unwrap();
-    let review = workflows.iter().find(|w| w.source == LIBRARY && w.name == "review").expect("the library's review workflow").clone();
+    let library = library().expect("a Library edition").display().to_string();
+    let review = workflows.iter().find(|w| w.source == library && w.name == "review").expect("the library's review workflow").clone();
     ctx.script("main", calls("main", shell_call("call_main", "printf ok > main.txt", true), false));
     let message = Message { text: "STUB[main] review this".into(), attachments: vec![], workflow: Some(review.id.clone()) };
     let thread = ctx.engine.start_thread(&project.id, message, settings(Access::Ask)).await.unwrap();

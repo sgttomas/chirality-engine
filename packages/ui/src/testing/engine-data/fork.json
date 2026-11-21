@@ -1,0 +1,767 @@
+{
+  "after": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "project",
+        "path": "/work/run/project"
+      }
+    ],
+    "seq": 22,
+    "threads": [
+      {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": "STUB[one] go",
+        "unread": true,
+        "updatedAt": 1795000000
+      }
+    ]
+  },
+  "before": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [],
+    "seq": 0,
+    "threads": []
+  },
+  "events": [
+    {
+      "projects": [
+        {
+          "id": "project-1",
+          "name": "project",
+          "path": "/work/run/project"
+        }
+      ],
+      "type": "projects"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "kind": "userMessage",
+          "text": "STUB[one] go",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000004"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "kind": "userMessage",
+          "text": "STUB[one] go",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000004"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "One."
+        },
+        "done": false,
+        "id": "msg_one"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": "msg_one",
+      "kind": "agentMessage",
+      "text": "One.",
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "One."
+        },
+        "done": true,
+        "id": "msg_one"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "kind": "userMessage",
+          "text": "STUB[two] go",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000007"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "kind": "userMessage",
+          "text": "STUB[two] go",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000007"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Two."
+        },
+        "done": false,
+        "id": "msg_two"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": "msg_two",
+      "kind": "agentMessage",
+      "text": "Two.",
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Two."
+        },
+        "done": true,
+        "id": "msg_two"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "forkedFrom": "00000000-0000-0000-0000-000000000002",
+        "id": "00000000-0000-0000-0000-000000000009",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": "STUB[one] go",
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": "STUB[one] go",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000009",
+      "type": "threadRemoved"
+    }
+  ],
+  "reads": [
+    {
+      "afterEvents": 20,
+      "view": {
+        "seq": 20,
+        "summary": {
+          "forkedFrom": "00000000-0000-0000-0000-000000000002",
+          "id": "00000000-0000-0000-0000-000000000009",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": "STUB[one] go",
+          "unread": false,
+          "updatedAt": 0
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "kind": "userMessage",
+                  "text": "STUB[one] go",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000004"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "One."
+                },
+                "done": true,
+                "id": "msg_one"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "afterEvents": 21,
+      "view": {
+        "seq": 21,
+        "summary": {
+          "forkedFrom": null,
+          "id": "00000000-0000-0000-0000-000000000002",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": "STUB[one] go",
+          "unread": true,
+          "updatedAt": 1795000000
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "kind": "userMessage",
+                  "text": "STUB[one] go",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000004"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "One."
+                },
+                "done": true,
+                "id": "msg_one"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000006",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "kind": "userMessage",
+                  "text": "STUB[two] go",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000007"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "Two."
+                },
+                "done": true,
+                "id": "msg_two"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

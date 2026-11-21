@@ -1,0 +1,93 @@
+:where(.chirality) .nav {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  background: var(--ground);
+  border-right: 1px solid var(--rule);
+}
+:where(.chirality) .nav-top { display: grid; gap: 8px; padding: 16px 10px 10px; }
+:where(.chirality) .nav-brand { padding: 0 8px 6px; font: 500 19px/1.2 var(--font-display); letter-spacing: 0.01em; color: var(--brand-ink); }
+:where(.chirality) .nav-new { justify-content: flex-start; display: flex; align-items: center; gap: 8px; padding: 6px 8px; color: var(--ink); }
+:where(.chirality) .nav-search { width: 100%; padding: 5px 9px; font-size: 12.5px; background: var(--surface); }
+
+:where(.chirality) .nav-projects { overflow: auto; padding: 4px 10px 10px; display: grid; align-content: start; gap: 10px; }
+:where(.chirality) .nav-project { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+:where(.chirality) .nav-project:hover .nav-project-new { opacity: 1; }
+:where(.chirality) .nav-project--current { background: var(--selected); }
+:where(.chirality) .nav-chevron, :where(.chirality) .nav-project-name { border: 0; background: transparent; padding: 0; }
+:where(.chirality) .nav-chevron { width: 20px; height: 26px; display: grid; place-items: center; color: var(--ink-faint); }
+:where(.chirality) .nav-chevron:hover { color: var(--ink); }
+:where(.chirality) .nav-project-name {
+  flex: 1; min-width: 0; text-align: left;
+  font-size: 12px; font-weight: 600; color: var(--ink-soft);
+  letter-spacing: 0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+:where(.chirality) .nav-project-name:hover { color: var(--ink); }
+:where(.chirality) .nav-project-new { opacity: 0; padding: 4px 6px; }
+:where(.chirality) .nav-project .mark { margin-right: 4px; }
+
+:where(.chirality) .nav-projects > *, :where(.chirality) .nav-threads > li { min-width: 0; }
+:where(.chirality) .nav-threads { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 1px; }
+:where(.chirality) .nav-thread {
+  width: 100%;
+  display: flex; align-items: center; gap: 6px;
+  border: 0; border-radius: 6px;
+  padding: 6px 8px 6px 26px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px; font-weight: 400;
+  text-align: left;
+}
+:where(.chirality) .nav-thread:hover:not(:disabled) { background: var(--hover); }
+:where(.chirality) .nav-thread[aria-current="page"] { background: var(--selected); }
+:where(.chirality) .nav-thread--quiet { color: var(--ink-soft); }
+:where(.chirality) .nav-thread--unread .nav-thread-title { font-weight: 600; }
+:where(.chirality) .nav-thread-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.chirality) .nav-when { flex: none; font-size: 11px; color: var(--ink-faint); }
+:where(.chirality) .nav-fork { flex: none; color: var(--ink-faint); }
+
+:where(.chirality) .mark { flex: none; width: 7px; height: 7px; border-radius: 50%; margin: 0 4px; }
+:where(.chirality) .mark--running { background: var(--sage); animation: pulse 1.4s ease-in-out infinite; }
+:where(.chirality) .mark--waiting { background: var(--rose); box-shadow: 0 0 0 3px var(--rose-soft); }
+:where(.chirality) .mark--finished { background: var(--accent); }
+:where(.chirality) .mark--failed { background: var(--danger); }
+@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { :where(.chirality) .mark--running { animation: none; } }
+
+:where(.chirality) .nav-foot { display: grid; gap: 2px; padding: 8px 10px 12px; border-top: 1px solid var(--rule); }
+:where(.chirality) .nav-foot > button { display: flex; align-items: center; gap: 8px; justify-content: flex-start; padding: 6px 8px; }
+:where(.chirality) .nav-account { position: relative; }
+:where(.chirality) .nav-account-button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+:where(.chirality) .nav-avatar {
+  width: 20px; height: 20px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 11px; font-weight: 600;
+}
+:where(.chirality) .nav-account-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+:where(.chirality) .nav-account-menu { bottom: calc(100% + 4px); left: 0; right: 0; }
+
+:where(.chirality) .menu {
+  position: absolute; z-index: 20;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+:where(.chirality) .menu-item {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  border: 0; border-radius: 5px;
+  padding: 6px 9px;
+  text-align: left; font-size: 12.5px; font-weight: 400;
+  color: var(--ink);
+}
+:where(.chirality) .menu-item:hover:not(:disabled), :where(.chirality) .menu-item[aria-selected="true"] { background: var(--hover); }
+:where(.chirality) .menu-note { padding: 6px 9px 4px; color: var(--ink-faint); font-size: 11.5px; }
+:where(.chirality) .menu-segment { display: flex; gap: 2px; margin: 2px 4px 4px; padding: 2px; border-radius: 6px; background: var(--ground); }
+:where(.chirality) .menu-segment button { flex: 1; border: 0; padding: 3px 6px; font-size: 12px; }
+:where(.chirality) .menu-segment button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--rule); }

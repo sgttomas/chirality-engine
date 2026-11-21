@@ -1,0 +1,29 @@
+:where(.chirality) .diff {
+  font: 400 11.5px/1.55 var(--font-mono);
+  overflow-x: auto;
+  background: var(--surface);
+}
+:where(.chirality) .diff-line {
+  display: grid;
+  grid-template-columns: 3.2em 3.2em 1.2em minmax(0, 1fr);
+  min-width: max-content;
+}
+:where(.chirality) .diff-no { color: var(--ink-faint); text-align: right; padding-right: 6px; user-select: none; opacity: 0.8; }
+:where(.chirality) .diff-sign { color: var(--ink-faint); user-select: none; }
+:where(.chirality) .diff-text { white-space: pre; padding-right: 12px; }
+:where(.chirality) .diff-add { background: var(--add); }
+:where(.chirality) .diff-add .diff-sign, :where(.chirality) .diff-add .diff-text { color: var(--add-ink); }
+:where(.chirality) .diff-del { background: var(--del); }
+:where(.chirality) .diff-del .diff-sign, :where(.chirality) .diff-del .diff-text { color: var(--del-ink); }
+:where(.chirality) .diff-hunk {
+  padding: 2px 10px;
+  color: var(--ink-faint);
+  background: var(--sunken);
+  border-block: 1px solid var(--rule);
+  font-size: 11px;
+}
+:where(.chirality) .diff-hunk:first-child { border-top: 0; }
+:where(.chirality) .diff-more { padding: 2px 10px; color: var(--ink-faint); }
+:where(.chirality) .diff-stat { display: inline-flex; gap: 6px; font: 500 11.5px var(--font-mono); }
+:where(.chirality) .diff-stat-add { color: var(--sage-ink); }
+:where(.chirality) .diff-stat-del { color: var(--del-ink); }

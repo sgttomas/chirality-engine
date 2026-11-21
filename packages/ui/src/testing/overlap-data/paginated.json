@@ -1,0 +1,425 @@
+{
+  "frames": [
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+          "project": "8450057b452b4e20",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": null,
+          "unread": false,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 7
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+          "project": "8450057b452b4e20",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "working"
+          },
+          "title": null,
+          "unread": false,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 8
+    },
+    {
+      "event": {
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "turnStarted"
+      },
+      "seq": 9
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "attachments": [],
+            "kind": "userMessage",
+            "text": "STUB[overlap]",
+            "workflow": null
+          },
+          "done": false,
+          "id": "01a1fee1-ca0d-79f2-9891-c2a9e886d8eb"
+        },
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "item"
+      },
+      "seq": 10
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "attachments": [],
+            "kind": "userMessage",
+            "text": "STUB[overlap]",
+            "workflow": null
+          },
+          "done": true,
+          "id": "01a1fee1-ca0d-79f2-9891-c2a9e886d8eb"
+        },
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "item"
+      },
+      "seq": 11
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "agentMessage",
+            "text": "Completed while reading."
+          },
+          "done": false,
+          "id": "msg_overlap"
+        },
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "item"
+      },
+      "seq": 12
+    },
+    {
+      "event": {
+        "item": "msg_overlap",
+        "kind": "agentMessage",
+        "text": "Completed while reading.",
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "itemDelta"
+      },
+      "seq": 13
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "agentMessage",
+            "text": "Completed while reading."
+          },
+          "done": true,
+          "id": "msg_overlap"
+        },
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "item"
+      },
+      "seq": 14
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+          "project": "8450057b452b4e20",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": null,
+          "unread": false,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 15
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+          "project": "8450057b452b4e20",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": null,
+          "unread": true,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 16
+    },
+    {
+      "event": {
+        "state": {
+          "state": "completed"
+        },
+        "thread": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "turn": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "type": "turnEnded"
+      },
+      "seq": 17
+    }
+  ],
+  "initial": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [
+      {
+        "id": "8450057b452b4e20",
+        "name": "project",
+        "path": "/work/project"
+      }
+    ],
+    "seq": 6,
+    "threads": [
+      {
+        "forkedFrom": null,
+        "id": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+        "project": "8450057b452b4e20",
+        "settings": {
+          "access": "ask",
+          "effort": null,
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795277572
+      }
+    ]
+  },
+  "view": {
+    "seq": 6,
+    "summary": {
+      "forkedFrom": null,
+      "id": "01a1fee1-c98c-7b21-b3ec-07e67864c06b",
+      "project": "8450057b452b4e20",
+      "settings": {
+        "access": "ask",
+        "effort": "low",
+        "model": "gpt-6.2-sol"
+      },
+      "status": {
+        "state": "idle"
+      },
+      "title": null,
+      "unread": true,
+      "updatedAt": 1795277572
+    },
+    "turns": [
+      {
+        "id": "01a1fee1-c99a-7352-a45b-e1ea1d5f573b",
+        "items": [
+          {
+            "body": {
+              "attachments": [],
+              "kind": "userMessage",
+              "text": "STUB[overlap]",
+              "workflow": null
+            },
+            "done": true,
+            "id": "01a1fee1-ca0d-79f2-9891-c2a9e886d8eb"
+          },
+          {
+            "body": {
+              "kind": "agentMessage",
+              "text": "Completed while reading."
+            },
+            "done": true,
+            "id": "msg_overlap"
+          }
+        ],
+        "state": {
+          "state": "completed"
+        }
+      }
+    ]
+  }
+}

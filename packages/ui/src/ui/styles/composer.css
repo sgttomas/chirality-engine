@@ -1,0 +1,103 @@
+:where(.chirality) .composer-area {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 4px 40px 18px;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px;
+}
+:where(.chirality) .composer {
+  position: relative;
+  display: grid; gap: 4px;
+  padding: 8px 8px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 5%, transparent);
+}
+:where(.chirality) .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong)); }
+:where(.chirality) .composer--behind { opacity: 0.6; }
+:where(.chirality) .composer-chips { padding: 2px 4px 4px; }
+:where(.chirality) .composer-input {
+  width: 100%;
+  min-height: 26px; max-height: 200px;
+  resize: none;
+  border: 0; outline: none;
+  padding: 4px 6px;
+  background: transparent;
+  font: 400 13.5px/22px var(--font-body);
+  field-sizing: content;
+}
+:where(.chirality) .composer-input:focus-visible { outline: none; }
+:where(.chirality) .composer-line { display: flex; align-items: center; gap: 2px; min-width: 0; }
+:where(.chirality) .composer-line > button.quiet, :where(.chirality) .dropdown-button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+:where(.chirality) .composer-spacer { flex: 1; }
+:where(.chirality) .send {
+  width: 30px; height: 30px; flex: none;
+  display: grid; place-items: center;
+  padding: 0; border: 0; border-radius: 50%;
+  background: var(--cta); color: var(--cta-ink);
+}
+:where(.chirality) .send:hover:not(:disabled) { color: var(--cta-ink) !important; filter: brightness(1.15); }
+:where(.chirality) .send .icon { width: 15px; height: 15px; }
+:where(.chirality) .send--stop .icon { fill: currentColor; width: 12px; height: 12px; }
+
+:where(.chirality) .composer-area--new { align-self: start; padding-top: 0; }
+:where(.chirality) .conv:has(.composer-area--new) { grid-template-rows: auto minmax(0, 0.8fr) auto minmax(0, 1fr); }
+:where(.chirality) .conv:has(.composer-area--new) .conv-scroll { overflow: hidden; }
+
+:where(.chirality) .dropdown { position: relative; }
+:where(.chirality) .dropdown-menu { bottom: calc(100% + 6px); left: 0; max-height: 340px; overflow: auto; }
+:where(.chirality) .dropdown-menu--wide { width: 340px; }
+:where(.chirality) .dropdown-menu .menu-item { flex-direction: column; align-items: flex-start; gap: 1px; }
+:where(.chirality) .dropdown-label { font-size: 12.5px; }
+:where(.chirality) .dropdown-detail { font-size: 11.5px; color: var(--ink-faint); line-height: 1.4; }
+:where(.chirality) .dropdown-search { width: calc(100% - 8px); margin: 4px 4px 6px; font-size: 12.5px; }
+:where(.chirality) .access--fullAccess { color: var(--danger); }
+:where(.chirality) .access--readOnly { color: var(--slate, var(--ink-soft)); }
+
+:where(.chirality) .mention-menu { bottom: calc(100% + 6px); left: 8px; width: min(440px, calc(100% - 16px)); }
+:where(.chirality) .mention-menu .menu-item { gap: 8px; }
+:where(.chirality) .mention-name { font-size: 12.5px; }
+:where(.chirality) .mention-dir { color: var(--ink-faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+:where(.chirality) .ask {
+  display: grid; gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--rose);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 0 0 3px var(--rose-soft);
+}
+:where(.chirality) .ask-head { display: flex; align-items: baseline; gap: 10px; font-weight: 600; font-size: 13.5px; }
+:where(.chirality) .ask-eyebrow { color: var(--rose-ink); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+:where(.chirality) .ask-reason { color: var(--ink-soft); font-size: 12.5px; margin-top: -4px; }
+:where(.chirality) .ask-command {
+  margin: 0;
+  display: flex; gap: 8px; align-items: center;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+:where(.chirality) .ask-file { border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; max-height: 220px; overflow-y: auto; }
+:where(.chirality) .ask-file-head { display: flex; justify-content: space-between; gap: 10px; padding: 5px 10px; background: var(--sunken); border-bottom: 1px solid var(--rule); }
+:where(.chirality) .ask-actions { display: flex; align-items: center; gap: 6px; }
+:where(.chirality) .ask-question { font-size: 13.5px; }
+:where(.chirality) .ask-options { display: grid; gap: 5px; }
+:where(.chirality) .ask-option {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--ink); font-weight: 400; font-size: 13px;
+  background: var(--surface);
+}
+:where(.chirality) .ask-option:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+:where(.chirality) .ask-option kbd {
+  width: 18px; height: 18px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid var(--rule-strong); border-radius: 4px;
+  font-size: 10.5px; color: var(--ink-faint);
+}
+:where(.chirality) .ask-own { display: flex; gap: 6px; }
+:where(.chirality) .ask-own input { flex: 1; min-width: 0; }
