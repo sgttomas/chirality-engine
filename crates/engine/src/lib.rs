@@ -39,13 +39,33 @@ pub struct Engine {
     inner: Arc<Inner>,
 }
 
+/// An engine still starting that no caller has yet: shut down if dropped so.
+struct Unowned(Option<Engine>);
+
+impl Drop for Unowned {
+    fn drop(&mut self) {
+        if let Some(engine) = self.0.take()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            runtime.spawn(async move { engine.shutdown().await });
+        }
+    }
+}
+
 impl Engine {
     /// Starts Codex and reads the account, models, projects and threads:
     /// [`Engine::new`], then [`Engine::connect`].
     pub async fn start(config: EngineConfig) -> Result<Engine> {
-        let engine = Engine::new(config)?;
-        engine.connect().await?;
-        Ok(engine)
+        Engine::new(config)?.connected().await
+    }
+
+    /// Connects, and hands the engine over once it has; an engine never handed
+    /// over (its start failed, or the caller gave up on it) is shut down.
+    async fn connected(self) -> Result<Engine> {
+        let mut unowned = Unowned(Some(self.clone()));
+        self.connect().await?;
+        unowned.0 = None;
+        Ok(self)
     }
 
     /// The engine with its projects, before Codex has started: it can be
@@ -66,9 +86,7 @@ impl Engine {
 
     #[cfg(test)]
     pub(crate) async fn start_with(config: EngineConfig, connector: Arc<dyn transport::Connector>, tap: Option<rpc::Tap>) -> Result<Engine> {
-        let engine = Engine { inner: Inner::new(config, connector, tap)? };
-        engine.connect().await?;
-        Ok(engine)
+        Engine { inner: Inner::new(config, connector, tap)? }.connected().await
     }
 
     #[cfg(test)]

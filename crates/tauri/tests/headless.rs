@@ -152,3 +152,54 @@ fn the_interface_reaches_the_real_engine_without_a_window() {
     assert_eq!(codex_children(), "", "the Codex a start in flight spawned is reaped");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// An application with its own ACL manifest grants the engine's commands with
+/// `permissions/engine.toml`, resolved here as Tauri resolves it.
+#[test]
+fn an_application_with_its_own_acl_grants_the_engine_commands_with_the_permission_file() {
+    use std::collections::BTreeMap;
+    use tauri_utils::acl::capability::Capability;
+    use tauri_utils::acl::manifest::{Manifest, PermissionFile};
+    use tauri_utils::acl::resolved::Resolved;
+
+    // The app's permissions: the engine's file and one of its own.
+    let acl = || {
+        let engine: PermissionFile = toml::from_str(include_str!("../permissions/engine.toml")).unwrap();
+        let own: PermissionFile = toml::from_str("[[permission]]\nidentifier = \"allow-own\"\ncommands.allow = [\"snapshot\"]\n").unwrap();
+        BTreeMap::from([(tauri_utils::acl::APP_ACL_KEY.to_string(), Manifest::new(vec![engine, own], None))])
+    };
+    let app_with = |permissions: serde_json::Value| {
+        let capability: Capability = serde_json::from_value(json!({ "identifier": "default", "windows": ["main"], "permissions": permissions })).unwrap();
+        let resolved = Resolved::resolve(&acl(), BTreeMap::from([("default".to_string(), capability)]), tauri_utils::platform::Target::current()).unwrap();
+        assert!(resolved.has_app_acl);
+        let mut context = mock_context(noop_assets());
+        *context.runtime_authority_mut() = tauri::runtime_authority!(acl(), resolved);
+        let root = std::env::temp_dir().join(format!("chirality-tauri-acl-{}", std::process::id()));
+        let app = mock_builder()
+            .plugin(plugin(move |_| Ok(config(root.join("no-codex"), &root, Some(tools("web"))))))
+            .invoke_handler(commands(tauri::generate_handler![own_snapshot]))
+            .build(context)
+            .unwrap();
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        (app, webview)
+    };
+
+    let (_app, granted) = app_with(json!(["allow-engine", "allow-own"]));
+    assert_eq!(call(&granted, "snapshot", json!({})).unwrap(), json!("the application's snapshot"));
+    // The engine answers (its start is refused for the `web` namespace, which the interface is told).
+    let answered = call(&granted, "engine:snapshot", json!({})).unwrap_err();
+    assert!(answered.to_string().contains("tool namespace"), "{answered}");
+
+    let (_app, ungranted) = app_with(json!(["allow-own"]));
+    let refused = call(&ungranted, "engine:snapshot", json!({})).unwrap_err();
+    assert!(refused.to_string().contains("not allowed"), "{refused}");
+}
+
+/// The permission file names exactly the engine's commands.
+#[test]
+fn the_permission_file_names_every_engine_command() {
+    let file: tauri_utils::acl::manifest::PermissionFile = toml::from_str(include_str!("../permissions/engine.toml")).unwrap();
+    let named: Vec<String> = file.permission[0].commands.allow.clone();
+    let commands: Vec<String> = chirality_engine_tauri::COMMANDS.iter().map(|c| format!("{}{c}", chirality_engine_tauri::PREFIX)).collect();
+    assert_eq!(named, commands);
+}

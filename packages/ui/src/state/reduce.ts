@@ -2,7 +2,7 @@
 import type { Event, Item, ItemBody, Snapshot, ThreadId, ThreadView, Turn } from "../engine/types";
 
 export interface Model {
-  /** Its `seq` is the last event applied (by the store; `applyEvent` leaves it). */
+  /** Its `seq` is the last event applied (when `applyEvent` is given the event's number). */
   snapshot: Snapshot;
   /** The threads read so far, kept current from events. */
   views: Record<ThreadId, ThreadView>;
@@ -44,9 +44,10 @@ export function applyToView(view: ThreadView, event: Event): ThreadView {
     case "item":
       return withTurn(view, event.turn, (t) => ({ ...t, items: upsert<Item>(t.items, event.item) }));
     case "itemDelta":
+      // A done item's text is whole.
       return withTurn(view, event.turn, (t) => ({
         ...t,
-        items: t.items.map((i) => (i.id === event.item ? { ...i, body: appended(i.body, event.text) } : i)),
+        items: t.items.map((i) => (i.id === event.item && !i.done ? { ...i, body: appended(i.body, event.text) } : i)),
       }));
     default:
       return view;
@@ -67,11 +68,21 @@ export const threadOf = (event: Event): ThreadId | null => {
   }
 };
 
-export function applyEvent(model: Model, event: Event): Model {
+/** The model with `event` applied. Given its number `seq`, a view already
+ * current to it (read after it) is left as it is, and the model is numbered. */
+export function applyEvent(model: Model, event: Event, seq?: number): Model {
+  const applied = apply(model, event, seq);
+  return seq === undefined ? applied : { ...applied, snapshot: { ...applied.snapshot, seq } };
+}
+
+function apply(model: Model, event: Event, seq: number | undefined): Model {
   const snapshot = applyToSnapshot(model.snapshot, event);
   let views = model.views;
   const thread = threadOf(event);
-  if (thread && views[thread]) views = { ...views, [thread]: applyToView(views[thread], event) };
+  const view = thread ? views[thread] : undefined;
+  if (thread && view && (seq === undefined || seq > view.seq)) {
+    views = { ...views, [thread]: { ...applyToView(view, event), ...(seq === undefined ? {} : { seq }) } };
+  }
   if (event.type === "threadRemoved" && views[event.thread]) {
     views = { ...views };
     delete views[event.thread];

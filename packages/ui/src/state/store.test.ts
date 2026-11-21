@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createEngineClient, type Transport } from "../engine/client";
 import type { EngineCommand } from "../engine/commands";
 import type { Event, Item, Numbered, Snapshot, ThreadSummary, ThreadView } from "../engine/types";
+import { engineData } from "../testing/replay";
+import { noticeFor } from "../ui/notify";
 import { Store } from "./store";
 import { testHost } from "../testing/render";
 
@@ -260,5 +262,153 @@ describe("the store recovers what it missed, and starts and stops cleanly", () =
     await tick();
     expect(store.get().model?.snapshot.threads[0].status.state).toBe("needsApproval");
     expect(listener).toHaveBeenCalledWith(background, expect.anything());
+  });
+});
+
+describe("the store's views and recovery, on the engine's recorded data", () => {
+  it("leaves a view read after an event as it is when that event arrives late: no doubled text", async () => {
+    const data = engineData("text_turn");
+    const read = data.reads[0].view;
+    const at = data.events.findIndex((e) => e.type === "itemDelta");
+    const delta = data.events[at];
+    if (delta.type !== "itemDelta") throw new Error("expected a recorded delta");
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return { ...data.before, seq: data.before.seq + at, projects: data.after.projects, threads: [read.summary] };
+      if (command === "read_thread") return read;
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    await store.selectThread(read.summary.id);
+    wire.emit(data.before.seq + at + 1, delta);
+    const shown = store.get().model?.views[read.summary.id].turns[0].items.find((i) => i.id === delta.item);
+    expect(shown?.body).toEqual(read.turns[0].items.find((i) => i.id === delta.item)?.body);
+  });
+
+  it("leaves a view read after a delta to an item still streaming as it is when the delta arrives late", async () => {
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return snapshot(4);
+      // The engine had sent 5 when the read began; the store had not yet received it.
+      if (command === "read_thread") return { summary, seq: 5, turns: [{ id: "turn-1", items: [message("a", "Half")], state: { state: "running" } }] };
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    await store.selectThread("t");
+    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: "Half" });
+    wire.emit(6, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: " more" });
+    expect(store.get().model?.views.t.turns[0].items[0].body).toEqual({ kind: "agentMessage", text: "Half more" });
+    expect(store.get().model?.views.t.seq).toBe(6);
+  });
+
+  it("takes no text for an item the read has as done, from an event numbered after the read", async () => {
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return snapshot(4);
+      // The read began after 4; Codex finished the item before it answered.
+      if (command === "read_thread") return { summary, seq: 4, turns: [{ id: "turn-1", items: [{ ...message("a", "Whole"), done: true }], state: { state: "running" } }] };
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    await store.selectThread("t");
+    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: "Whole" });
+    expect(store.get().model?.views.t.turns[0].items[0].body).toEqual({ kind: "agentMessage", text: "Whole" });
+  });
+
+  it("tells onEvent an approval that revealed a gap, though the snapshot holds it", async () => {
+    const data = engineData("command_approved");
+    const at = data.events.findIndex((e) => e.type === "thread" && e.thread.status.state === "needsApproval");
+    const approval = data.events[at];
+    if (approval.type !== "thread") throw new Error("expected a recorded approval");
+    const working = data.events.slice(0, at).reverse().find((e) => e.type === "thread" && e.thread.id === approval.thread.id && e.thread.status.state === "working");
+    if (working?.type !== "thread") throw new Error("expected a recorded running thread");
+    let reads = 0;
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      if (reads++ === 0) return { ...data.before, seq: data.before.seq + at - 1, projects: data.after.projects, threads: [working.thread] };
+      return { ...data.before, seq: data.before.seq + at + 1, projects: data.after.projects, threads: [approval.thread] };
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    const notices: unknown[] = [];
+    store.onEvent((event, before) => {
+      const notice = noticeFor(event, before, false);
+      if (notice) notices.push(notice);
+    });
+    wire.emit(data.before.seq + at + 1, approval);
+    await tick();
+    expect(store.get().model?.snapshot.threads[0].status.state).toBe("needsApproval");
+    expect(notices).toHaveLength(1);
+  });
+
+  it("leaves a store started again alone when an earlier recovery fails", async () => {
+    let reads = 0;
+    let reject: (e: Error) => void = () => {};
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      if (++reads === 2) return new Promise((_, refuse) => (reject = refuse));
+      return snapshot(reads === 1 ? 0 : 2);
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    wire.mark(2);
+    store.dispose();
+    await store.start();
+    reject(new Error("disposed transport"));
+    await tick();
+    expect(store.get().error).toBeNull();
+  });
+
+  it("keeps an earlier recovery from clearing what a new start holds", async () => {
+    let calls = 0;
+    let rejectOld: (error: Error) => void = () => {};
+    let resolveNew: (value: Snapshot) => void = () => {};
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      switch (++calls) {
+        case 1:
+          return snapshot(0);
+        case 2:
+          return new Promise((_, reject) => (rejectOld = reject));
+        case 3:
+          return new Promise((resolve) => (resolveNew = resolve));
+        default:
+          throw new Error("unexpected snapshot");
+      }
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    wire.mark(2);
+    store.dispose();
+    const starting = store.start();
+    await tick();
+    rejectOld(new Error("the old snapshot, cancelled with its transport"));
+    await tick();
+    resolveNew(snapshot(2));
+    await expect(starting).resolves.toBeUndefined();
+    expect(store.get().model?.snapshot.seq).toBe(2);
+  });
+
+  it("tries a failed recovery again while the host has marked events not received", async () => {
+    let calls = 0;
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      switch (++calls) {
+        case 1:
+          return snapshot(0);
+        case 2:
+          throw new Error("temporary snapshot failure");
+        default:
+          return snapshot(2);
+      }
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    wire.mark(2);
+    await tick();
+    expect(store.get().error).toBe("temporary snapshot failure");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(store.get().model?.snapshot.seq).toBe(2);
+    expect(store.get().error).toBeNull();
   });
 });

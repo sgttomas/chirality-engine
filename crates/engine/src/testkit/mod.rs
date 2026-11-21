@@ -10,7 +10,6 @@
 //!   (`harness::codex`, `harness::library`).
 
 mod admission;
-mod reads;
 mod apptools;
 pub(crate) mod catalog;
 mod export;

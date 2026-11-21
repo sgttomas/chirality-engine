@@ -70,6 +70,8 @@ impl Inner {
     pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
         let session = self.session()?;
         self.known_thread(thread)?;
+        // Every event after this is applied to the view; one before it, the history holds.
+        let seq = self.store.seq();
         let read_at = self.store.renames();
         let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
         self.adopt_thread(&read.thread, Some(read_at));
@@ -81,7 +83,6 @@ impl Inner {
             }
             other => other.map_err(engine_error)?,
         };
-        let (turns, seq) = self.store.merged(thread, turns);
         let summary = self.store.summary(thread).ok_or_else(|| EngineError::NotFound { what: format!("thread {}", thread.0) })?;
         Ok(ThreadView { summary, turns, seq })
     }
@@ -121,8 +122,6 @@ impl Inner {
         let session = self.session()?;
         self.ensure_loaded(&session, thread).await?;
         let _: p::ThreadResponse = session.call("thread/revert", json!({ "threadId": thread.0, "beforeTurnId": from.0 })).await?;
-        // The turns removed run to the last, the one the events told.
-        self.store.forget_live(thread);
         self.store.update_thread(thread, |e| e.updated_at = crate::store::now());
         Ok(())
     }

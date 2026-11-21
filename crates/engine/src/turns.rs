@@ -13,12 +13,13 @@ use crate::mapping;
 use crate::protocol as p;
 use crate::session::Inner;
 
-/// How long a Stop holds the thread for Codex to end the turn it stopped
-/// (Codex answers `turn/interrupt` before it ends the turn).
+/// How long a Stop holds the thread for Codex to answer it and end the turn
+/// it stopped (Codex answers `turn/interrupt` before it ends the turn, or,
+/// in some states, only once it has).
 #[cfg(not(test))]
 const STOP_SETTLE: Duration = Duration::from_secs(10);
 #[cfg(test)]
-const STOP_SETTLE: Duration = Duration::from_millis(400);
+const STOP_SETTLE: Duration = Duration::from_millis(1200);
 
 /// One admission at a time per thread: starting a turn, steering it and
 /// interrupting it each wait for the one before, so two sends cannot both see
@@ -120,29 +121,27 @@ impl Inner {
         let session = self.session()?;
         let Some(turn) = self.known_thread(thread)?.active_turn else { return Ok(()) };
         let mut events = self.store.subscribe();
-        session.call_value("turn/interrupt", json!({ "threadId": thread.0, "turnId": turn.0 })).await?;
         let running = || self.store.thread(thread).is_some_and(|e| e.active_turn.as_ref() == Some(&turn));
-        let ended = tokio::time::timeout(STOP_SETTLE, async {
+        let stopped = tokio::time::timeout(STOP_SETTLE, async {
+            session.call_value("turn/interrupt", json!({ "threadId": thread.0, "turnId": turn.0 })).await?;
             while running() {
                 if let Err(tokio::sync::broadcast::error::RecvError::Closed) = events.recv().await {
-                    return;
+                    break;
                 }
             }
+            Ok(())
         })
         .await;
-        if ended.is_err() {
-            // Codex has not said the turn ended: it is taken as stopped, and the next send starts a turn.
-            let stopped = self.store.update_thread(thread, |e| {
-                (e.active_turn.as_ref() == Some(&turn)).then(|| {
+        stopped.unwrap_or_else(|_| {
+            // Codex has neither answered nor ended the turn. The thread is let go: the next
+            // send goes to Codex as a start, which Codex takes as a steer if the turn still runs.
+            self.store.update_thread(thread, |e| {
+                if e.active_turn.as_ref() == Some(&turn) {
                     e.active_turn = None;
-                    e.last_ended = Some(turn.clone());
-                })
+                }
             });
-            if let Some(Some(())) = stopped {
-                self.store.emit(Event::TurnEnded { thread: thread.clone(), turn, state: TurnState::Interrupted });
-            }
-        }
-        Ok(())
+            Err(EngineError::Codex { message: "Codex did not stop the turn".into() })
+        })
     }
 
     pub(crate) async fn answer(self: &Arc<Self>, request: &RequestId, answer: Answer) -> Result<()> {

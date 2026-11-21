@@ -133,26 +133,73 @@ async fn a_send_after_a_stop_starts_a_turn_once_codex_has_ended_the_stopped_one(
     engine.shutdown().await;
 }
 
-/// A Stop whose turn Codex never ends: after a while it is taken as ended,
-/// and the next send starts a turn.
+/// A Stop Codex never ends the turn for: after a while the Stop is reported
+/// as not taken, and no end is made up; the next send goes to Codex as a start.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_stopped_turn_codex_never_ends_is_taken_as_ended() {
+async fn a_stop_codex_answers_but_never_ends_is_reported_and_lets_the_thread_go() {
     let (engine, mut wire) = running_turn("admission-stop-unended").await;
     let mut events = engine.subscribe();
     let stopping = stop(&engine);
     wire.answer("turn/interrupt", json!({})).await;
-    stopping.await.unwrap().unwrap();
-    let ended = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            if let Event::TurnEnded { turn, state, .. } = events.recv().await.unwrap().event {
-                return (turn, state);
-            }
-        }
-    });
-    assert_eq!(ended.await.unwrap(), (TurnId("turn-1".into()), TurnState::Interrupted));
+    assert!(matches!(stopping.await.unwrap(), Err(EngineError::Codex { .. })), "the Stop is reported as not taken");
     let next = send(&engine, "next", "m");
     assert_eq!(wire.next().await["method"], "turn/start");
+    while let Ok(n) = events.try_recv() {
+        assert!(!matches!(n.event, Event::TurnEnded { .. }), "no end is made up");
+    }
     next.abort();
+    engine.shutdown().await;
+}
+
+/// Codex that holds `turn/interrupt` unanswered (until the turn's end, which
+/// does not come): the Stop is bounded all the same, and the next send goes on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_codex_never_answers_is_bounded_and_the_next_send_goes_on() {
+    let (engine, mut wire) = running_turn("admission-stop-unanswered").await;
+    let stopping = stop(&engine);
+    assert_eq!(wire.next().await["method"], "turn/interrupt");
+    let queued = send(&engine, "next", "m");
+    let within = std::time::Duration::from_secs(2);
+    assert!(tokio::time::timeout(within, stopping).await.expect("the Stop returns").unwrap().is_err());
+    let start = tokio::time::timeout(within, wire.next()).await.expect("the send goes on");
+    assert_eq!(start["method"], "turn/start");
+    wire.send(json!({"id": start["id"], "result": turn("turn-1")}));
+    tokio::time::timeout(within, queued).await.unwrap().unwrap().unwrap();
+    engine.shutdown().await;
+}
+
+/// A read whose history answer comes after the turn it shows running has
+/// ended: its number is from before the read, so the end applies on top.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_read_is_numbered_before_codex_answers_it() {
+    let (engine, mut wire, project) = idle_thread("admission-read-numbered").await;
+    let first = send(&engine, "one", "m");
+    wire.answer("thread/resume", json!({"thread": thread(&project, "Old")})).await;
+    wire.answer("turn/start", turn("turn-1")).await;
+    first.await.unwrap().unwrap();
+    let mut events = engine.subscribe();
+    let reading = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.read_thread(&ThreadId("t".into())).await }
+    });
+    wire.answer("thread/read", json!({"thread": thread(&project, "Old")})).await;
+    let list = wire.next().await;
+    assert_eq!(list["method"], "thread/turns/list");
+    wire.send(completed("turn-1"));
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let n = events.recv().await.unwrap();
+            if matches!(n.event, Event::TurnEnded { .. }) {
+                break n.seq;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    // Codex's history as of the request, with the turn still running.
+    wire.send(json!({"id": list["id"], "result": {"data": [turn("turn-1")["turn"]], "nextCursor": null}}));
+    let view = reading.await.unwrap().unwrap();
+    assert!(view.seq < ended, "the view, numbered {}, does not claim the end ({ended}) it does not hold", view.seq);
     engine.shutdown().await;
 }
 
@@ -340,4 +387,90 @@ async fn shutdown_ends_a_codex_still_starting() {
     assert!(starting.await.unwrap().is_err(), "the start fails");
     assert!(engine.connect().await.is_err(), "and stays failed");
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Shutdown while the engine reads the account, after Codex answered
+/// `initialize`: the start fails, and stays failed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_shut_down_while_it_reads_is_not_started() {
+    let (connector, mut wires) = super::fake::FakeCodex::new();
+    connector.hold("account/read");
+    let root = std::env::temp_dir().join(format!("chirality-shut-reading-{}", std::process::id()));
+    let engine = Engine { inner: crate::session::Inner::new(config(&root), connector, None).unwrap() };
+    let starting = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.connect().await }
+    });
+    let mut wire = wires.recv().await.unwrap();
+    assert_eq!(wire.next().await["method"], "account/read");
+    engine.shutdown().await;
+    assert!(wire.is_ended());
+    assert!(starting.await.unwrap().is_err(), "the start fails");
+    assert!(engine.connect().await.is_err(), "and stays failed");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// `Engine::start` given up on while Codex starts: the engine nobody holds
+/// is shut down, and its Codex with it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_given_up_on_shuts_its_engine_down() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+    let root = std::env::temp_dir().join(format!("chirality-start-given-up-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("home")).unwrap();
+    let (pid_file, proceed, bootstrapped) = (root.join("pid"), root.join("proceed"), root.join("bootstrapped"));
+    let bin = root.join("supplier");
+    let script = format!(
+        r#"#!/bin/sh
+test ! -f '{pid}' || exit 0
+echo $$ > '{pid}'
+IFS= read -r init || exit 0
+while test ! -f '{proceed}'; do /bin/sleep 0.01; done
+printf '%s\n' '{{"id":1,"result":{{"userAgent":"chirality/0.171.0 (fake)"}}}}'
+IFS= read -r initialized || exit 0
+IFS= read -r account || exit 0
+printf '%s\n' '{{"id":2,"result":{{"account":null}}}}'
+IFS= read -r models || exit 0
+printf '%s\n' '{{"id":3,"result":{{"data":[],"nextCursor":null}}}}'
+touch '{bootstrapped}'
+while IFS= read -r more; do :; done
+"#,
+        pid = pid_file.display(),
+        proceed = proceed.display(),
+        bootstrapped = bootstrapped.display()
+    );
+    std::fs::write(&bin, script).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let starting = tokio::spawn(Engine::start(EngineConfig { codex_bin: bin, ..config(&root) }));
+    let appears = |path: std::path::PathBuf| async move {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !path.is_file() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok()
+    };
+    assert!(appears(pid_file.clone()).await);
+    let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_string();
+    starting.abort();
+    assert!(matches!(starting.await, Err(e) if e.is_cancelled()));
+    std::fs::write(&proceed, "go").unwrap();
+    let _ = appears(bootstrapped).await;
+    let gone = async {
+        for _ in 0..300 {
+            let alive = std::process::Command::new("/bin/kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status().unwrap().success();
+            if !alive {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        false
+    };
+    let gone = gone.await;
+    if !gone {
+        let _ = std::process::Command::new("/bin/kill").args(["-KILL", &pid]).status();
+    }
+    let _ = std::fs::remove_dir_all(root);
+    assert!(gone, "the Codex of a start nobody took is ended");
 }

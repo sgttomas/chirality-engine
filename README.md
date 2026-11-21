@@ -49,7 +49,10 @@ tauri::Builder::default()
 `commands` answers the engine's commands, each named `engine:<method>`, and
 gives every other command to the app's own handler (`|_| false` for none), so
 the app's names never meet the engine's. The engine's commands are the app's
-own, so they need no permission; the plugins' do, in
+own, so they need no permission unless the app has its own ACL manifest
+(`tauri_build::AppManifest`): then it copies the crate's
+`permissions/engine.toml` into `src-tauri/permissions/` and adds
+`"allow-engine"` to its capability. The plugins' commands need permission, in
 `src-tauri/capabilities/default.json`, no more than the interface uses:
 
 ```json
@@ -91,8 +94,10 @@ The parts' styles and the theme (`applyTheme`) apply only on and inside the
 `EngineProvider`'s root. Every engine event reaches the interface numbered,
 and after each burst a mark with the last number sent; on a gap, or a mark
 past what arrived, the store reads the snapshot and the thread in view again.
-A thread read holds the text still streaming, so the events after it apply
-on top. `@chirality/engine-ui/fake` runs an interface in a
+A thread read is Codex's history, numbered from before the read; a view
+skips the events it already holds. Text Codex did not keep (a reply a Stop
+cut short) is in the view while it is open, and not when the thread is read
+again. `@chirality/engine-ui/fake` runs an interface in a
 browser on a scripted engine; `@chirality/engine-ui/testing` (with
 `@testing-library/react`) has the data the engine produced from recorded Codex
 sessions and a transport that replays it.

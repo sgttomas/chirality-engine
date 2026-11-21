@@ -14,3 +14,5 @@ tokio.workspace = true
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 serde_json.workspace = true
+tauri-utils = "2"
+toml = "0.8"

@@ -54,81 +54,11 @@ struct State {
     renames: u64,
     /// The number of the last event sent.
     seq: u64,
-    /// Each thread's last turn as its events told it: Codex's history leaves
-    /// out text still streaming, and an item a Stop cut short.
-    live: HashMap<ThreadId, Turn>,
 }
 
 pub(crate) struct Store {
     state: Mutex<State>,
     events: broadcast::Sender<Numbered>,
-}
-
-/// Keeps each thread's last turn current from its events.
-fn follow(live: &mut HashMap<ThreadId, Turn>, event: &Event) {
-    let fresh = |turn: &TurnId| Turn { id: turn.clone(), items: Vec::new(), state: TurnState::Running };
-    match event {
-        Event::TurnStarted { thread, turn } => {
-            live.insert(thread.clone(), fresh(turn));
-        }
-        Event::TurnEnded { thread, turn, state } => {
-            if let Some(last) = live.get_mut(thread).filter(|t| &t.id == turn) {
-                last.state = state.clone();
-            }
-        }
-        Event::Item { thread, turn, item } => {
-            let last = live.entry(thread.clone()).or_insert_with(|| fresh(turn));
-            if &last.id != turn {
-                *last = fresh(turn);
-            }
-            match last.items.iter_mut().find(|i| i.id == item.id) {
-                Some(known) => *known = item.clone(),
-                None => last.items.push(item.clone()),
-            }
-        }
-        Event::ItemDelta { thread, turn, item, text } => {
-            let found = live.get_mut(thread).filter(|t| &t.id == turn).and_then(|t| t.items.iter_mut().find(|i| &i.id == item));
-            if let Some(item) = found {
-                match &mut item.body {
-                    ItemBody::AgentMessage { text: so_far } | ItemBody::Reasoning { summary: so_far } | ItemBody::Command { output: so_far, .. } => so_far.push_str(text),
-                    _ => {}
-                }
-            }
-        }
-        Event::ThreadRemoved { thread } => {
-            live.remove(thread);
-        }
-        _ => {}
-    }
-}
-
-/// Codex's history with the turn the events told: an item Codex has finished
-/// is Codex's; one it has not, or has left out, is the events'.
-fn merge(turns: &mut Vec<Turn>, live: &Turn) {
-    let Some(turn) = turns.iter_mut().find(|t| t.id == live.id) else {
-        turns.push(live.clone());
-        return;
-    };
-    if turn.state == TurnState::Running {
-        turn.state = live.state.clone();
-    }
-    let mut after: Option<usize> = None;
-    for item in &live.items {
-        let at = match turn.items.iter().position(|i| i.id == item.id) {
-            Some(at) => {
-                if !turn.items[at].done {
-                    turn.items[at] = item.clone();
-                }
-                at
-            }
-            None => {
-                let at = after.map_or(turn.items.len(), |a| a + 1);
-                turn.items.insert(at, item.clone());
-                at
-            }
-        };
-        after = Some(at);
-    }
 }
 
 pub(crate) fn now() -> i64 {
@@ -152,24 +82,13 @@ impl Store {
     /// Numbers an event and sends it, under the state's lock, so the numbers
     /// follow the order of the changes and a snapshot knows the last it holds.
     fn send(&self, state: &mut State, event: Event) {
-        follow(&mut state.live, &event);
         state.seq += 1;
         let _ = self.events.send(Numbered { seq: state.seq, event });
     }
 
-    /// Codex's history alone holds the thread's turns from now (after a revert).
-    pub fn forget_live(&self, thread: &ThreadId) {
-        self.state.lock().unwrap().live.remove(thread);
-    }
-
-    /// A thread's history from Codex with its last turn as the events told it,
-    /// and the number of the last event that covers.
-    pub fn merged(&self, thread: &ThreadId, mut turns: Vec<Turn>) -> (Vec<Turn>, u64) {
-        let state = self.state.lock().unwrap();
-        if let Some(live) = state.live.get(thread) {
-            merge(&mut turns, live);
-        }
-        (turns, state.seq)
+    /// The number of the last event sent.
+    pub fn seq(&self) -> u64 {
+        self.state.lock().unwrap().seq
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -396,33 +315,5 @@ mod tests {
         // No change, no event, no number.
         store.set_account(Account::SignedOut);
         assert_eq!(store.snapshot().seq, 3);
-    }
-
-    fn agent(id: &str, text: &str, done: bool) -> Item {
-        Item { id: ItemId(id.into()), body: ItemBody::AgentMessage { text: text.into() }, done }
-    }
-
-    #[test]
-    fn a_read_takes_codex_s_finished_items_and_the_events_for_the_rest() {
-        let store = Store::new();
-        let (thread, turn) = (ThreadId("t".into()), TurnId("turn-1".into()));
-        store.emit(Event::TurnStarted { thread: thread.clone(), turn: turn.clone() });
-        for (id, text) in [("a", ""), ("b", "")] {
-            store.emit(Event::Item { thread: thread.clone(), turn: turn.clone(), item: agent(id, text, false) });
-        }
-        store.emit(Event::ItemDelta { thread: thread.clone(), turn: turn.clone(), item: ItemId("a".into()), text: "Fin".into() });
-        store.emit(Event::ItemDelta { thread: thread.clone(), turn: turn.clone(), item: ItemId("b".into()), text: "Stre".into() });
-        store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: TurnState::Interrupted });
-        // Codex finished `a` (its text is whole) and has `b` only as begun; an older turn is Codex's alone.
-        let older = Turn { id: TurnId("turn-0".into()), items: vec![agent("z", "Old", true)], state: TurnState::Completed };
-        let history = Turn { id: turn.clone(), items: vec![agent("a", "Finished", true), agent("b", "", false)], state: TurnState::Running };
-        let (turns, seq) = store.merged(&thread, vec![older.clone(), history]);
-        assert_eq!(seq, 6);
-        assert_eq!(turns[0], older);
-        assert_eq!(turns[1].items, [agent("a", "Finished", true), agent("b", "Stre", false)]);
-        assert_eq!(turns[1].state, TurnState::Interrupted);
-        // History without the turn at all: the turn as its events told it.
-        let (turns, _) = store.merged(&thread, vec![older]);
-        assert_eq!(turns[1].items, [agent("a", "Fin", false), agent("b", "Stre", false)]);
     }
 }

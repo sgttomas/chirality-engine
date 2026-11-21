@@ -7,8 +7,10 @@ import type { Turn } from "./Turn";
  */
 export type ThreadView = { summary: ThreadSummary, turns: Array<Turn>, 
 /**
- * The [`Numbered::seq`] of the last event the view holds: Codex's
- * history with the thread's last turn as its events told it (text still
- * streaming, an item a Stop cut short). Apply the events after it.
+ * The [`Numbered::seq`] of the last event before the read began: the
+ * view is Codex's history, which holds that and every event before it.
+ * Apply each event after it, except text for an item the view has as
+ * done. Text Codex has not kept (of a reply still streaming, or one a
+ * Stop cut short) is not in the view; the events after it bring the rest.
  */
 seq: number, };

@@ -150,6 +150,10 @@ impl Inner {
             for project in inner.store.projects() {
                 let _ = inner.list_threads(&project).await;
             }
+            if inner.shutting_down.load(Ordering::SeqCst) {
+                // Shut down while it read: not started.
+                return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            }
             tokio::spawn(inner.clone().run(incoming));
             Ok(())
         });

@@ -27,6 +27,8 @@ export class Store {
   private held: Numbered[] | null = [];
   /** The highest number the host has marked as sent. */
   private marked = 0;
+  /** The failure of the last recovery, shown until one succeeds. */
+  private recoveryError: string | null = null;
   /** While a thread is read: the events that arrive meanwhile, for each read. */
   private reads = new Set<Numbered[]>();
   /** Each thread's latest read: an earlier one that answers later, or one begun before a disposal, is dropped. */
@@ -61,6 +63,7 @@ export class Store {
     this.stop?.();
     this.stop = null;
     this.held = [];
+    this.marked = 0;
     this.reads.clear();
     this.latestRead.clear();
   }
@@ -82,7 +85,11 @@ export class Store {
     if (this.held) return void this.held.push(n);
     const seq = this.state.model!.snapshot.seq;
     if (n.seq <= seq) return;
-    if (n.seq !== seq + 1) return void this.recover();
+    if (n.seq !== seq + 1) {
+      this.recover();
+      // Held, so it is applied (and told) after the snapshot.
+      return void (this.held as Numbered[] | null)?.push(n);
+    }
     this.apply(n);
   }
 
@@ -92,22 +99,44 @@ export class Store {
     if (!this.held && last > this.state.model!.snapshot.seq) this.recover();
   }
 
-  private recover() {
-    void this.resync(this.generation).catch((e) => {
-      this.held = null;
-      this.set({ error: describe(e) });
-    });
+  /** Reads again after a gap or a mark ahead. A failure is shown, and tried again
+   * (after 0.25 s, doubling to 4 s) while the host has marked events not received. */
+  private recover(attempt = 0) {
+    const generation = this.generation;
+    void this.resync(generation).then(
+      () => {
+        if (this.recoveryError && this.state.error === this.recoveryError) this.set({ error: null });
+        this.recoveryError = null;
+      },
+      (e) => {
+        if (generation !== this.generation) return;
+        this.held = null;
+        this.recoveryError = describe(e);
+        this.set({ error: this.recoveryError });
+        setTimeout(() => {
+          const behind = this.state.model && this.marked > this.state.model.snapshot.seq;
+          if (generation === this.generation && !this.held && behind) this.recover(attempt + 1);
+        }, Math.min(250 * 2 ** attempt, 4000));
+      },
+    );
   }
 
   /** Reads the snapshot (and the thread in view) again; at the start, or once events were missed.
    * The events that arrived meanwhile are applied after it, and told to `onEvent`. */
   private async resync(generation: number) {
     this.held ??= [];
+    // Every event received from now is told to `onEvent` once, the snapshot holding it or not;
+    // at the start, those after the snapshot.
+    const applied = this.state.model?.snapshot.seq ?? null;
+    const received = new Map<number, Event>();
     let model: Model;
     let after: Numbered[];
+    let read = 0;
     for (;;) {
       const snapshot = await this.engine.snapshot();
+      read = snapshot.seq;
       if (generation !== this.generation) return;
+      for (const n of this.held) received.set(n.seq, n.event);
       after = this.held.filter((n) => n.seq > snapshot.seq);
       const gap = after.some((n, i) => n.seq !== snapshot.seq + i + 1);
       if (gap || this.marked > snapshot.seq + after.length) {
@@ -115,23 +144,24 @@ export class Store {
         continue;
       }
       model = { snapshot, views: {} };
-      for (const n of after) model = numbered(applyEvent(model, n.event), n.seq);
+      for (const n of after) model = applyEvent(model, n.event, n.seq);
       break;
     }
     this.held = null;
+    const told = [...received].filter(([seq]) => seq > (applied ?? read)).sort(([a], [b]) => a - b);
     const before = this.state;
     const { project, thread } = before;
     const projects = model.snapshot.projects;
     const keptProject = projects.some((p) => p.id === project) ? project : (projects[0]?.id ?? null);
     const keptThread = model.snapshot.threads.some((t) => t.id === thread && t.project === keptProject) ? thread : null;
     this.set({ model, project: keptProject, thread: keptThread });
-    for (const { event } of after) for (const listener of this.eventListeners) listener(event, before);
+    for (const [, event] of told) for (const listener of this.eventListeners) listener(event, before);
     if (keptThread) await this.reload(keptThread);
   }
 
   private apply({ seq, event }: Numbered) {
     const before = this.state;
-    this.set({ model: numbered(applyEvent(before.model!, event), seq) });
+    this.set({ model: applyEvent(before.model!, event, seq) });
     if (event.type === "thread" && event.thread.id === this.state.thread && event.thread.unread) this.markRead(event.thread.id);
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
     if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });
@@ -191,7 +221,7 @@ export class Store {
     if (!this.state.model.snapshot.threads.some((t) => t.id === thread)) return;
     // The read holds every event through its number; the rest apply on top.
     let view: ThreadView = read;
-    for (const { event } of after) if (threadOf(event) === thread) view = applyToView(view, event);
+    for (const { seq, event } of after) if (threadOf(event) === thread) view = { ...applyToView(view, event), seq };
     this.set({ model: { ...this.state.model, views: { ...this.state.model.views, [thread]: view } } });
   }
   async loadWorkflows(project: ProjectId) {
@@ -203,9 +233,6 @@ export class Store {
     void this.attempt(() => this.engine.markRead(thread));
   }
 }
-
-/** The model as of event `seq`. */
-const numbered = (model: Model, seq: number): Model => ({ ...model, snapshot: { ...model.snapshot, seq } });
 
 export function describe(error: unknown): string {
   if (error && typeof error === "object" && "kind" in error) {
