@@ -37,10 +37,18 @@ impl Inner {
             approvals_reviewer: "user",
             sandbox_policy,
         };
-        let started: p::TurnResponse = session.call("turn/start", params).await?;
+        // The thread carries the turn's settings from before Codex hears of it,
+        // so every summary the turn causes has them; a refused turn leaves the earlier ones.
+        let earlier = self.store.update_thread(thread, |e| e.settings.replace(settings)).flatten();
+        let started: p::TurnResponse = match session.call("turn/start", params).await {
+            Ok(started) => started,
+            Err(e) => {
+                self.store.update_thread(thread, |entry| entry.settings = earlier);
+                return Err(e);
+            }
+        };
         let turn = TurnId(started.turn.id);
         self.store.update_thread(thread, |e| {
-            e.settings = Some(settings);
             e.failed = None;
             if e.active_turn.is_none() && e.last_ended.as_ref() != Some(&turn) {
                 e.active_turn = Some(turn);

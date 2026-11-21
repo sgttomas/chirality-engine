@@ -187,32 +187,25 @@ impl Inner {
         }
         let project = self.store.projects().into_iter().find(|p| mapping::same_folder(&thread.cwd, &p.path))?;
         let id = ThreadId(thread.id.clone());
-        let existing = self.store.thread(&id);
-        let title = thread
-            .name
-            .clone()
-            .or_else(|| existing.as_ref().and_then(|e| e.title.clone()))
-            .or_else(|| mapping::title_from_preview(&thread.preview));
-        let settings = existing.as_ref().and_then(|e| e.settings.clone()).or_else(|| {
-            thread.model.clone().map(|model| TurnSettings { model, effort: thread.reasoning_effort.clone().map(Effort), access: Access::default() })
-        });
         let active_turn = match &thread.status {
             p::ThreadStatus::Active => thread.turns.iter().rev().find(|t| t.status == p::TurnStatus::InProgress).map(|t| TurnId(t.id.clone())),
             _ => None,
         };
-        let entry = crate::store::ThreadEntry {
+        self.store.upsert_thread(id.clone(), |existing| crate::store::ThreadEntry {
             project: project.id,
             cwd: thread.cwd.clone(),
-            title,
-            forked_from: thread.forked_from_id.clone().map(ThreadId),
-            updated_at: existing.as_ref().map(|e| e.updated_at.max(thread.updated_at)).unwrap_or(thread.updated_at),
-            settings,
-            active_turn: existing.as_ref().and_then(|e| e.active_turn.clone()).or(active_turn),
-            last_ended: existing.as_ref().and_then(|e| e.last_ended.clone()),
-            failed: existing.as_ref().and_then(|e| e.failed.clone()),
-            unread: existing.as_ref().is_some_and(|e| e.unread),
-        };
-        self.store.put_thread(id.clone(), entry);
+            title: thread.name.clone().or_else(|| existing.and_then(|e| e.title.clone())).or_else(|| mapping::title_from_preview(&thread.preview)),
+            // A fork made from this thread keeps the parent it was given.
+            forked_from: thread.forked_from_id.clone().map(ThreadId).or_else(|| existing.and_then(|e| e.forked_from.clone())),
+            updated_at: existing.map(|e| e.updated_at.max(thread.updated_at)).unwrap_or(thread.updated_at),
+            settings: existing.and_then(|e| e.settings.clone()).or_else(|| {
+                thread.model.clone().map(|model| TurnSettings { model, effort: thread.reasoning_effort.clone().map(Effort), access: Access::default() })
+            }),
+            active_turn: existing.and_then(|e| e.active_turn.clone()).or(active_turn),
+            last_ended: existing.and_then(|e| e.last_ended.clone()),
+            failed: existing.and_then(|e| e.failed.clone()),
+            unread: existing.is_some_and(|e| e.unread),
+        });
         Some(id)
     }
 }

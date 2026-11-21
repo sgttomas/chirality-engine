@@ -135,11 +135,18 @@ impl Store {
         self.state.lock().unwrap().threads.keys().cloned().collect()
     }
 
-    /// Adds or replaces a thread and announces it.
-    pub fn put_thread(&self, id: ThreadId, entry: ThreadEntry) {
+    /// Adds or replaces a thread, built from what is known of it in the same
+    /// step (so no change made meanwhile is lost), and announces it if its
+    /// summary changed.
+    pub fn upsert_thread(&self, id: ThreadId, build: impl FnOnce(Option<&ThreadEntry>) -> ThreadEntry) {
         let mut state = self.state.lock().unwrap();
+        let before = state.threads.contains_key(&id).then(|| summary(&state, &id));
+        let entry = build(state.threads.get(&id));
         state.threads.insert(id.clone(), entry);
-        let _ = self.events.send(Event::Thread { thread: summary(&state, &id) });
+        let after = summary(&state, &id);
+        if before.as_ref() != Some(&after) {
+            let _ = self.events.send(Event::Thread { thread: after });
+        }
     }
 
     /// Changes a known thread and announces it if its summary changed.

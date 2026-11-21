@@ -9,6 +9,8 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
+use crate::api::{Event, ThreadView};
+
 use super::harness::{Ctx, Tape};
 use super::scenarios;
 
@@ -33,6 +35,28 @@ fn fix_times(value: &mut Value, since: i64) {
     }
 }
 
+/// Consecutive summaries of one thread with no read between them become the
+/// last. Each replaces the one before it whole, and whether the engine sends
+/// one or two for a turn's start depends only on whether Codex's answer or its
+/// notification is handled first.
+fn collapse(events: Vec<Event>, reads: Vec<(usize, ThreadView)>) -> (Vec<Event>, Vec<(usize, ThreadView)>) {
+    let mut kept: Vec<Event> = Vec::new();
+    // kept.len() after the first i events.
+    let mut count = vec![0];
+    for (i, event) in events.into_iter().enumerate() {
+        let read_between = reads.iter().any(|(at, _)| *at == i);
+        let same_thread = matches!((kept.last(), &event), (Some(Event::Thread { thread: a }), Event::Thread { thread: b }) if a.id == b.id);
+        if same_thread && !read_between {
+            *kept.last_mut().unwrap() = event;
+        } else {
+            kept.push(event);
+        }
+        count.push(kept.len());
+    }
+    let reads = reads.into_iter().map(|(at, view)| (count[at], view)).collect();
+    (kept, reads)
+}
+
 async fn capture(name: &str) -> Value {
     let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 - 5;
     let mut ctx = Ctx::replay(name).await;
@@ -52,12 +76,13 @@ async fn capture(name: &str) -> Value {
     let after = ctx.engine.snapshot();
     let mut tape = ctx.tape.take().unwrap().into_inner().unwrap();
     tape.drain();
-    let reads: Vec<Value> = tape.reads.iter().map(|(at, view)| json!({ "afterEvents": at, "view": view })).collect();
+    let (events, reads) = collapse(tape.events, tape.reads);
+    let reads: Vec<Value> = reads.iter().map(|(at, view)| json!({ "afterEvents": at, "view": view })).collect();
     let root = ctx.run.root.display().to_string();
     // Project ids are derived from the run's folder; name them by position instead.
     let projects: Vec<String> = after.projects.iter().map(|p| p.id.0.clone()).collect();
     ctx.finish(name).await;
-    let data = json!({ "before": before, "events": tape.events, "after": after, "reads": reads });
+    let data = json!({ "before": before, "events": events, "after": after, "reads": reads });
     // The run's temporary folder becomes a fixed one, so the files are stable.
     let mut text = serde_json::to_string(&data).unwrap().replace(&root, "/work/run");
     for (i, id) in projects.iter().enumerate() {

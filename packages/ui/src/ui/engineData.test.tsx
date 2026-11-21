@@ -117,7 +117,9 @@ describe("over the real engine's data", () => {
     const { engine, store } = await open("fork");
     const fork = await act(async () => engine.play((e) => e.type === "thread" && e.thread.forkedFrom !== null));
     if (fork?.type !== "thread") throw new Error("no fork");
-    for (let i = 0; i < 4; i++) await playTo(engine, "thread");
+    // The parent's summary with its title, the last event before the archive.
+    await playTo(engine, "thread");
+    expect(engine.data.events[engine.data.events.length - 1].type).toBe("threadRemoved");
     await act(() => store.selectThread(fork.thread.id));
     await settle();
     expect(screen.getAllByText("One.")).toHaveLength(1);

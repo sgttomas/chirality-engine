@@ -368,63 +368,6 @@
         "project": "project-1",
         "settings": {
           "access": "ask",
-          "effort": null,
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "idle"
-        },
-        "title": null,
-        "unread": false,
-        "updatedAt": 0
-      },
-      "type": "thread"
-    },
-    {
-      "thread": {
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
-          "effort": null,
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "idle"
-        },
-        "title": null,
-        "unread": false,
-        "updatedAt": 0
-      },
-      "type": "thread"
-    },
-    {
-      "thread": {
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
-          "effort": "low",
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "working"
-        },
-        "title": null,
-        "unread": false,
-        "updatedAt": 0
-      },
-      "type": "thread"
-    },
-    {
-      "thread": {
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
           "effort": "low",
           "model": "gpt-6.2-sol"
         },
@@ -471,25 +414,6 @@
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000003",
       "type": "item"
-    },
-    {
-      "thread": {
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
-          "effort": "low",
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "idle"
-        },
-        "title": null,
-        "unread": false,
-        "updatedAt": 1795000000
-      },
-      "type": "thread"
     },
     {
       "thread": {
