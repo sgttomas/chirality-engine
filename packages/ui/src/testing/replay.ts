@@ -3,7 +3,7 @@
 // to the real client.
 import { createEngineClient, type EngineClient, type Transport } from "../engine/client";
 import { engineEvent, type EngineCommand } from "../engine/commands";
-import type { Answer, Event, Snapshot, ThreadView } from "../engine/types";
+import type { Answer, Event, Numbered, Snapshot, ThreadView } from "../engine/types";
 
 export interface EngineData {
   before: Snapshot;
@@ -27,7 +27,7 @@ const notRecorded = { kind: "invalid", message: "not in the recording" };
 
 /** Plays recorded events on demand; records what the interface asks of it. */
 export class ReplayTransport implements Transport {
-  private listeners = new Set<(event: Event) => void>();
+  private listeners = new Set<(event: Numbered) => void>();
   private at = 0;
   readonly answers: { request: string; answer: Answer }[] = [];
   /** Commands the recording has no answer for, by name. */
@@ -41,11 +41,12 @@ export class ReplayTransport implements Transport {
     private patch: (s: Snapshot) => Snapshot = (s) => s,
   ) {}
 
-  /** Emits events until `stop` accepts one (it is emitted too), or to the end. */
+  /** Emits events, numbered as the engine numbered them, until `stop` accepts one (it is emitted too), or to the end. */
   play(stop: (event: Event) => boolean = () => false) {
     while (this.at < this.data.events.length) {
       const event = this.data.events[this.at++];
-      for (const listener of this.listeners) listener(structuredClone(event));
+      const numbered = { seq: this.data.before.seq + this.at, event: structuredClone(event) };
+      for (const listener of this.listeners) listener(numbered);
       if (stop(event)) return event;
     }
     return undefined;
@@ -54,9 +55,9 @@ export class ReplayTransport implements Transport {
     return this.at >= this.data.events.length;
   }
 
-  listen<T>(event: string, handler: (payload: T) => void) {
+  async listen<T>(event: string, handler: (payload: T) => void) {
     if (event !== engineEvent) return () => {};
-    const listener = handler as unknown as (event: Event) => void;
+    const listener = handler as unknown as (event: Numbered) => void;
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
   }
@@ -98,6 +99,6 @@ export class ReplayTransport implements Transport {
     if (read) return structuredClone(read.view);
     const summary = [...this.data.events.slice(0, this.at)].reverse().find((e) => e.type === "thread" && e.thread.id === thread);
     if (summary?.type !== "thread") throw { kind: "notFound", what: thread };
-    return { summary: structuredClone(summary.thread), turns: [] };
+    return { summary: structuredClone(summary.thread), turns: [], seq: this.data.before.seq + this.at };
   }
 }

@@ -9,6 +9,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+use crate::Engine;
+use crate::api::{AppTools, EngineConfig};
 use crate::transport::{ConnectFuture, Connection, Connector, Ended, Stopper};
 
 /// The fake's end of the connection, and the mark that it has ended.
@@ -89,22 +91,29 @@ pub struct FakeCodex {
     wires: mpsc::UnboundedSender<Wire>,
     /// Methods given to the test to answer instead.
     held: Arc<Mutex<HashSet<String>>>,
+    /// How long a stopped connection's process takes to be reaped.
+    reaping: Arc<Mutex<Duration>>,
 }
 
 impl FakeCodex {
     /// The connector, and each connection it makes, in order.
     pub fn new() -> (Arc<FakeCodex>, mpsc::UnboundedReceiver<Wire>) {
         let (wires, rx) = mpsc::unbounded_channel();
-        (Arc::new(FakeCodex { wires, held: Arc::default() }), rx)
+        (Arc::new(FakeCodex { wires, held: Arc::default(), reaping: Arc::default() }), rx)
     }
 
     /// From now on the test answers `method`, on every connection.
     pub fn hold(&self, method: &str) {
         self.held.lock().unwrap().insert(method.to_string());
     }
+
+    /// From now on a stopped process takes `delay` to be reaped.
+    pub fn reap_after(&self, delay: Duration) {
+        *self.reaping.lock().unwrap() = delay;
+    }
 }
 
-struct Stop(Line);
+struct Stop(Line, Duration);
 
 impl Stopper for Stop {
     fn stop(&self) {
@@ -112,6 +121,9 @@ impl Stopper for Stop {
     }
     fn kill(&self) {
         self.0.end();
+    }
+    fn reaped(&self) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(tokio::time::sleep(self.1))
     }
 }
 
@@ -149,6 +161,31 @@ impl Connector for FakeCodex {
             }
         });
         let ended = line.ended.clone();
-        Box::pin(async move { Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(Stop(line)), ended }) })
+        let reaping = *self.reaping.lock().unwrap();
+        Box::pin(async move { Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(Stop(line, reaping)), ended }) })
     }
+}
+
+static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// An engine on the scripted Codex: the engine, the later connections, the
+/// first one, the scripted Codex itself, and a project folder the engine
+/// knows nothing of yet.
+pub async fn start_engine(name: &str, tools: Option<AppTools>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wire, Arc<FakeCodex>, std::path::PathBuf) {
+    let n = RUN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let root = std::env::temp_dir().join(format!("chirality-{name}-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let config = EngineConfig {
+        codex_bin: "codex".into(),
+        codex_home: Some(root.join("home")),
+        state_dir: root.join("state"),
+        workflow_roots: Vec::new(),
+        codex_settings: Vec::new(),
+        tools,
+    };
+    let (connector, mut wires) = FakeCodex::new();
+    let engine = Engine::start_with(config, connector.clone(), None).await.expect("the engine starts");
+    let wire = wires.recv().await.expect("a connection");
+    std::fs::create_dir_all(root.join("project")).unwrap();
+    (engine, wires, wire, connector, root.join("project").canonicalize().unwrap())
 }

@@ -3,8 +3,8 @@
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
 
 import type { EngineClient, Host } from "../engine/client";
-import type { Event, ProjectId, ThreadId, Workflow } from "../engine/types";
-import { applyEvent, type Model } from "./reduce";
+import type { Event, Numbered, ProjectId, ThreadId, ThreadView, Workflow } from "../engine/types";
+import { applyEvent, applyToView, threadOf, type Model } from "./reduce";
 
 export interface State {
   model: Model | null;
@@ -19,6 +19,10 @@ export class Store {
   private listeners = new Set<() => void>();
   private stop: (() => void) | null = null;
   private eventListeners = new Set<(event: Event, before: State) => void>();
+  /** While the snapshot is read: the events that arrive meanwhile. */
+  private held: Numbered[] | null = [];
+  /** While a thread is read: the events that arrive meanwhile, for each read. */
+  private reads = new Set<Numbered[]>();
 
   constructor(
     readonly engine: EngineClient,
@@ -36,27 +40,52 @@ export class Store {
     return () => void this.eventListeners.delete(listener);
   }
 
-  /** Follows the engine: listens first, then reads the snapshot, then applies what came meanwhile. */
+  /** Follows the engine: listens first, then reads the snapshot and applies the events after it. */
   async start() {
-    const early: Event[] = [];
-    this.stop = this.engine.subscribe((event) => {
-      if (!this.state.model) return void early.push(event);
-      this.apply(event);
-    });
-    const snapshot = await this.engine.snapshot();
-    let model: Model = { snapshot, views: {} };
-    for (const event of early) model = applyEvent(model, event);
-    const project = this.state.project ?? snapshot.projects[0]?.id ?? null;
-    this.set({ model, project });
+    this.stop = await this.engine.subscribe((n) => this.receive(n));
+    await this.resync();
+    if (this.state.project) void this.loadWorkflows(this.state.project);
   }
   dispose() {
     this.stop?.();
   }
 
-  private apply(event: Event) {
+  private receive(n: Numbered) {
+    for (const read of this.reads) read.push(n);
+    if (this.held) return void this.held.push(n);
+    const seq = this.state.model!.snapshot.seq;
+    if (n.seq <= seq) return;
+    if (n.seq !== seq + 1) return void this.resync();
+    this.apply(n);
+  }
+
+  /** Reads the snapshot (and the thread in view) again; at the start, or once events were missed. */
+  private async resync() {
+    this.held ??= [];
+    let model: Model;
+    for (;;) {
+      const snapshot = await this.engine.snapshot();
+      model = { snapshot, views: {} };
+      const after = this.held.filter((n) => n.seq > snapshot.seq);
+      if (after.some((n, i) => n.seq !== snapshot.seq + i + 1)) {
+        this.held = [];
+        continue;
+      }
+      for (const n of after) model = numbered(applyEvent(model, n.event), n.seq);
+      break;
+    }
+    this.held = null;
+    const { project, thread } = this.state;
+    const projects = model.snapshot.projects;
+    const keptProject = projects.some((p) => p.id === project) ? project : (projects[0]?.id ?? null);
+    const keptThread = model.snapshot.threads.some((t) => t.id === thread && t.project === keptProject) ? thread : null;
+    this.set({ model, project: keptProject, thread: keptThread });
+    if (keptThread) await this.reload(keptThread);
+  }
+
+  private apply({ seq, event }: Numbered) {
     const before = this.state;
-    const model = applyEvent(before.model!, event);
-    if (model !== before.model) this.set({ model });
+    this.set({ model: numbered(applyEvent(before.model!, event), seq) });
     if (event.type === "thread" && event.thread.id === this.state.thread && event.thread.unread) this.markRead(event.thread.id);
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
     if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });
@@ -102,9 +131,25 @@ export class Store {
     if (!this.state.model?.views[thread]) await this.reload(thread);
     if (summary?.unread) this.markRead(thread);
   }
+  /** Reads the thread again, with the events after the read applied. */
   async reload(thread: ThreadId) {
-    const view = await this.attempt(() => this.engine.readThread(thread));
-    if (view && this.state.model) this.set({ model: { ...this.state.model, views: { ...this.state.model.views, [thread]: view } } });
+    const during: Numbered[] = [];
+    this.reads.add(during);
+    const read = await this.attempt(() => this.engine.readThread(thread)).finally(() => this.reads.delete(during));
+    if (!read || !this.state.model) return;
+    const after = during.filter((n) => n.seq > read.seq);
+    // A gap: the snapshot is read again, and this thread with it if it is in view.
+    if (after.some((n, i) => n.seq !== read.seq + i + 1)) return;
+    if (!this.state.model.snapshot.threads.some((t) => t.id === thread)) return;
+    const had = new Set(read.turns.flatMap((t) => t.items.map((i) => i.id)));
+    let view: ThreadView = read;
+    for (const { event } of after) {
+      if (threadOf(event) !== thread) continue;
+      // Text the read already holds; the item's last event brings all of it in any case.
+      if (event.type === "itemDelta" && had.has(event.item)) continue;
+      view = applyToView(view, event);
+    }
+    this.set({ model: { ...this.state.model, views: { ...this.state.model.views, [thread]: view } } });
   }
   async loadWorkflows(project: ProjectId) {
     if (this.state.workflows[project]) return;
@@ -115,6 +160,9 @@ export class Store {
     void this.attempt(() => this.engine.markRead(thread));
   }
 }
+
+/** The model as of event `seq`. */
+const numbered = (model: Model, seq: number): Model => ({ ...model, snapshot: { ...model.snapshot, seq } });
 
 export function describe(error: unknown): string {
   if (error && typeof error === "object" && "kind" in error) {
@@ -128,9 +176,11 @@ export function describe(error: unknown): string {
 
 export const StoreContext = createContext<Store | null>(null);
 
-/** Gives the parts inside it the engine store. */
-export function EngineProvider({ store, children }: { store: Store; children?: ReactNode }) {
-  return createElement(StoreContext.Provider, { value: store }, children);
+/** The root of the engine's parts: gives them the store, and shows them once it has followed the
+ * engine to its first snapshot (`fallback` until then). Their styles apply inside it. */
+export function EngineProvider({ store, fallback = null, children }: { store: Store; fallback?: ReactNode; children?: ReactNode }) {
+  const ready = useSyncExternalStore(store.subscribe, () => store.get().model !== null);
+  return createElement(StoreContext.Provider, { value: store }, createElement("div", { className: "chirality" }, ready ? children : fallback));
 }
 
 export function useStoreHandle(): Store {

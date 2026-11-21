@@ -167,6 +167,7 @@
         "path": "/work/run/project"
       }
     ],
+    "seq": 22,
     "threads": [
       {
         "forkedFrom": null,
@@ -348,6 +349,7 @@
     ],
     "pending": [],
     "projects": [],
+    "seq": 0,
     "threads": []
   },
   "events": [
@@ -636,6 +638,7 @@
     {
       "afterEvents": 20,
       "view": {
+        "seq": 20,
         "summary": {
           "forkedFrom": "00000000-0000-0000-0000-000000000002",
           "id": "00000000-0000-0000-0000-000000000009",
@@ -685,6 +688,7 @@
     {
       "afterEvents": 21,
       "view": {
+        "seq": 21,
         "summary": {
           "forkedFrom": null,
           "id": "00000000-0000-0000-0000-000000000002",

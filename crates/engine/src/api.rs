@@ -176,6 +176,9 @@ pub struct Snapshot {
     pub projects: Vec<Project>,
     pub threads: Vec<ThreadSummary>,
     pub pending: Vec<PendingRequest>,
+    /// The [`Numbered::seq`] of the last event it includes (0 before any).
+    #[ts(type = "number")]
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
@@ -307,6 +310,10 @@ pub enum Attachment {
 pub struct ThreadView {
     pub summary: ThreadSummary,
     pub turns: Vec<Turn>,
+    /// The [`Numbered::seq`] of the last event before the read began: the
+    /// view holds at least what that and the events before it did.
+    #[ts(type = "number")]
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -468,6 +475,18 @@ pub enum Event {
     ItemDelta { thread: ThreadId, turn: TurnId, item: ItemId, text: String },
     Pending { request: PendingRequest },
     Resolved { request: RequestId },
+}
+
+/// An [`Event`] with its place in the engine's stream: numbered from 1, each
+/// one more than the one before. A gap means events were missed: read the
+/// snapshot (and any thread shown) again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct Numbered {
+    #[ts(type = "number")]
+    pub seq: u64,
+    pub event: Event,
 }
 
 /// Why an engine call failed, in words an interface can show.

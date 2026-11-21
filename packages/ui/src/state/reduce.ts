@@ -2,6 +2,7 @@
 import type { Event, Item, ItemBody, Snapshot, ThreadId, ThreadView, Turn } from "../engine/types";
 
 export interface Model {
+  /** Its `seq` is the last event applied (by the store; `applyEvent` leaves it). */
   snapshot: Snapshot;
   /** The threads read so far, kept current from events. */
   views: Record<ThreadId, ThreadView>;
@@ -31,7 +32,8 @@ const appended = (body: ItemBody, text: string): ItemBody => {
   }
 };
 
-function applyToView(view: ThreadView, event: Event): ThreadView {
+/** A thread's view with one of that thread's events applied. */
+export function applyToView(view: ThreadView, event: Event): ThreadView {
   switch (event.type) {
     case "thread":
       return { ...view, summary: event.thread };
@@ -51,7 +53,7 @@ function applyToView(view: ThreadView, event: Event): ThreadView {
   }
 }
 
-const threadOf = (event: Event): ThreadId | null => {
+export const threadOf = (event: Event): ThreadId | null => {
   switch (event.type) {
     case "thread":
       return event.thread.id;

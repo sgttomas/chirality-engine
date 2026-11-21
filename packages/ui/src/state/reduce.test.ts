@@ -11,7 +11,7 @@ const yes = (r: Request): Answer => (r.kind === "question" ? { kind: "answers", 
 /** Follows an engine by events only, as the interface does. */
 async function follow(engine: FakeEngine) {
   const events: Event[] = [];
-  engine.subscribe((e) => events.push(e));
+  await engine.subscribe((n) => events.push(n.event));
   let model: Model = { snapshot: await engine.snapshot(), views: {} };
   return {
     events,
@@ -41,8 +41,10 @@ describe("following the engine's events", () => {
     await engine.settled(thread);
 
     const model = follower.model();
-    expect(model.views[thread]).toEqual(await engine.readThread(thread));
-    expect(model.snapshot).toEqual(await engine.snapshot());
+    const read = await engine.readThread(thread);
+    expect({ ...model.views[thread], seq: read.seq }).toEqual(read);
+    const held = await engine.snapshot();
+    expect({ ...model.snapshot, seq: held.seq }).toEqual(held);
   });
 
   it("keeps a question pending until it is answered, then clears it", async () => {

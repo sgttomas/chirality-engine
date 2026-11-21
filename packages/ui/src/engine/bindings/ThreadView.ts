@@ -5,4 +5,9 @@ import type { Turn } from "./Turn";
 /**
  * A thread's full contents, for showing it.
  */
-export type ThreadView = { summary: ThreadSummary, turns: Array<Turn>, };
+export type ThreadView = { summary: ThreadSummary, turns: Array<Turn>, 
+/**
+ * The [`Numbered::seq`] of the last event before the read began: the
+ * view holds at least what that and the events before it did.
+ */
+seq: number, };

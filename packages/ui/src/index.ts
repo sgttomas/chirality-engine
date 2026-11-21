@@ -1,9 +1,10 @@
 // The Chirality engine's interface parts. An application gives them an engine
 // client and a host (`@chirality/engine-ui/tauri` in a Tauri app), a `Store`
-// inside an `EngineProvider`, and composes the parts it wants: the whole
-// `StandardLayout`, or `Conversation` (or `Turns` and `Composer`) inside its own.
-// Each part brings its own styles; `@chirality/engine-ui/tokens.css` is the
-// design language they share, imported once by the application.
+// inside an `EngineProvider` (which shows them once the store has started), and
+// composes the parts it wants: the whole `StandardLayout`, or `Conversation` (or
+// `Turns` and `Composer`) inside its own. Each part brings its own styles;
+// `@chirality/engine-ui/tokens.css` is the design language they share, imported
+// once by the application, and `page.css` lets them fill the window.
 
 // The engine's types, generated from its Rust API.
 export type * from "./engine/types";

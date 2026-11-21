@@ -13,10 +13,7 @@ export const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS
 
 export const tauriTransport: Transport = {
   invoke: <T>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args),
-  listen<T>(event: string, handler: (payload: T) => void) {
-    const stop = listen<T>(event, (e) => handler(e.payload));
-    return () => void stop.then((unlisten) => unlisten());
-  },
+  listen: <T>(event: string, handler: (payload: T) => void) => listen<T>(event, (e) => handler(e.payload)),
 };
 
 export const tauriEngine: EngineClient = createEngineClient(tauriTransport);

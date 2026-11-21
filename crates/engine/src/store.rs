@@ -17,7 +17,10 @@ pub(crate) struct ThreadEntry {
     pub title: Option<String>,
     pub forked_from: Option<ThreadId>,
     pub updated_at: i64,
+    /// The settings of the last turn Codex took.
     pub settings: Option<TurnSettings>,
+    /// The settings of a turn being started, until Codex takes or refuses it.
+    pub starting: Option<TurnSettings>,
     pub active_turn: Option<TurnId>,
     /// The last turn Codex ended, so a late `turn/start` answer does not revive it.
     pub last_ended: Option<TurnId>,
@@ -47,11 +50,15 @@ struct State {
     file_changes: HashMap<String, Vec<FileDiff>>,
     /// Subagent threads, by the thread that started them.
     parents: HashMap<ThreadId, ThreadId>,
+    /// Counts renames, so a read sent before one does not undo it.
+    renames: u64,
+    /// The number of the last event sent.
+    seq: u64,
 }
 
 pub(crate) struct Store {
     state: Mutex<State>,
-    events: broadcast::Sender<Event>,
+    events: broadcast::Sender<Numbered>,
 }
 
 pub(crate) fn now() -> i64 {
@@ -63,13 +70,25 @@ impl Store {
         Store { state: Mutex::default(), events: broadcast::channel(4096).0 }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+    pub fn subscribe(&self) -> broadcast::Receiver<Numbered> {
         self.events.subscribe()
     }
 
     pub fn emit(&self, event: Event) {
-        let _state = self.state.lock().unwrap();
-        let _ = self.events.send(event);
+        let mut state = self.state.lock().unwrap();
+        self.send(&mut state, event);
+    }
+
+    /// Numbers an event and sends it, under the state's lock, so the numbers
+    /// follow the order of the changes and a snapshot knows the last it holds.
+    fn send(&self, state: &mut State, event: Event) {
+        state.seq += 1;
+        let _ = self.events.send(Numbered { seq: state.seq, event });
+    }
+
+    /// The number of the last event sent.
+    pub fn seq(&self) -> u64 {
+        self.state.lock().unwrap().seq
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -83,6 +102,7 @@ impl Store {
             projects: state.projects.clone(),
             threads,
             pending: state.pending.iter().map(|p| p.request.clone()).collect(),
+            seq: state.seq,
         }
     }
 
@@ -94,7 +114,7 @@ impl Store {
         let mut state = self.state.lock().unwrap();
         if state.codex != status {
             state.codex = status.clone();
-            let _ = self.events.send(Event::Codex { status });
+            { let event = Event::Codex { status }; self.send(&mut state, event); }
         }
     }
 
@@ -102,14 +122,14 @@ impl Store {
         let mut state = self.state.lock().unwrap();
         if state.account != account {
             state.account = account.clone();
-            let _ = self.events.send(Event::Account { account });
+            { let event = Event::Account { account }; self.send(&mut state, event); }
         }
     }
 
     pub fn set_models(&self, models: Vec<Model>) {
         let mut state = self.state.lock().unwrap();
         state.models = models.clone();
-        let _ = self.events.send(Event::Models { models });
+        { let event = Event::Models { models }; self.send(&mut state, event); }
     }
 
     pub fn projects(&self) -> Vec<Project> {
@@ -119,7 +139,17 @@ impl Store {
     pub fn set_projects(&self, projects: Vec<Project>) {
         let mut state = self.state.lock().unwrap();
         state.projects = projects.clone();
-        let _ = self.events.send(Event::Projects { projects });
+        { let event = Event::Projects { projects }; self.send(&mut state, event); }
+    }
+
+    /// How many renames there have been; see [`Store::upsert_thread`].
+    pub fn renames(&self) -> u64 {
+        self.state.lock().unwrap().renames
+    }
+
+    /// A rename is starting, or Codex reported one.
+    pub fn renamed(&self) {
+        self.state.lock().unwrap().renames += 1;
     }
 
     pub fn thread(&self, id: &ThreadId) -> Option<ThreadEntry> {
@@ -138,14 +168,20 @@ impl Store {
     /// Adds or replaces a thread, built from what is known of it in the same
     /// step (so no change made meanwhile is lost), and announces it if its
     /// summary changed.
-    pub fn upsert_thread(&self, id: ThreadId, build: impl FnOnce(Option<&ThreadEntry>) -> ThreadEntry) {
+    /// `read_at` is [`Store::renames`] when the reply being adopted was asked
+    /// for: after a rename since, the known title stays.
+    pub fn upsert_thread(&self, id: ThreadId, read_at: Option<u64>, build: impl FnOnce(Option<&ThreadEntry>) -> ThreadEntry) {
         let mut state = self.state.lock().unwrap();
         let before = state.threads.contains_key(&id).then(|| summary(&state, &id));
-        let entry = build(state.threads.get(&id));
+        let mut entry = build(state.threads.get(&id));
+        let renamed_since = read_at.is_some_and(|at| at != state.renames);
+        if let Some(title) = state.threads.get(&id).and_then(|e| e.title.clone()).filter(|_| renamed_since) {
+            entry.title = Some(title);
+        }
         state.threads.insert(id.clone(), entry);
         let after = summary(&state, &id);
         if before.as_ref() != Some(&after) {
-            let _ = self.events.send(Event::Thread { thread: after });
+            { let event = Event::Thread { thread: after }; self.send(&mut state, event); }
         }
     }
 
@@ -157,7 +193,7 @@ impl Store {
         let result = change(state.threads.get_mut(id)?);
         let after = summary(&state, id);
         if after != before {
-            let _ = self.events.send(Event::Thread { thread: after });
+            { let event = Event::Thread { thread: after }; self.send(&mut state, event); }
         }
         Some(result)
     }
@@ -165,7 +201,7 @@ impl Store {
     pub fn remove_thread(&self, id: &ThreadId) {
         let mut state = self.state.lock().unwrap();
         if state.threads.remove(id).is_some() {
-            let _ = self.events.send(Event::ThreadRemoved { thread: id.clone() });
+            { let event = Event::ThreadRemoved { thread: id.clone() }; self.send(&mut state, event); }
         }
     }
 
@@ -180,13 +216,13 @@ impl Store {
     pub fn add_pending(&self, pending: Pending) {
         let mut state = self.state.lock().unwrap();
         let thread = pending.request.thread.clone();
-        let _ = self.events.send(Event::Pending { request: pending.request.clone() });
+        { let event = Event::Pending { request: pending.request.clone() }; self.send(&mut state, event); }
         state.pending.push(pending);
         if let Some(entry) = state.threads.get_mut(&thread) {
             entry.unread = true;
         }
         if state.threads.contains_key(&thread) {
-            let _ = self.events.send(Event::Thread { thread: summary(&state, &thread) });
+            { let event = Event::Thread { thread: summary(&state, &thread) }; self.send(&mut state, event); }
         }
     }
 
@@ -227,9 +263,9 @@ impl Store {
         let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut state.pending).into_iter().partition(|p| matches(p));
         state.pending = kept;
         for p in gone {
-            let _ = self.events.send(Event::Resolved { request: p.request.id.clone() });
+            { let event = Event::Resolved { request: p.request.id.clone() }; self.send(&mut state, event); }
             if state.threads.contains_key(&p.request.thread) {
-                let _ = self.events.send(Event::Thread { thread: summary(&state, &p.request.thread) });
+                { let event = Event::Thread { thread: summary(&state, &p.request.thread) }; self.send(&mut state, event); }
             }
         }
     }
@@ -257,6 +293,27 @@ fn summary(state: &State, id: &ThreadId) -> ThreadSummary {
         unread: entry.unread,
         forked_from: entry.forked_from.clone(),
         updated_at: entry.updated_at,
-        settings: entry.settings.clone(),
+        settings: entry.starting.clone().or_else(|| entry.settings.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn events_are_numbered_in_order_and_a_snapshot_knows_the_last_it_holds() {
+        let store = Store::new();
+        let mut events = store.subscribe();
+        assert_eq!(store.snapshot().seq, 0);
+        store.set_codex(CodexStatus::Ready { version: "0.171.0".into() });
+        store.set_account(Account::SignedOut);
+        store.emit(Event::ThreadRemoved { thread: ThreadId("t".into()) });
+        let seqs: Vec<u64> = std::iter::from_fn(|| events.try_recv().ok()).map(|n| n.seq).collect();
+        assert_eq!(seqs, [1, 2, 3]);
+        assert_eq!(store.snapshot().seq, 3);
+        // No change, no event, no number.
+        store.set_account(Account::SignedOut);
+        assert_eq!(store.snapshot().seq, 3);
     }
 }

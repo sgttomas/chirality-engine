@@ -9,6 +9,7 @@ import type {
   ItemBody,
   ItemId,
   Message,
+  Numbered,
   PendingRequest,
   Project,
   ProjectId,
@@ -58,7 +59,8 @@ const fail = (error: EngineError) => Promise.reject(error);
 export class FakeEngine implements EngineClient {
   private snap: Snapshot;
   private views = new Map<ThreadId, ThreadView>();
-  private listeners = new Set<(event: Event) => void>();
+  private listeners = new Set<(event: Numbered) => void>();
+  private seq = 0;
   private running = new Map<ThreadId, Running>();
   private waiting = new Map<RequestId, { thread: ThreadId; resolve: (a: Answer) => void }>();
   private marks = new Map<string, () => void>();
@@ -75,6 +77,7 @@ export class FakeEngine implements EngineClient {
       projects: [],
       threads: [],
       pending: [],
+      seq: 0,
     };
   }
 
@@ -108,9 +111,9 @@ export class FakeEngine implements EngineClient {
   // The client.
 
   async snapshot() {
-    return structuredClone(this.snap);
+    return structuredClone({ ...this.snap, seq: this.seq });
   }
-  subscribe(onEvent: (event: Event) => void) {
+  async subscribe(onEvent: (event: Numbered) => void) {
     this.listeners.add(onEvent);
     return () => void this.listeners.delete(onEvent);
   }
@@ -148,7 +151,7 @@ export class FakeEngine implements EngineClient {
   async readThread(thread: ThreadId) {
     const view = this.views.get(thread);
     if (!view) return fail({ kind: "notFound", what: `thread ${thread}` });
-    return structuredClone(view);
+    return structuredClone({ ...view, seq: this.seq });
   }
   async startThread(project: ProjectId, message: Message, settings: TurnSettings) {
     if (!this.snap.projects.some((p) => p.id === project)) return fail({ kind: "notFound", what: `project ${project}` });
@@ -163,7 +166,7 @@ export class FakeEngine implements EngineClient {
       settings,
     };
     this.snap.threads.unshift(summary);
-    this.views.set(summary.id, { summary, turns: [] });
+    this.views.set(summary.id, { summary, turns: [], seq: 0 });
     this.emitThread(summary.id);
     this.startTurn(summary.id, message, settings);
     return summary.id;
@@ -195,7 +198,7 @@ export class FakeEngine implements EngineClient {
       updatedAt: now(),
     };
     this.snap.threads.unshift(summary);
-    this.views.set(summary.id, { summary, turns: structuredClone(view.turns.slice(0, at + 1)) });
+    this.views.set(summary.id, { summary, turns: structuredClone(view.turns.slice(0, at + 1)), seq: 0 });
     this.emitThread(summary.id);
     return summary.id;
   }
@@ -415,7 +418,8 @@ export class FakeEngine implements EngineClient {
     this.emit({ type: "thread", thread: structuredClone(summary) });
   }
   private emit(event: Event) {
-    for (const listener of this.listeners) listener(event);
+    const numbered = { seq: ++this.seq, event };
+    for (const listener of this.listeners) listener(numbered);
   }
   private wait(ms: number) {
     if (this.options.instant) return Promise.resolve();

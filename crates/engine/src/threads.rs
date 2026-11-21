@@ -35,9 +35,10 @@ impl Inner {
         let mut cursor = None;
         loop {
             let params = p::ThreadListParams { cwd: vec![project.path.display().to_string()], limit: PAGE, cursor };
+            let read_at = self.store.renames();
             let page: p::ThreadListResponse = session.call("thread/list", params).await?;
             for thread in &page.data {
-                self.adopt_thread(thread);
+                self.adopt_thread(thread, Some(read_at));
             }
             match page.next_cursor {
                 Some(next) if !page.data.is_empty() => cursor = Some(next),
@@ -69,8 +70,10 @@ impl Inner {
     pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
         let session = self.session()?;
         self.known_thread(thread)?;
+        let seq = self.store.seq();
+        let read_at = self.store.renames();
         let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
-        self.adopt_thread(&read.thread);
+        self.adopt_thread(&read.thread, Some(read_at));
         let turns = match list_turns(&session, thread).await {
             Err(RpcError::Server { code: METHOD_NOT_FOUND, .. }) => {
                 // Threads kept in Codex's older history format cannot be paged; read them whole.
@@ -80,7 +83,7 @@ impl Inner {
             other => other.map_err(engine_error)?,
         };
         let summary = self.store.summary(thread).ok_or_else(|| EngineError::NotFound { what: format!("thread {}", thread.0) })?;
-        Ok(ThreadView { summary, turns })
+        Ok(ThreadView { summary, turns, seq })
     }
 
     pub(crate) async fn start_thread(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings) -> Result<ThreadId> {
@@ -88,7 +91,7 @@ impl Inner {
         let session = self.session()?;
         let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: self.config.tools.as_ref().map(crate::tools::specs) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
-        let id = self.adopt_thread(&started.thread).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
+        let id = self.adopt_thread(&started.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
         session.mark_loaded(&id);
         self.send(&id, message, settings).await?;
         Ok(id)
@@ -99,7 +102,7 @@ impl Inner {
         self.ensure_loaded(&session, thread).await?;
         let params = json!({ "threadId": thread.0, "lastTurnId": through.0, "excludeTurns": true });
         let forked: p::ThreadResponse = session.call("thread/fork", params).await?;
-        let id = self.adopt_thread(&forked.thread).ok_or_else(|| EngineError::Codex { message: "Codex forked the thread into another folder".into() })?;
+        let id = self.adopt_thread(&forked.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex forked the thread into another folder".into() })?;
         let parent = self.store.thread(thread);
         self.store.update_thread(&id, |e| {
             e.forked_from = Some(thread.clone());
@@ -125,6 +128,7 @@ impl Inner {
     pub(crate) async fn rename(&self, thread: &ThreadId, title: String) -> Result<()> {
         let session = self.session()?;
         self.known_thread(thread)?;
+        self.store.renamed();
         session.call_value("thread/name/set", json!({ "threadId": thread.0, "name": title })).await?;
         self.store.update_thread(thread, |e| e.title = Some(title));
         Ok(())

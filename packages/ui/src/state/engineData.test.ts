@@ -16,15 +16,17 @@ describe.each(engineDataNames)("following the engine's events: %s", (name) => {
       // after starting it; a fork's history comes from reading it.
       if (event.type === "thread" && !model.views[event.thread.id] && !event.thread.forkedFrom) {
         followed.add(event.thread.id);
-        model = { ...model, views: { ...model.views, [event.thread.id]: { summary: event.thread, turns: [] } } };
+        model = { ...model, views: { ...model.views, [event.thread.id]: { summary: event.thread, turns: [], seq: 0 } } };
       }
       model = applyEvent(model, event);
       for (const read of data.reads.filter((r) => r.afterEvents === i + 1 && followed.has(r.view.summary.id))) {
-        expect(model.views[read.view.summary.id]).toEqual(read.view);
+        expect(read.view.seq).toBe(data.before.seq + i + 1);
+        expect({ ...model.views[read.view.summary.id], seq: read.view.seq }).toEqual(read.view);
         compared++;
       }
     });
-    expect(model.snapshot).toEqual(data.after);
+    expect(data.after.seq).toBe(data.before.seq + data.events.length);
+    expect({ ...model.snapshot, seq: data.after.seq }).toEqual(data.after);
     if (name !== "interrupt") expect(compared).toBeGreaterThan(0);
   });
 });

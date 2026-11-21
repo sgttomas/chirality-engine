@@ -57,6 +57,18 @@ fn collapse(events: Vec<Event>, reads: Vec<(usize, ThreadView)>) -> (Vec<Event>,
     (kept, reads)
 }
 
+/// The data's own numbering: the snapshot before is 0, each event one more,
+/// the snapshot after the last, a read the events before it. The engine's own
+/// numbers count the start-up events too and skip what `collapse` merged.
+fn number(value: &mut Value) {
+    let count = value["events"].as_array().map_or(0, Vec::len);
+    value["before"]["seq"] = json!(0);
+    value["after"]["seq"] = json!(count);
+    for read in value["reads"].as_array_mut().into_iter().flatten() {
+        read["view"]["seq"] = read["afterEvents"].clone();
+    }
+}
+
 async fn capture(name: &str) -> Value {
     let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 - 5;
     let mut ctx = Ctx::replay(name).await;
@@ -90,6 +102,7 @@ async fn capture(name: &str) -> Value {
     }
     let mut value: Value = serde_json::from_str(&text).unwrap();
     fix_times(&mut value, since);
+    number(&mut value);
     value
 }
 

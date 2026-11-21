@@ -9,4 +9,8 @@ import type { ThreadSummary } from "./ThreadSummary";
 /**
  * Everything an interface shows, at one moment.
  */
-export type Snapshot = { codex: CodexStatus, account: Account, models: Array<Model>, projects: Array<Project>, threads: Array<ThreadSummary>, pending: Array<PendingRequest>, };
+export type Snapshot = { codex: CodexStatus, account: Account, models: Array<Model>, projects: Array<Project>, threads: Array<ThreadSummary>, pending: Array<PendingRequest>, 
+/**
+ * The [`Numbered::seq`] of the last event it includes (0 before any).
+ */
+seq: number, };

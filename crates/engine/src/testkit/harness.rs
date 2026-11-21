@@ -114,7 +114,7 @@ enum Mode {
 /// What a scenario works with.
 pub struct Ctx {
     pub engine: Engine,
-    pub events: broadcast::Receiver<Event>,
+    pub events: broadcast::Receiver<Numbered>,
     pub run: Run,
     /// When set, keeps every event and each thread view the scenario reads.
     pub tape: Option<std::sync::Mutex<Tape>>,
@@ -126,7 +126,7 @@ pub struct Ctx {
 
 /// The events since taping began, and each view read with how many events preceded it.
 pub struct Tape {
-    pub rx: broadcast::Receiver<Event>,
+    pub rx: broadcast::Receiver<Numbered>,
     pub events: Vec<Event>,
     pub reads: Vec<(usize, ThreadView)>,
 }
@@ -135,7 +135,7 @@ impl Tape {
     pub fn drain(&mut self) {
         loop {
             match self.rx.try_recv() {
-                Ok(event) => self.events.push(event),
+                Ok(numbered) => self.events.push(numbered.event),
                 Err(broadcast::error::TryRecvError::Lagged(n)) => panic!("{n} events lost"),
                 Err(_) => return,
             }
@@ -227,7 +227,7 @@ impl Ctx {
             }
             let step = (tokio::time::Instant::now() + Duration::from_millis(200)).min(deadline);
             let event = match tokio::time::timeout_at(step, self.events.recv()).await {
-                Ok(Ok(event)) => event,
+                Ok(Ok(numbered)) => numbered.event,
                 Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
                 Ok(Err(e)) => panic!("events ended waiting for {what}: {e}"),
                 Err(_) if tokio::time::Instant::now() < deadline => continue,

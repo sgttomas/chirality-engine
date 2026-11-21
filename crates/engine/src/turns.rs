@@ -2,6 +2,9 @@
 //! running, interrupt it; the person's answers to what Codex asks; and the
 //! file search behind `@` references.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use serde_json::json;
 
 use crate::api::*;
@@ -9,8 +12,22 @@ use crate::mapping;
 use crate::protocol as p;
 use crate::session::Inner;
 
+/// One admission at a time per thread: starting a turn, steering it and
+/// interrupting it each wait for the one before, so two sends cannot both see
+/// an idle thread, and a Stop sent while a turn is starting stops that turn.
+#[derive(Default)]
+pub(crate) struct Admission(Mutex<HashMap<ThreadId, Arc<tokio::sync::Mutex<()>>>>);
+
+impl Admission {
+    async fn admit(&self, thread: &ThreadId) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = self.0.lock().unwrap().entry(thread.clone()).or_default().clone();
+        lock.lock_owned().await
+    }
+}
+
 impl Inner {
     pub(crate) async fn send(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
+        let _admitted = self.admission.admit(thread).await;
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
         let project = self.project(&entry.project)?;
@@ -37,18 +54,22 @@ impl Inner {
             approvals_reviewer: "user",
             sandbox_policy,
         };
-        // The thread carries the turn's settings from before Codex hears of it,
-        // so every summary the turn causes has them; a refused turn leaves the earlier ones.
-        let earlier = self.store.update_thread(thread, |e| e.settings.replace(settings)).flatten();
+        // The summary shows the turn's settings from before Codex hears of it, so
+        // every summary the turn causes has them; they are kept only once Codex
+        // has taken the turn.
+        self.store.update_thread(thread, |e| e.starting = Some(settings));
         let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {
-                self.store.update_thread(thread, |entry| entry.settings = earlier);
+                self.store.update_thread(thread, |entry| entry.starting = None);
                 return Err(e);
             }
         };
         let turn = TurnId(started.turn.id);
         self.store.update_thread(thread, |e| {
+            if let Some(settings) = e.starting.take() {
+                e.settings = Some(settings);
+            }
             e.failed = None;
             if e.active_turn.is_none() && e.last_ended.as_ref() != Some(&turn) {
                 e.active_turn = Some(turn);
@@ -57,7 +78,9 @@ impl Inner {
         Ok(())
     }
 
+    /// Stops the running turn; a turn still starting is stopped once Codex has started it.
     pub(crate) async fn interrupt(&self, thread: &ThreadId) -> Result<()> {
+        let _admitted = self.admission.admit(thread).await;
         let session = self.session()?;
         let Some(turn) = self.known_thread(thread)?.active_turn else { return Ok(()) };
         session.call_value("turn/interrupt", json!({ "threadId": thread.0, "turnId": turn.0 })).await?;

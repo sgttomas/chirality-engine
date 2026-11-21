@@ -167,6 +167,7 @@
         "path": "/work/run/project"
       }
     ],
+    "seq": 7,
     "threads": [
       {
         "forkedFrom": null,
@@ -348,6 +349,7 @@
     ],
     "pending": [],
     "projects": [],
+    "seq": 0,
     "threads": []
   },
   "events": [

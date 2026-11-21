@@ -109,24 +109,8 @@ async fn start_with(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire
 }
 
 async fn start_configured(tools: Option<AppTools>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wire, Arc<FakeCodex>, std::path::PathBuf) {
-    let root = std::env::temp_dir().join(format!("chirality-tool-calls-{}-{}", std::process::id(), RUN.fetch_add(1, Ordering::SeqCst)));
-    std::fs::create_dir_all(&root).unwrap();
-    let config = EngineConfig {
-        codex_bin: "codex".into(),
-        codex_home: Some(root.join("home")),
-        state_dir: root.join("state"),
-        workflow_roots: Vec::new(),
-        codex_settings: Vec::new(),
-        tools,
-    };
-    let (connector, mut wires) = FakeCodex::new();
-    let engine = Engine::start_with(config, connector.clone(), None).await.expect("the engine starts");
-    let wire = wires.recv().await.expect("a connection");
-    std::fs::create_dir_all(root.join("project")).unwrap();
-    (engine, wires, wire, connector, root.join("project").canonicalize().unwrap())
+    super::fake::start_engine("tool-calls", tools).await
 }
-
-static RUN: AtomicUsize = AtomicUsize::new(0);
 
 fn call(id: i64, thread: &str, item: &str, tool: &str) -> Value {
     json!({"id": id, "method": "item/tool/call", "params": {"threadId": thread, "turnId": format!("turn-{thread}"), "callId": item, "namespace": NS, "tool": tool, "arguments": {}}})

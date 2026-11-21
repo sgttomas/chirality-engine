@@ -7,5 +7,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["src/test-setup.ts"],
+    // The style test reads the sheets themselves.
+    css: { include: [/\/styles\/[a-z-]+\.css/] },
   },
 });

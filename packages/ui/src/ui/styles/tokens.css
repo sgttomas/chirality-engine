@@ -121,20 +121,19 @@
   }
 }
 
-* { box-sizing: border-box; }
-html, body, #root { margin: 0; height: 100%; }
-body {
+/* Inside the engine's parts only (the root `EngineProvider` renders); a page made wholly of them adds page.css. */
+.chirality {
+  display: contents;
   font: 400 13.5px/1.5 var(--font-body);
   color: var(--ink);
-  background: var(--ground);
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;
 }
-a { color: var(--accent); text-underline-offset: 2px; }
-code, pre, kbd { font-family: var(--font-mono); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:where(.chirality) *, :where(.chirality) *::before, :where(.chirality) *::after { box-sizing: border-box; }
+:where(.chirality) a { color: var(--accent); text-underline-offset: 2px; }
+:where(.chirality) :is(code, pre, kbd) { font-family: var(--font-mono); }
+:where(.chirality) :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-button {
+:where(.chirality) button {
   font: inherit;
   cursor: pointer;
   border-radius: 7px;
@@ -145,24 +144,24 @@ button {
   font-size: 12.5px;
   font-weight: 500;
 }
-button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-faint); }
-button:disabled { opacity: 0.45; cursor: default; }
-button.primary { background: var(--cta); border-color: var(--cta); color: var(--cta-ink); font-weight: 600; }
-button.primary:hover:not(:disabled) { color: var(--cta-ink); filter: brightness(1.12); }
-button.quiet { border-color: transparent; padding: 4px 7px; }
-button.quiet:hover:not(:disabled) { background: var(--hover); border-color: transparent; }
+:where(.chirality) button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-faint); }
+:where(.chirality) button:disabled { opacity: 0.45; cursor: default; }
+:where(.chirality) button.primary { background: var(--cta); border-color: var(--cta); color: var(--cta-ink); font-weight: 600; }
+:where(.chirality) button.primary:hover:not(:disabled) { color: var(--cta-ink); filter: brightness(1.12); }
+:where(.chirality) button.quiet { border-color: transparent; padding: 4px 7px; }
+:where(.chirality) button.quiet:hover:not(:disabled) { background: var(--hover); border-color: transparent; }
 
-input, textarea, select { font: inherit; color: var(--ink); }
-input[type="text"], input[type="search"] {
+:where(.chirality) :is(input, textarea, select) { font: inherit; color: var(--ink); }
+:where(.chirality) :is(input[type="text"], input[type="search"]) {
   border: 1px solid var(--rule-strong);
   border-radius: 7px;
   background: var(--surface);
   padding: 6px 9px;
   outline: none;
 }
-input[type="text"]:focus, input[type="search"]:focus { border-color: var(--accent); }
-::placeholder { color: var(--ink-faint); }
+:where(.chirality) :is(input[type="text"], input[type="search"]):focus { border-color: var(--accent); }
+:where(.chirality) ::placeholder { color: var(--ink-faint); }
 
-.mono { font-family: var(--font-mono); font-size: 12px; }
-.faint { color: var(--ink-faint); }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:where(.chirality) .mono { font-family: var(--font-mono); font-size: 12px; }
+:where(.chirality) .faint { color: var(--ink-faint); }
+:where(.chirality) .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

@@ -18,6 +18,8 @@ use crate::store::Store;
 use crate::transport::{Connector, Stopper};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long shutdown waits for Codex to be reaped: its two seconds to end, then the kill.
+const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 /// More deaths than this within [`DEATH_WINDOW`] and the engine stops restarting.
 const MAX_DEATHS: usize = 3;
 const DEATH_WINDOW: Duration = Duration::from_secs(60);
@@ -75,6 +77,7 @@ pub(crate) struct Inner {
     pub login: Mutex<Option<String>>,
     /// The application's tool calls being answered.
     pub tool_calls: crate::calls::Calls,
+    pub admission: crate::turns::Admission,
 }
 
 impl Inner {
@@ -91,6 +94,7 @@ impl Inner {
             attempts: tokio::sync::watch::channel(0).0,
             login: Mutex::new(None),
             tool_calls: Default::default(),
+            admission: Default::default(),
         });
         inner.store.set_projects(projects);
         let incoming = inner.open().await?;
@@ -113,21 +117,27 @@ impl Inner {
     }
 
     /// Stops Codex. Returns, to every caller, once no connection attempt is
-    /// under way (one that finishes after this ends its Codex at once) and no
-    /// application tool call of any session is still running. Under the same
-    /// lock as a session's publication and an attempt's start.
+    /// under way (one that finishes after this ends its Codex at once), no
+    /// application tool call of any session is still running, and the Codex
+    /// process has been reaped (waiting at most [`REAP_TIMEOUT`] for that).
+    /// Under the same lock as a session's publication and an attempt's start.
     pub async fn shutdown(&self) {
-        {
+        let reaped = {
             let mut current = self.current.lock().unwrap();
             self.shutting_down.store(true, Ordering::SeqCst);
-            if let Some(session) = current.take() {
+            let reaped = current.take().map(|session| {
                 session.client.close();
                 session.stopper.stop();
-            }
+                session.stopper.reaped()
+            });
             self.tool_calls.close();
-        }
+            reaped
+        };
         let _ = self.attempts.subscribe().wait_for(|n| *n == 0).await;
         self.tool_calls.idle().await;
+        if let Some(reaped) = reaped {
+            let _ = tokio::time::timeout(REAP_TIMEOUT, reaped).await;
+        }
     }
 
     /// A connection attempt, counted until it ends; none starts after shutdown.
@@ -178,15 +188,22 @@ impl Inner {
             }
         };
         client.notify("initialized", None).map_err(|e| failed(e.to_string()))?;
-        {
+        let refused = {
             let mut current = self.current.lock().unwrap();
             if self.shutting_down.load(Ordering::SeqCst) {
                 client.close();
                 stopper.kill();
-                return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+                Some(stopper.reaped())
+            } else {
+                *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
+                self.tool_calls.open(generation);
+                None
             }
-            *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
-            self.tool_calls.open(generation);
+        };
+        if let Some(reaped) = refused {
+            // Shutdown waits for this attempt, so for this Codex to be reaped too.
+            let _ = tokio::time::timeout(REAP_TIMEOUT, reaped).await;
+            return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
         }
         self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
         Ok(incoming)

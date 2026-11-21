@@ -26,13 +26,11 @@ export function fakeEngine(options: FakeOptions & { bare?: boolean } = {}) {
   return engine;
 }
 
-/** Mounts `ui` (the standard layout unless given) over an engine. */
+/** Mounts `ui` (the standard layout unless given) over an engine, then starts following it, as an application does. */
 export async function mount(engine: EngineClient, ui: ReactNode = <StandardLayout />) {
   const store = new Store(engine, testHost);
-  await store.start();
-  const project = store.get().project;
-  if (project) store.selectProject(project);
   const view = render(<EngineProvider store={store}>{ui}</EngineProvider>);
+  await act(() => store.start());
   await settle();
   return { store, ...view };
 }

@@ -13,6 +13,7 @@ export type { ItemBody } from "./bindings/ItemBody";
 export type { ItemId } from "./bindings/ItemId";
 export type { Message } from "./bindings/Message";
 export type { Model } from "./bindings/Model";
+export type { Numbered } from "./bindings/Numbered";
 export type { PendingRequest } from "./bindings/PendingRequest";
 export type { PlanStep } from "./bindings/PlanStep";
 export type { PlanStepStatus } from "./bindings/PlanStepStatus";

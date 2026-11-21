@@ -67,8 +67,9 @@ impl Engine {
         self.inner.store.snapshot()
     }
 
-    /// Every change from now on, in order.
-    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+    /// Every change from now on, in order and numbered ([`Numbered`]); a
+    /// receiver that lags has missed some and reads the snapshot again.
+    pub fn subscribe(&self) -> broadcast::Receiver<Numbered> {
         self.inner.store.subscribe()
     }
 

@@ -3,8 +3,8 @@
 import { engineEvent, type EngineCommand } from "./commands";
 import type {
   Answer,
-  Event,
   Message,
+  Numbered,
   Project,
   ProjectId,
   RequestId,
@@ -19,8 +19,8 @@ import type {
 /** One method per engine method, with the engine's own types. */
 export interface EngineClient {
   snapshot(): Promise<Snapshot>;
-  /** Every engine event from now on, in order. Returns a function that stops it. */
-  subscribe(onEvent: (event: Event) => void): () => void;
+  /** Every engine event from now on, numbered, in order. Resolves once listening, with a function that stops it. */
+  subscribe(onEvent: (event: Numbered) => void): Promise<() => void>;
 
   signIn(): Promise<void>;
   cancelSignIn(): Promise<void>;
@@ -50,8 +50,8 @@ export interface EngineClient {
 /** How the interface reaches its host: a command with its arguments, and the host's events. */
 export interface Transport {
   invoke<T>(command: EngineCommand, args?: Record<string, unknown>): Promise<T>;
-  /** Calls `handler` with each payload of `event`; returns a function that stops it. */
-  listen<T>(event: string, handler: (payload: T) => void): () => void;
+  /** Calls `handler` with each payload of `event`. Resolves once listening, with a function that stops it. */
+  listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>;
 }
 
 /** What the desktop itself provides: dialogs, the browser, notifications. */
@@ -66,7 +66,7 @@ export interface Host {
 export function createEngineClient(t: Transport): EngineClient {
   return {
     snapshot: () => t.invoke("snapshot"),
-    subscribe: (onEvent) => t.listen<Event>(engineEvent, onEvent),
+    subscribe: (onEvent) => t.listen<Numbered>(engineEvent, onEvent),
     signIn: () => t.invoke("sign_in"),
     cancelSignIn: () => t.invoke("cancel_sign_in"),
     signOut: () => t.invoke("sign_out"),
