@@ -45,7 +45,7 @@ impl Engine {
         if let Some(tools) = &config.tools {
             tools::validate(tools)?;
         }
-        let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings: config.codex_settings.clone(), env: None, cwd: None };
+        let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings: transport::settings(&config), env: None, cwd: None };
         Engine::start_with(config, Arc::new(ProcessConnector { launch }), None).await
     }
 

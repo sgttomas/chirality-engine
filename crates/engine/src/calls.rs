@@ -198,7 +198,8 @@ impl Calls {
     pub fn take(&self, to: ReplyTo, thread: Option<&str>, ask: Ask, answer: fn(ToolOutput) -> Value) -> Taken {
         let key = (to.generation, to.id.to_string());
         let mut state = self.state.lock().unwrap();
-        if state.open != Some(to.generation) || !state.taken.insert(key.clone()) {
+        // A request the connection delivered after its source ended is never acted on.
+        if to.client.has_ended() || state.open != Some(to.generation) || !state.taken.insert(key.clone()) {
             return Taken::Nothing;
         }
         let (place, call, handler) = match ask {
@@ -266,7 +267,7 @@ mod tests {
     fn client() -> (Arc<RpcClient>, mpsc::UnboundedReceiver<String>) {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let (_in_tx, in_rx) = mpsc::unbounded_channel::<String>();
-        let (client, _, _) = RpcClient::start(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(NoStop) }, None, None);
+        let (client, _, _) = RpcClient::start(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(NoStop), ended: Default::default() }, None, None);
         (client, out_rx)
     }
 

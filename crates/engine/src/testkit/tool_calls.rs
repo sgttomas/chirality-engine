@@ -462,3 +462,17 @@ async fn with_no_tools_a_call_sent_again_gets_one_error() {
     wire.quiet().await;
     engine.shutdown().await;
 }
+
+/// Codex ended with many calls still buffered between the transport and the
+/// session loop, which goes on handling them as fast as it can: none runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn calls_still_buffered_when_the_transport_ends_never_run() {
+    let probe = Arc::new(Probe::default());
+    let (engine, mut wires, wire) = start(&probe).await;
+    wire.end_with((1..=512).map(|id| call(id, "a", &format!("call_{id}"), "quick")).collect());
+    let _next = tokio::time::timeout(Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
+    probe.settle(|_| matches!(engine.snapshot().codex, CodexStatus::Ready { .. })).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(probe.called(), 0, "a call delivered after the transport ended ran");
+    engine.shutdown().await;
+}

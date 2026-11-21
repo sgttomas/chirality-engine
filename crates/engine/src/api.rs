@@ -56,6 +56,14 @@ pub struct EngineConfig {
 /// message. Under some Codex settings Codex has further tools of its own in
 /// namespaces of their own, and it leaves out, without saying, an
 /// application's tool whose namespace and name are the same as one of those.
+///
+/// Subagents: the engine keeps Codex from giving a new subagent the
+/// application's tools. A subagent Codex starts from a forked copy of its
+/// parent's conversation can still carry them, since Codex restores a thread's
+/// tools from forked history. For a subagent's thread that has them, a call
+/// made just as its parent is archived can still reach the handler (Codex
+/// ends the subagents after answering the archive), and Codex replaying a
+/// subagent's earlier turn can let its calls through again.
 #[derive(Clone)]
 pub struct AppTools {
     /// The one name the agent sees the tools under, with what they are for.
@@ -138,6 +146,12 @@ pub type ToolFuture = Pin<Box<dyn Future<Output = ToolOutput> + Send>>;
 /// Each call is answered with what its future gives. Codex cancels a call
 /// when its turn is interrupted or ends, or Codex stops; the engine then drops
 /// the future. A future that panics answers its call as failed.
+///
+/// A handler may now and then run, at least in part, for a call whose answer
+/// never reaches the agent: Codex cancelled it, its thread was archived, or
+/// Codex ended, just as the handler started. So a handler must be safe to run
+/// without its answer being delivered, as anything across a process boundary
+/// must be.
 pub trait ToolHandler: Send + Sync {
     fn call(&self, call: ToolCall) -> ToolFuture;
 }

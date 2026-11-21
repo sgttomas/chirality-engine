@@ -143,7 +143,8 @@ impl Ctx {
         if app_tools.is_some() {
             config.tools = app_tools;
         }
-        let settings = vec!["analytics.enabled=false".to_string(), "model_provider=\"openai\"".to_string(), format!("openai_base_url=\"{}\"", stub.base_url())];
+        let mut settings = vec!["analytics.enabled=false".to_string(), "model_provider=\"openai\"".to_string(), format!("openai_base_url=\"{}\"", stub.base_url())];
+        settings.extend(crate::transport::settings(&config));
         let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings, env: Some(run.environment()), cwd: Some(run.project()) };
         let recorder = record.then(Recorder::new);
         let mut connector: Arc<dyn crate::transport::Connector> = Arc::new(ProcessConnector { launch });

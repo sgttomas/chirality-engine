@@ -19,6 +19,36 @@ pub(crate) struct Connection {
     pub outgoing: mpsc::UnboundedSender<String>,
     pub incoming: mpsc::UnboundedReceiver<String>,
     pub stopper: Box<dyn Stopper>,
+    /// Set by the transport the moment its source ends, while lines it read
+    /// before may still wait in `incoming`.
+    pub ended: Ended,
+}
+
+/// That a connection's source has ended: nothing it delivers is to be acted on after.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Ended(Arc<std::sync::atomic::AtomicBool>);
+
+impl Ended {
+    pub fn mark(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn is_set(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Keeps Codex from giving a subagent the application's tools (Codex 0.171.0
+/// does so only with this feature, which is off unless a Codex home turns it on).
+pub(crate) const NO_SUBAGENT_TOOLS: &str = "features.multi_agent_v2_dynamic_tools=false";
+
+/// The application's `-c` settings, and with its tools, [`NO_SUBAGENT_TOOLS`].
+pub(crate) fn settings(config: &crate::api::EngineConfig) -> Vec<String> {
+    let mut settings = config.codex_settings.clone();
+    if config.tools.is_some() {
+        settings.push(NO_SUBAGENT_TOOLS.into());
+    }
+    settings
 }
 
 /// Ends a connection's process.
@@ -135,14 +165,21 @@ fn spawn(launch: &Launch) -> Result<Connection, String> {
             }
         }
     });
-    // Reader: lines from stdout until it ends.
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let line = line.trim_end_matches('\r');
-            if !line.is_empty() && in_tx.send(line.to_string()).is_err() {
-                break;
+    // Reader: lines from stdout until it ends, which it marks before the
+    // lines already read are handled.
+    let ended = Ended::default();
+    tokio::spawn({
+        let ended = ended.clone();
+        async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let line = line.trim_end_matches('\r');
+                if !line.is_empty() && in_tx.send(line.to_string()).is_err() {
+                    break;
+                }
             }
+            ended.mark();
+            drop(in_tx);
         }
     });
     // Stderr is drained so Codex never blocks on it; its tail is not kept.
@@ -151,7 +188,7 @@ fn spawn(launch: &Launch) -> Result<Connection, String> {
         while let Ok(Some(_)) = lines.next_line().await {}
     });
     tokio::spawn(supervise(child, stop_rx));
-    Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(ProcessStopper(Arc::new(std::sync::Mutex::new(Some(stop_tx))))) })
+    Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(ProcessStopper(Arc::new(std::sync::Mutex::new(Some(stop_tx))))), ended })
 }
 
 /// Waits for the child; on a stop request, gives it two seconds after its
@@ -182,5 +219,36 @@ impl Stopper for ProcessStopper {
         if let Some(tx) = self.0.lock().unwrap().take() {
             let _ = tx.send(false);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A process that writes many lines and ends: the end is marked while the
+    /// lines are still waiting to be read, so nothing read after can be acted on.
+    #[tokio::test]
+    async fn the_end_is_marked_before_the_lines_still_buffered_are_read() {
+        let dir = std::env::temp_dir().join(format!("chirality-transport-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("lines.sh");
+        std::fs::write(&script, "#!/bin/sh\ni=0\nwhile [ $i -lt 512 ]; do echo \"{\\\"n\\\":$i}\"; i=$((i+1)); done\n").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let launch = Launch { bin: script, home: None, settings: Vec::new(), env: Some(vec![("PATH".into(), "/usr/bin:/bin".into())]), cwd: None };
+        let Connection { mut incoming, ended, .. } = spawn(&launch).unwrap();
+        for _ in 0..500 {
+            if ended.is_set() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(ended.is_set(), "the end is marked");
+        let mut lines = 0;
+        while incoming.recv().await.is_some() {
+            lines += 1;
+        }
+        assert_eq!(lines, 512, "every line written is still there to read after the end is marked");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

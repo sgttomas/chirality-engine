@@ -9,9 +9,26 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::transport::{ConnectFuture, Connection, Connector, Stopper};
+use crate::transport::{ConnectFuture, Connection, Connector, Ended, Stopper};
 
-type Line = Arc<Mutex<Option<mpsc::UnboundedSender<String>>>>;
+/// The fake's end of the connection, and the mark that it has ended.
+#[derive(Clone)]
+struct Line {
+    tx: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
+    ended: Ended,
+}
+
+impl Line {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<mpsc::UnboundedSender<String>>> {
+        self.tx.lock().unwrap()
+    }
+
+    /// Ends it as a transport would: marked first, while what was sent may still wait.
+    fn end(&self) {
+        self.ended.mark();
+        self.lock().take();
+    }
+}
 
 /// One connection, as the test drives it.
 pub struct Wire {
@@ -21,19 +38,31 @@ pub struct Wire {
 
 impl Wire {
     pub fn send(&self, frame: Value) {
-        if let Some(line) = self.line.lock().unwrap().as_ref() {
+        if let Some(line) = self.line.lock().as_ref() {
             let _ = line.send(frame.to_string());
         }
     }
 
     /// Ends the connection as if Codex died.
     pub fn kill(&self) {
-        self.line.lock().unwrap().take();
+        self.line.end();
+    }
+
+    /// Ends the connection with `frames` still queued behind its end, as the
+    /// transport leaves lines it read before Codex's output ended.
+    pub fn end_with(&self, frames: Vec<Value>) {
+        self.line.ended.mark();
+        if let Some(line) = self.line.lock().as_ref() {
+            for frame in frames {
+                let _ = line.send(frame.to_string());
+            }
+        }
+        self.line.end();
     }
 
     /// Whether the engine has ended this Codex, or it died.
     pub fn is_ended(&self) -> bool {
-        self.line.lock().unwrap().is_none()
+        self.line.lock().is_none()
     }
 
     /// Reads the engine's next frame, which must be a `method` request, and answers it.
@@ -79,10 +108,10 @@ struct Stop(Line);
 
 impl Stopper for Stop {
     fn stop(&self) {
-        self.0.lock().unwrap().take();
+        self.0.end();
     }
     fn kill(&self) {
-        self.0.lock().unwrap().take();
+        self.0.end();
     }
 }
 
@@ -91,7 +120,7 @@ impl Connector for FakeCodex {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
         let (in_tx, in_rx) = mpsc::unbounded_channel::<String>();
         let (test_tx, test_rx) = mpsc::unbounded_channel::<Value>();
-        let line: Line = Arc::new(Mutex::new(Some(in_tx)));
+        let line = Line { tx: Arc::new(Mutex::new(Some(in_tx))), ended: Ended::default() };
         let _ = self.wires.send(Wire { line: line.clone(), from_engine: test_rx });
         let answering = line.clone();
         let held = self.held.clone();
@@ -109,7 +138,7 @@ impl Connector for FakeCodex {
                 };
                 match result {
                     Some(result) => {
-                        if let Some(line) = answering.lock().unwrap().as_ref() {
+                        if let Some(line) = answering.lock().as_ref() {
                             let _ = line.send(json!({ "id": frame["id"], "result": result }).to_string());
                         }
                     }
@@ -119,6 +148,7 @@ impl Connector for FakeCodex {
                 }
             }
         });
-        Box::pin(async move { Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(Stop(line)) }) })
+        let ended = line.ended.clone();
+        Box::pin(async move { Ok(Connection { outgoing: out_tx, incoming: in_rx, stopper: Box::new(Stop(line)), ended }) })
     }
 }
