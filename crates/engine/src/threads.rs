@@ -11,18 +11,6 @@ use crate::rpc::RpcError;
 use crate::session::{Inner, Session, engine_error};
 
 const PAGE: u32 = 100;
-const INVALID_REQUEST: i64 = -32600;
-const METHOD_NOT_FOUND: i64 = -32601;
-
-/// Codex's refusal to read a thread's history before it has kept the
-/// thread's first message (Codex 0.171.0's own words, which name the thread).
-fn not_kept_yet(error: &RpcError, thread: &ThreadId) -> bool {
-    match error {
-        RpcError::Server { code: INVALID_REQUEST, message } => message.starts_with(&format!("thread {} is not materialized yet;", thread.0)),
-        RpcError::Server { code: METHOD_NOT_FOUND, message } => message == "list_turns is not supported yet",
-        _ => false,
-    }
-}
 
 async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
     let mut turns = Vec::new();
@@ -84,17 +72,21 @@ impl Inner {
         // Every event after this is applied to the view; one before it, the history holds.
         let seq = self.store.seq();
         let read_at = self.store.renames();
-        let read: p::ThreadResponse = session.call("thread/read", json!({ "threadId": thread.0 })).await?;
-        self.refresh_thread(&read.thread, read_at);
-        let (turns, seq) = match list_turns(&session, thread).await {
+        let history = async {
+            let read: p::ThreadResponse = session.client.request("thread/read", json!({ "threadId": thread.0 })).await?;
+            self.refresh_thread(&read.thread, read_at);
+            list_turns(&session, thread).await
+        };
+        let (turns, seq) = match history.await {
             Ok(turns) => {
                 session.mark_kept(thread);
                 (turns, seq)
             }
-            // A thread the engine started and Codex has not kept yet: its history is empty, and
-            // every event since it started is after the view's number.
+            // A thread the engine started, before Codex has kept it and before any turn of it has
+            // ended, whatever Codex answers: its history is empty, and every event since it
+            // started is after the view's number.
             Err(e) => match session.unkept_since(thread) {
-                Some(since) if not_kept_yet(&e, thread) => (Vec::new(), since),
+                Some(since) if self.known_thread(thread)?.last_ended.is_none() => (Vec::new(), since),
                 _ => return Err(engine_error(e)),
             },
         };

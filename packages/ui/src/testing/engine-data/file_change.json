@@ -516,7 +516,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Done."
+          "text": ""
         },
         "done": false,
         "id": "msg_patch_done"

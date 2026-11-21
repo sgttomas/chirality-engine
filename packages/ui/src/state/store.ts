@@ -164,11 +164,14 @@ export class Store {
       const after = this.held.filter((n) => n.seq > snapshot.seq);
       const gap = after.some((n, i) => n.seq !== snapshot.seq + i + 1);
       if (gap || this.marked > snapshot.seq + after.length) continue;
-      model = { snapshot, views: {} };
+      // The view on screen stays until its replacement is read.
+      const shown = this.state.thread ? this.state.model?.views[this.state.thread] : undefined;
+      model = { snapshot, views: shown && snapshot.threads.some((t) => t.id === shown.summary.id) ? { [shown.summary.id]: shown } : {} };
       for (const n of after) model = applyEvent(model, n.event, n.seq);
       break;
     }
     this.held = null;
+    for (const id of [...this.early.keys()]) if (!model.snapshot.threads.some((t) => t.id === id)) this.dropEarly(id);
     const told = [...this.untold].filter(([seq]) => seq > (applied ?? read)).sort(([a], [b]) => a - b);
     this.untold.clear();
     const before = this.state;
@@ -196,17 +199,20 @@ export class Store {
   }
 
   private keepEarly(n: Numbered) {
+    if (n.event.type === "threadRemoved") return this.dropEarly(n.event.thread);
     const thread = threadOf(n.event);
     if (!thread) return;
-    if (n.event.type === "threadRemoved") {
-      this.early.delete(thread);
-      this.provisional.delete(thread);
-    } else if (!this.state.model!.views[thread] || this.provisional.has(thread)) {
+    if (!this.state.model!.views[thread] || this.provisional.has(thread)) {
       const kept = this.early.get(thread) ?? [];
       kept.push(n);
       if (kept.length > EARLY) kept.shift();
       this.early.set(thread, kept);
     }
+  }
+
+  private dropEarly(thread: ThreadId) {
+    this.early.delete(thread);
+    this.provisional.delete(thread);
   }
 
   private set(patch: Partial<State>) {
@@ -294,7 +300,8 @@ export class Store {
     try {
       read = await this.engine.readThread(thread);
     } catch (e) {
-      const shown = (latest() && !completed) || (viewless() && this.state.thread === thread);
+      // Said only for the thread in view, and when it is the latest read or the thread has no view.
+      const shown = this.state.thread === thread && ((latest() && !completed) || viewless());
       if (generation === this.generation && shown) this.set({ error: describe(e) });
       return;
     } finally {
@@ -327,8 +334,9 @@ export class Store {
     const list = await this.attempt(() => this.engine.workflows(project));
     if (list) this.set({ workflows: { ...this.state.workflows, [project]: list } });
   }
+  /** Marks the thread read; its success leaves a shown error be. */
   private markRead(thread: ThreadId) {
-    void this.attempt(() => this.engine.markRead(thread));
+    void this.engine.markRead(thread).catch((e) => this.set({ error: describe(e) }));
   }
 }
 

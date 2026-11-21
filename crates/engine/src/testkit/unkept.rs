@@ -1,8 +1,9 @@
 //! A thread the engine has just started, and threads Codex refuses, against
 //! the scripted Codex with Codex 0.171.0's own answers (`unkept_thread`
-//! recorded the first): a read before Codex has kept the first message is an
-//! empty view numbered from before the thread started; any other refusal is
-//! Codex's; a read does not put back a thread archived while it was asked.
+//! recorded the first): a read of a new thread that fails before Codex has
+//! kept it is an empty view numbered from before the thread started; for
+//! another thread a refusal is Codex's; a read does not put back a thread
+//! archived while it was asked.
 
 use std::path::Path;
 
@@ -86,15 +87,23 @@ async fn a_new_threads_first_read_holds_nothing_and_is_numbered_from_its_start()
     }
 }
 
-/// Finding 6: on a new thread, any other refusal is Codex's, at once.
+/// Whatever Codex answers for a new thread before it is kept (its metadata request failing on an
+/// empty rollout, or another refusal of its first page), the read is the empty view, at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_new_threads_other_refusal_is_codexs() {
-    let (engine, mut wire, project, _) = with_thread("unkept-lineage", true).await;
+async fn a_new_threads_failed_read_is_the_empty_view() {
+    let (engine, mut wire, _, before) = with_thread("unkept-metadata", true).await;
+    let reading = read(&engine);
+    refuse(&mut wire, "thread/read", -32603, "failed to read thread: empty rollout file").await;
+    let view = reading.await.unwrap().unwrap();
+    assert!(view.turns.is_empty() && view.seq == before, "{view:?}");
+    engine.shutdown().await;
+
+    let (engine, mut wire, project, before) = with_thread("unkept-lineage", true).await;
     let reading = read(&engine);
     wire.answer("thread/read", thread(&project)).await;
-    let lineage = "invalid paginated history lineage for thread t: missing source rollout";
-    refuse(&mut wire, "thread/turns/list", -32600, lineage).await;
-    assert_eq!(reading.await.unwrap().unwrap_err(), EngineError::Codex { message: lineage.into() });
+    refuse(&mut wire, "thread/turns/list", -32600, "invalid paginated history lineage for thread t: missing source rollout").await;
+    let view = reading.await.unwrap().unwrap();
+    assert!(view.turns.is_empty() && view.seq == before, "{view:?}");
     wire.quiet().await;
     engine.shutdown().await;
 }

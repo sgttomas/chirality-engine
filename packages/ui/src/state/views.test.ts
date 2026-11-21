@@ -146,6 +146,67 @@ describe("a view and the turn running in it", () => {
     expect(error).toBeNull();
   });
 
+  describe("a read that fails (the engine's text_turn data)", () => {
+    const data = engineData("text_turn");
+    const read = data.reads[0].view;
+    const thread = read.summary.id;
+    const initial = (seq: number, unread = false) => ({ ...data.before, seq, projects: data.after.projects, threads: [{ ...read.summary, unread }] });
+    const failed = { kind: "codex", message: "read failed" };
+
+    it("leaves the view shown when a gap's read again fails", async () => {
+      let reads = 0;
+      const wire = new Wire(async (command) => {
+        if (command === "snapshot") return initial(reads ? 5 : 3);
+        if (command === "read_thread") return reads++ === 0 ? { ...read, seq: 3 } : Promise.reject(failed);
+        return [];
+      });
+      const store = new Store(createEngineClient(wire), testHost);
+      await store.start();
+      await store.selectThread(thread);
+      wire.emit(5, { type: "thread", thread: read.summary });
+      for (let i = 0; i < 5; i++) await tick();
+      const shown = store.get().model!.views[thread];
+      store.dispose();
+      expect(reads).toBe(2);
+      expect(shown?.turns).toEqual(read.turns);
+    });
+
+    it("keeps an unread thread's failed first read said, after marking it read", async () => {
+      const wire = new Wire(async (command) => {
+        if (command === "snapshot") return initial(3, true);
+        if (command === "read_thread") throw failed;
+        return null;
+      });
+      const store = new Store(createEngineClient(wire), testHost);
+      await store.start();
+      await store.selectThread(thread);
+      await tick();
+      const error = store.get().error;
+      store.dispose();
+      expect(wire.asked).toContain("mark_read");
+      expect(error).toBe("read failed");
+    });
+
+    it("says nothing of a read that fails after the person went to another thread", async () => {
+      let fail = () => {};
+      const wire = new Wire(async (command) => {
+        if (command === "snapshot") return initial(3);
+        if (command === "read_thread") return new Promise((_, reject) => (fail = () => reject(failed)));
+        return [];
+      });
+      const store = new Store(createEngineClient(wire), testHost);
+      await store.start();
+      const selecting = store.selectThread(thread);
+      await tick();
+      store.selectProject(data.after.projects[0].id);
+      fail();
+      await selecting;
+      const error = store.get().error;
+      store.dispose();
+      expect(error).toBeNull();
+    });
+  });
+
   it("streams text into a thread opened mid-reply, and settles on the turn's end", async () => {
     const { initial, view, frames } = overlap("streaming");
     let reads = 0;

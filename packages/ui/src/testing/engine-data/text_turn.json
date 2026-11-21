@@ -421,7 +421,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Hello from the stub."
+          "text": ""
         },
         "done": false,
         "id": "msg_hello"

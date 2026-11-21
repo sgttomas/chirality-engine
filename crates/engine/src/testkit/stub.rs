@@ -102,7 +102,12 @@ async fn serve(mut stream: TcpStream, scripts: Arc<Mutex<HashMap<String, Script>
         }
         Reply::Items(items) => {
             for (index, item) in items.iter().enumerate() {
-                let mut events = vec![sse("response.output_item.added", json!({"type": "response.output_item.added", "output_index": index, "item": item}))];
+                // A message opens empty, as the model's does; its text comes in the delta.
+                let mut opening = item.clone();
+                if item["type"] == "message" {
+                    opening["content"][0]["text"] = json!("");
+                }
+                let mut events = vec![sse("response.output_item.added", json!({"type": "response.output_item.added", "output_index": index, "item": opening}))];
                 if item["type"] == "message" {
                     let text = item["content"][0]["text"].clone();
                     events.push(sse("response.output_text.delta", json!({"type": "response.output_text.delta", "output_index": index, "content_index": 0, "delta": text, "item_id": item["id"]})));

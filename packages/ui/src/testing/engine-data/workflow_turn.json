@@ -439,7 +439,7 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Following the workflow."
+          "text": ""
         },
         "done": false,
         "id": "msg_flow"

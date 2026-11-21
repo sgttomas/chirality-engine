@@ -247,7 +247,7 @@ describe("a new thread read before Codex kept it (finding 5)", () => {
     const view = store.get().model!.views[store.get().thread!];
     expect(view.turns[0].items.map((i) => i.body.kind)).toEqual(["userMessage", "agentMessage"]);
     expect(screen.getByText("STUB[flow] Estimate this")).toBeInTheDocument();
-    expect(screen.getByText(/^Following the workflow\./)).toBeInTheDocument();
+    expect(screen.getByText("Following the workflow.")).toBeInTheDocument();
   });
 });
 
