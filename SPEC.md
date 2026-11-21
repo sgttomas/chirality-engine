@@ -56,12 +56,12 @@ give it another home.
 
 ## The engine
 
-- **Codex process:** start, health, restart, stop; one process for all projects.
+- **Codex process:** start, health, restart, stop; one process for all projects. After a restart, every project's threads are listed again.
 - **Account:** read, sign in with ChatGPT through Codex, sign out.
 - **Models:** the models Codex lists, each with its reasoning levels.
 - **Projects:** folders the person adds; each thread belongs to one.
 - **Threads:** list (from Codex, which keeps them), start, resume, fork, archive, rename; title as Codex gives it.
-- **Subagents:** a thread an agent starts (Codex's multi-agent tools) is a thread of the snapshot with its parent, path (`/root/worker`) and, once Codex lists it, nickname; it is listed under the thread that started it, never at the top. It is read and followed live like any thread, and Stop works on it; a message to it is refused, as Codex refuses one. Archiving a thread archives its subagents, as Codex does.
+- **Subagents:** a thread an agent starts (Codex's multi-agent tools) is a thread of the snapshot with its parent (the thread that started it, never one it messaged), path (`/root/worker`) and, once Codex lists it, nickname; it is listed under that parent, never at the top. Neither its end nor its approval marks it unread: its parent tells what it did. It is read and followed live like any thread, and Stop works on it; a message to it is refused, as Codex refuses one. Archiving a thread archives its subagents, as Codex does.
 - **Turns:** send a message with text, attachments (images, files) and file references; steer or interrupt a running turn; model, reasoning level and access level per turn. A thread takes one send or Stop at a time, each carried through by the engine even if its caller gives up: a send while a turn runs (or starts) steers it, Stop during a start stops that turn, and after a Stop the thread waits for Codex to answer and end the turn, so the next send starts a new one. If Codex does neither within a while, the Stop is reported as not taken and the thread is let go; the next send goes to Codex as a start, which Codex takes as a steer if the turn still runs.
 - **Events:** one typed stream of everything a thread does: agent text as it streams, reasoning summaries, plans, commands with output, file changes with diffs, tool calls, a subagent started, messaged, stopped or finished (naming it), waiting for subagents, turn start and end, errors. Each event is numbered; a gap means some were missed.
 - **The person's part:** approvals (commands, file changes, permissions) and questions, each answered through the API; nothing is answered on the person's behalf. A subagent's approval names the subagent, which the snapshot holds under its parent.
@@ -97,7 +97,7 @@ together. An application pins one engine revision for all of them.
   - **Approvals and questions:** shown where the person will see them, answered in one or two presses, then out of the way.
   - **Right panel:** the diff of the thread's changes, the workflow in use, and a preview of a file the agent produced; an application adds its own tabs.
   - **Forks:** fork a thread at a message to try another path; the fork is a thread of its own, shown under its parent.
-  - **Subagents:** listed under the thread that started them, folded unless one runs or waits on the person; each opens as a conversation, with a way back to its parent and Stop in place of the composer. In the parent, each start, message, stop and finish names the subagent and opens it, and an approval a subagent waits on is answered there too.
+  - **Subagents:** listed under the thread that started them, folded unless one runs or waits on the person (one waiting, or open, is always shown), and their parent's mark counts theirs; each opens as a conversation, with a way back to its parent and Stop in place of the composer. In the parent, each start, message, stop and finish names the subagent and opens it, and an approval a subagent waits on is answered there too.
   - **Background:** several threads may run at once; a notice when one finishes or needs the person.
   - **First use:** sign in, add a project folder, start. Nothing else.
 

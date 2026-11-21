@@ -61,7 +61,9 @@ impl Inner {
                 if let Ok(session) = self.session() {
                     session.forget_loaded(&thread);
                 }
-                if method != "thread/closed" {
+                if method == "thread/closed" {
+                    self.store.drop_requests(&thread);
+                } else {
                     self.store.remove_thread(&thread);
                 }
             }
@@ -108,8 +110,11 @@ impl Inner {
                     p::ThreadItem::DynamicToolCall { id, .. } if method == "item/completed" => {
                         self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn_id && &place.item == id);
                     }
-                    // Codex announces no subagent's thread: this item is the first the engine hears of one.
-                    p::ThreadItem::SubAgentActivity { agent_thread_id, agent_path, .. } => self.adopt_subagent(&note.thread_id, agent_thread_id, agent_path),
+                    // Codex announces no subagent's thread: its start is the first the engine hears of one.
+                    // Only a start makes a parent; a message can go to any agent, the thread's own parent too.
+                    p::ThreadItem::SubAgentActivity { kind, agent_thread_id, agent_path, .. } if kind == "started" => {
+                        self.adopt_subagent(&note.thread_id, agent_thread_id, agent_path)
+                    }
                     _ => {}
                 }
                 let Some(item) = mapping::item(&note.item, method == "item/completed") else { return };
@@ -178,10 +183,10 @@ impl Inner {
             return self.on_tool_call(session, id, params, self.config.tools.as_ref());
         }
         match mapping::request(method, &params, |item| self.store.file_change(item)) {
-            Some((thread, request)) => {
-                let thread = self.store.shown_on(thread);
+            Some((asked_by, request)) => {
+                let thread = self.store.shown_on(asked_by.clone());
                 let request = PendingRequest { id: RequestId(format!("{generation}:{}", rpc_id_text(&id))), thread, request };
-                self.store.add_pending(Pending { request, generation, rpc_id: id, method: method.to_string(), params });
+                self.store.add_pending(Pending { request, generation, rpc_id: id, method: method.to_string(), params, asked_by });
             }
             None => {
                 let _ = session.client.respond_error(id, -32601, "not supported by this client");
@@ -208,6 +213,10 @@ impl Inner {
         self.store.set_parent(child.clone(), parent.clone());
         let (Some(of), None) = (self.store.thread(&parent), self.store.thread(&child)) else { return };
         let before = self.store.seq();
+        // Unkept before anyone hears of it: a read made on the news of it is the empty one.
+        if let Ok(session) = self.session() {
+            session.mark_unkept(&child, before);
+        }
         let subagent = Subagent { parent, path: path.to_string(), nickname: None };
         self.store.upsert_thread(child.clone(), None, false, |existing| match existing {
             Some(existing) => existing.clone(),
@@ -228,9 +237,6 @@ impl Inner {
                 subagent: Some(subagent),
             },
         });
-        if let Ok(session) = self.session() {
-            session.mark_unkept(&child, before);
-        }
     }
 
     fn take_thread(&self, thread: &p::Thread, read_at: Option<u64>, known_only: bool) -> Option<ThreadId> {

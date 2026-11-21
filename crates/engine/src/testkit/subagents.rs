@@ -71,6 +71,8 @@ pub async fn subagent(ctx: &mut Ctx) {
     let inner = new_subagent(ctx, "/root/worker/inner").await;
     assert_eq!(inner.subagent.as_ref().map(|s| (&s.parent, s.path.as_str())), Some((&worker.id, "/root/worker/inner")));
     assert_eq!(ctx.turn_ended(&lead).await.1, TurnState::Completed);
+    // Their parent tells what they did: a subagent's own approval leaves it unread no more than its end does.
+    assert!(!summary(ctx, &worker.id).unread && !summary(ctx, &inner.id).unread);
 
     // The parent's history shows where it delegated and what came back, each naming the subagent.
     let lead_view = ctx.read_thread(&lead).await;
@@ -98,6 +100,28 @@ pub async fn subagent(ctx: &mut Ctx) {
     assert!(summary(ctx, &lead).subagent.is_none());
 }
 
+/// A subagent's message to the agent that started it names that agent, which
+/// stays its parent; the parent's own tool calls are still its own.
+pub async fn subagent_message(ctx: &mut Ctx) {
+    let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
+    let tools = ctx.app_tools();
+    ctx.script("lead", steps("lead", vec![spawn("call_spawn", "worker", "STUB[worker] report back"), wait("call_wait")], "Lead done."));
+    let to_root = agent_call("call_report", "send_message", json!({"target": "/root", "message": "The piles are fine."}));
+    ctx.script("worker", steps("worker", vec![to_root], "Worker done."));
+    let lead = ctx.engine.start_thread(&project.id, text("STUB[lead] delegate and hear back"), settings(Access::Ask)).await.unwrap();
+    let worker = new_subagent(ctx, "/root/worker").await.id;
+    assert_eq!(ctx.turn_ended(&lead).await.1, TurnState::Completed);
+    let worker_view = ctx.read_thread(&worker).await;
+    let messaged = ItemBody::Subagent { thread: lead.clone(), path: "/root".into(), activity: SubagentActivity::Messaged };
+    assert!(bodies(&worker_view).contains(&messaged), "{:?}", bodies(&worker_view));
+    assert!(summary(ctx, &lead).subagent.is_none());
+    assert_eq!(summary(ctx, &worker).subagent.map(|s| s.parent), Some(lead.clone()));
+
+    let (_, turn) = super::scenarios::check_turn(ctx, Some(&lead), &project, "check", 7).await;
+    assert_eq!(tools.called(1).await[0].thread, lead);
+    assert!(turn.items.iter().any(|i| matches!(&i.body, ItemBody::ToolCall { status: ToolCallStatus::Completed, .. })), "{:?}", turn.items);
+}
+
 pub async fn subagent_stop(ctx: &mut Ctx) {
     let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
     ctx.script("hold", steps("hold", vec![spawn("call_spawn", "worker", "STUB[stall] take your time"), wait("call_wait")], "Hold done."));
@@ -106,6 +130,12 @@ pub async fn subagent_stop(ctx: &mut Ctx) {
     let worker = new_subagent(ctx, "/root/worker").await.id;
     ctx.wait("the subagent's turn", |e| matches!(e, Event::TurnStarted { thread, .. } if thread == &worker).then_some(())).await;
     assert_eq!(summary(ctx, &worker).status, ThreadStatus::Working);
+
+    // Listed again while both run (Codex lists no turns), each still runs, and Stop still reaches it.
+    ctx.engine.remove_project(&project.id).await.unwrap();
+    ctx.engine.add_project(ctx.run.project()).await.unwrap();
+    assert_eq!(summary(ctx, &worker).status, ThreadStatus::Working);
+    assert_eq!(summary(ctx, &lead).status, ThreadStatus::Working);
 
     // Stopped by the person: the subagent's turn ends; its parent is not told, and goes on waiting.
     ctx.engine.interrupt(&worker).await.unwrap();
@@ -118,8 +148,52 @@ pub async fn subagent_stop(ctx: &mut Ctx) {
 
     // Archiving the parent archives its subagent too.
     ctx.engine.archive(&lead).await.unwrap();
-    ctx.wait("the subagent to go", |e| matches!(e, Event::ThreadRemoved { thread } if thread == &worker).then_some(())).await;
-    assert!(ctx.engine.snapshot().threads.is_empty());
+    // (The project's removal above announced the subagent gone once already.)
+    for _ in 0..250 {
+        if ctx.engine.snapshot().threads.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(ctx.engine.snapshot().threads.is_empty(), "the subagent goes with its parent");
+}
+
+/// After Codex restarts on its own, each project is listed again with its
+/// threads' subagents: one the engine was never told of is there, under its parent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn after_codex_restarts_a_subagent_the_engine_had_not_seen_is_listed_under_its_parent() {
+    let (engine, mut wires, mut wire, codex, folder) = super::fake::start_engine("restart-subagents", None).await;
+    let cwd = folder.display().to_string();
+    let lead = json!({"id": "lead", "status": {"type": "notLoaded"}, "cwd": cwd});
+    let worker = json!({"id": "worker", "status": {"type": "notLoaded"}, "cwd": cwd, "parentThreadId": "lead", "agentNickname": "Hume",
+        "source": {"subAgent": {"thread_spawn": {"agent_path": "/root/worker", "agent_nickname": "Hume", "depth": 1, "parent_thread_id": "lead"}}}});
+    let page = |threads: Vec<&Value>| json!({"data": threads, "nextCursor": null});
+    codex.hold("thread/list");
+    let adding = tokio::spawn({
+        let (engine, folder) = (engine.clone(), folder.clone());
+        async move { engine.add_project(folder).await }
+    });
+    wire.answer("thread/list", page(vec![&lead])).await;
+    wire.answer("thread/list", page(vec![])).await;
+    adding.await.unwrap().expect("the project is added");
+    assert_eq!(engine.snapshot().threads.len(), 1);
+
+    wire.kill();
+    let mut wire = tokio::time::timeout(std::time::Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
+    wire.answer("thread/list", page(vec![&lead])).await;
+    let frame = wire.next().await;
+    assert_eq!((frame["method"].as_str(), frame["params"]["ancestorThreadId"].as_str()), (Some("thread/list"), Some("lead")), "{frame}");
+    wire.send(json!({"id": frame["id"], "result": page(vec![&worker])}));
+    for _ in 0..250 {
+        if let Some(found) = engine.snapshot().threads.into_iter().find(|t| t.id.0 == "worker") {
+            let expected = Subagent { parent: ThreadId("lead".into()), path: "/root/worker".into(), nickname: Some("Hume".into()) };
+            assert_eq!(found.subagent, Some(expected));
+            engine.shutdown().await;
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the subagent is not in the snapshot");
 }
 
 /// Live: a subagent read the moment the engine takes it in (before Codex has

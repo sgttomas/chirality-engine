@@ -36,6 +36,14 @@ export function pendingFor(snapshot: Snapshot, thread: ThreadId | null): Pending
   return snapshot.pending.find((p) => below.has(p.thread));
 }
 
+/** A thread row's mark: a subagent's own; any other thread's, the strongest of its own and its
+ * subagents' (whose finishing is their parent's to tell). */
+export function rowMark(thread: ThreadSummary, threads: ThreadSummary[]): Mark {
+  if (thread.subagent) return markOf(thread);
+  const below = subtreeOf(threads, thread.id).map((r) => markOf(r.thread)).filter((m) => m !== "finished");
+  return strongest([markOf(thread), ...below]);
+}
+
 /** A thread's name: its title, a subagent's task name, or "New thread". */
 export function nameOf(thread: ThreadSummary): string {
   return thread.title ?? thread.subagent?.path.split("/").filter(Boolean).at(-1) ?? "New thread";
@@ -78,6 +86,17 @@ export function treeOf(threads: ThreadSummary[], project: string): { thread: Thr
   return out;
 }
 
+/** A project's threads as `treeOf` gives them, searched by name: a thread is in it if it or one of its
+ * subagents matches; `found` holds the subagents that match, to be shown. */
+export function searchTree(threads: ThreadSummary[], project: string, query: string): { rows: { thread: ThreadSummary; depth: number }[]; found: Set<ThreadId> } {
+  const q = query.trim().toLowerCase();
+  const rows = treeOf(threads, project);
+  if (!q) return { rows, found: new Set() };
+  const matches = (t: ThreadSummary) => nameOf(t).toLowerCase().includes(q);
+  const found = new Set(threads.filter((t) => t.subagent && t.project === project && matches(t)).map((t) => t.id));
+  return { rows: rows.filter((r) => matches(r.thread) || subtreeOf(threads, r.thread.id).some((s) => found.has(s.thread.id))), found };
+}
+
 /** A thread's subagents at every depth, each under the one that started it, in the order they started. */
 export function subtreeOf(threads: ThreadSummary[], parent: ThreadId): { thread: ThreadSummary; depth: number }[] {
   const out: { thread: ThreadSummary; depth: number }[] = [];
@@ -95,7 +114,10 @@ export function subtreeOf(threads: ThreadSummary[], parent: ThreadId): { thread:
 
 /** The mark a collapsed group shows: the strongest of its threads'. */
 export function strongestMark(threads: ThreadSummary[]): Mark {
-  const marks = threads.map(markOf);
+  return strongest(threads.map(markOf));
+}
+
+function strongest(marks: Mark[]): Mark {
   return (["waiting", "failed", "finished", "running"] as const).find((m) => marks.includes(m)) ?? null;
 }
 

@@ -608,7 +608,7 @@
           "path": "/root/worker"
         },
         "title": null,
-        "unread": true,
+        "unread": false,
         "updatedAt": 1795000000
       },
       "type": "thread"
@@ -636,7 +636,7 @@
           "path": "/root/worker"
         },
         "title": null,
-        "unread": true,
+        "unread": false,
         "updatedAt": 1795000000
       },
       "type": "thread"
@@ -936,7 +936,7 @@
           "path": "/root/worker"
         },
         "title": null,
-        "unread": true,
+        "unread": false,
         "updatedAt": 1795000000
       },
       "type": "thread"
@@ -1081,7 +1081,7 @@
           "path": "/root/worker"
         },
         "title": null,
-        "unread": true,
+        "unread": false,
         "updatedAt": 1795000000
       },
       "type": "thread"
@@ -1286,7 +1286,7 @@
             "path": "/root/worker"
           },
           "title": null,
-          "unread": true,
+          "unread": false,
           "updatedAt": 1795000000
         },
         "turns": [

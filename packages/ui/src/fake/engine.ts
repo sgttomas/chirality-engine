@@ -24,6 +24,7 @@ import type {
   TurnId,
   TurnSettings,
 } from "../engine/types";
+import { subtreeOf } from "../state/selectors";
 import { files, libraryWorkflows, models, projectWorkflow } from "./fixtures";
 import { scriptFor, type Run, type Script } from "./scripts";
 
@@ -242,10 +243,19 @@ export class FakeEngine implements EngineClient {
     this.summary(thread).title = title;
     this.emitThread(thread);
   }
+  /** Archives the thread and, as Codex does, its subagents, with what they asked. */
   async archive(thread: ThreadId) {
-    this.snap.threads = this.snap.threads.filter((t) => t.id !== thread);
-    this.views.delete(thread);
-    this.emit({ type: "threadRemoved", thread });
+    const gone = [thread, ...subtreeOf(this.snap.threads, thread).map((r) => r.thread.id)];
+    for (const request of this.snap.pending.filter((p) => gone.includes(p.thread))) {
+      this.waiting.delete(request.id);
+      this.snap.pending = this.snap.pending.filter((p) => p.id !== request.id);
+      this.emit({ type: "resolved", request: request.id });
+    }
+    for (const id of gone) {
+      this.snap.threads = this.snap.threads.filter((t) => t.id !== id);
+      this.views.delete(id);
+      this.emit({ type: "threadRemoved", thread: id });
+    }
   }
   async markRead(thread: ThreadId) {
     const summary = this.snap.threads.find((t) => t.id === thread);
@@ -361,7 +371,8 @@ export class FakeEngine implements EngineClient {
         const answer = new Promise<Answer>((resolve) => this.waiting.set(pending.id, { thread, resolve }));
         this.snap.pending.push(pending);
         this.emit({ type: "pending", request: structuredClone(pending) });
-        this.summary(thread).unread = true;
+        // A subagent's request is the person's to see from where it shows; its parent tells what it did.
+        if (!this.summary(thread).subagent) this.summary(thread).unread = true;
         this.refresh(thread);
         const auto = this.options.autoAnswer?.(request);
         if (auto) this.resolve(pending.id, auto);

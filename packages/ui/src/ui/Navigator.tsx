@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import type { Project, ProjectId, ThreadSummary } from "../engine/types";
-import { ago, markLabel, markOf, nameOf, strongestMark, treeOf } from "../state/selectors";
+import { ago, markLabel, nameOf, rowMark, searchTree, strongestMark } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Icon } from "./Icon";
 import { SubagentGroup } from "./Subagents";
@@ -20,8 +20,7 @@ export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
 
   const addProject = () => void store.addProjectFolder();
 
-  const q = query.trim().toLowerCase();
-  const matches = (t: ThreadSummary) => !q || nameOf(t).toLowerCase().includes(q);
+  const q = query.trim();
 
   return (
     <nav className="nav" aria-label="Projects">
@@ -37,7 +36,7 @@ export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
           <ProjectGroup
             key={project.id}
             project={project}
-            rows={treeOf(snapshot.threads, project.id).filter((r) => matches(r.thread))}
+            {...searchTree(snapshot.threads, project.id, q)}
             all={snapshot.threads.filter((t) => t.project === project.id)}
             open={!closed[project.id] || !!q}
             current={current === project.id && !selected}
@@ -59,6 +58,8 @@ export function Navigator({ brand = "Chirality" }: { brand?: ReactNode }) {
 function ProjectGroup(props: {
   project: Project;
   rows: { thread: ThreadSummary; depth: number }[];
+  /** Subagents a search found. */
+  found: Set<string>;
   /** Every thread of the project, subagents too. */
   all: ThreadSummary[];
   open: boolean;
@@ -83,7 +84,7 @@ function ProjectGroup(props: {
           <Icon name="plus" />
         </button>
       </div>
-      {open && <ThreadRows rows={rows} selected={props.selected} />}
+      {open && <ThreadRows rows={rows} found={props.found} selected={props.selected} />}
     </section>
   );
 }
@@ -92,34 +93,33 @@ function ProjectGroup(props: {
 export function ThreadList({ project, query = "" }: { project: ProjectId; query?: string }) {
   const threads = useStore((s) => s.model!.snapshot.threads);
   const selected = useStore((s) => s.thread);
-  const q = query.trim().toLowerCase();
-  const rows = treeOf(threads, project).filter((r) => !q || nameOf(r.thread).toLowerCase().includes(q));
-  return <ThreadRows rows={rows} selected={selected} />;
+  const { rows, found } = searchTree(threads, project, query);
+  return <ThreadRows rows={rows} found={found} selected={selected} />;
 }
 
-function ThreadRows({ rows, selected }: { rows: { thread: ThreadSummary; depth: number }[]; selected: string | null }) {
+function ThreadRows({ rows, found, selected }: { rows: { thread: ThreadSummary; depth: number }[]; found: Set<string>; selected: string | null }) {
   return (
     <ul className="nav-threads">
       {rows.map(({ thread, depth }) => (
-        <ThreadAndSubagents key={thread.id} thread={thread} depth={depth} selected={selected} />
+        <ThreadAndSubagents key={thread.id} thread={thread} depth={depth} found={found} selected={selected} />
       ))}
     </ul>
   );
 }
 
-function ThreadAndSubagents({ thread, depth, selected }: { thread: ThreadSummary; depth: number; selected: string | null }) {
+function ThreadAndSubagents({ thread, depth, found, selected }: { thread: ThreadSummary; depth: number; found: Set<string>; selected: string | null }) {
   const row = (t: ThreadSummary, d: number) => <ThreadRow key={t.id} thread={t} depth={d} selected={t.id === selected} />;
   return (
     <>
       {row(thread, depth)}
-      <SubagentGroup parent={thread} depth={depth} row={row} />
+      <SubagentGroup parent={thread} depth={depth} found={found} row={row} />
     </>
   );
 }
 
 function ThreadRow({ thread, depth, selected }: { thread: ThreadSummary; depth: number; selected: boolean }) {
   const store = useStoreHandle();
-  const mark = markOf(thread);
+  const mark = useStore((s) => rowMark(thread, s.model!.snapshot.threads));
   const quiet = !mark && !selected;
   return (
     <li>

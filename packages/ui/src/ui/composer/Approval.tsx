@@ -6,6 +6,7 @@ import { useProjectRoot, useStoreHandle } from "../../state/store";
 import { Diff, DiffStat } from "../Diff";
 import { Icon } from "../Icon";
 import { RequestFrom } from "./RequestFrom";
+import { forShortcut } from "./shortcuts";
 
 const headings = { command: "Run this command?", fileChange: "Make these changes?", permissions: "Allow more access?" } as const;
 
@@ -25,7 +26,7 @@ export function Approval({ pending }: { pending: PendingRequest }) {
 
   useEffect(() => {
     const keys = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if (!forShortcut(e)) return;
       if (e.key === "Enter" && !e.metaKey) answer({ kind: "allow" });
       else if (e.key === "Escape") answer({ kind: "decline" });
     };

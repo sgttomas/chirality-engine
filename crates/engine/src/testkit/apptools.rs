@@ -16,7 +16,7 @@ pub const WAIT: &str = "wait_for_network";
 
 /// The scenarios run with the application's tools; every other runs without, as before.
 pub fn for_scenario(name: &str) -> Option<Arc<TestTools>> {
-    matches!(name, "app_tool" | "app_tool_kept" | "app_tool_cancelled").then(|| Arc::new(TestTools::default()))
+    matches!(name, "app_tool" | "app_tool_kept" | "app_tool_cancelled" | "subagent_message").then(|| Arc::new(TestTools::default()))
 }
 
 #[derive(Default)]

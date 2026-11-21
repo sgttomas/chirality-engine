@@ -57,6 +57,28 @@ describe("over the real engine's data", () => {
     expect(screen.getByText("Done.")).toBeInTheDocument();
   });
 
+  it("leaves a key pressed on a control to that control, and answers one pressed elsewhere", async () => {
+    const { engine } = await open("command_approved");
+    await playTo(engine, "pending");
+    const ask = () => screen.getByRole("dialog", { name: "Run this command?" });
+    within(ask()).getByRole("button", { name: "More choices" }).focus();
+    await userEvent.keyboard("{Enter}");
+    expect(within(ask()).getByRole("button", { name: "Decline and stop" })).toBeInTheDocument();
+    within(ask()).getByRole("button", { name: "Decline" }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(engine.answers).toEqual([]);
+    await userEvent.keyboard("{Enter}");
+    expect(engine.answers).toEqual([{ request: "1:0", answer: { kind: "decline" } }]);
+  });
+
+  it("allows with Enter when no control has the key", async () => {
+    const { engine } = await open("command_approved");
+    await playTo(engine, "pending");
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard("{Enter}");
+    expect(engine.answers).toEqual([{ request: "1:0", answer: { kind: "allow" } }]);
+  });
+
   it("shows a new file's change relative to the project, in the conversation, the approval and the side panel", async () => {
     const { engine, store } = await open("file_change");
     await playTo(engine, "pending");

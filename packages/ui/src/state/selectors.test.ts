@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { engineData } from "../testing/replay";
-import { nameOf, pendingFor, subtreeOf, treeOf } from "./selectors";
+import { nameOf, pendingFor, rowMark, subtreeOf, treeOf } from "./selectors";
 
 describe("subagents in the engine's snapshot", () => {
   const data = engineData("subagent");
@@ -29,5 +29,17 @@ describe("subagents in the engine's snapshot", () => {
     expect(pendingFor(snapshot, worker)).toEqual(asked.request);
     const own = { ...asked.request, id: "own", thread: lead.id };
     expect(pendingFor({ ...snapshot, pending: [asked.request, own] }, lead.id)).toEqual(own);
+  });
+
+  it("mark a parent's row with the strongest of its own and its subagents', but not their finishing", () => {
+    const [worker, inner] = subtreeOf(threads, lead.id).map((r) => r.thread);
+    const idle = { ...lead, status: { state: "idle" as const }, unread: false };
+    const as = (t: typeof worker, status: typeof worker.status, unread = false) => ({ ...t, status, unread });
+    const working = { state: "working" as const };
+    const mark = (parent: typeof lead, ...below: (typeof worker)[]) => rowMark(parent, [parent, ...below]);
+    expect(mark({ ...idle, status: working }, as(worker, { state: "needsApproval" }), inner)).toBe("waiting");
+    expect(mark(idle, as(worker, working), inner)).toBe("running");
+    expect(mark(idle, as(worker, { state: "idle" }, true), inner)).toBe(null);
+    expect(rowMark(as(worker, working), [idle, as(worker, working), as(inner, { state: "needsAnswer" })])).toBe("running");
   });
 });

@@ -2,17 +2,19 @@
 import { useEffect } from "react";
 
 import type { Event, ThreadSummary } from "../engine/types";
-import { nameOf } from "../state/selectors";
+import { nameOf, subtreeOf } from "../state/selectors";
 import type { State } from "../state/store";
 import { useStoreHandle } from "../state/store";
 
 /** The notice an event deserves, if any: a subagent's only when it needs the person (its parent
- * goes on with what it finishes). */
+ * goes on with what it finishes), and not while the person has it or one of its ancestors in front of them. */
 export function noticeFor(event: Event, before: State, focused: boolean): { title: string; body: string } | null {
   if (event.type !== "thread") return null;
   const now = event.thread;
   const was = before.model?.snapshot.threads.find((t) => t.id === now.id);
-  if (!was || (focused && before.thread === now.id)) return null;
+  if (!was) return null;
+  const inView = before.thread === now.id || (!!before.thread && subtreeOf(before.model!.snapshot.threads, before.thread).some((r) => r.thread.id === now.id));
+  if (focused && inView) return null;
   const title = nameOf(now);
   const needs = (t: ThreadSummary) => t.status.state === "needsApproval" || t.status.state === "needsAnswer";
   if (needs(now) && !needs(was)) return { title, body: now.status.state === "needsAnswer" ? "Has a question" : "Needs your approval" };

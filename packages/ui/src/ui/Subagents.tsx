@@ -9,15 +9,24 @@ import { Approval } from "./composer/Approval";
 import { Question } from "./composer/Question";
 import { Icon } from "./Icon";
 
-/** A thread's subagents, folded unless one runs, waits on the person, or is selected. */
-export function SubagentGroup({ parent, depth, row }: { parent: ThreadSummary; depth: number; row(thread: ThreadSummary, depth: number): ReactNode }) {
+/** A thread's subagents, folded unless one runs, waits on the person, or is selected. Folded or
+ * unfolded by hand, they stay so until one starts running or waits again; one waiting on the person,
+ * selected, or `found` by a search is always shown. */
+export function SubagentGroup(props: { parent: ThreadSummary; depth: number; found?: Set<string>; row(thread: ThreadSummary, depth: number): ReactNode }) {
+  const { parent, depth, row } = props;
   const threads = useStore((s) => s.model!.snapshot.threads);
   const selected = useStore((s) => s.thread);
   const [chosen, setChosen] = useState<boolean | null>(null);
   const rows = subtreeOf(threads, parent.id);
+  const shown = rows.some((r) => markOf(r.thread) === "waiting" || r.thread.id === selected || props.found?.has(r.thread.id));
+  const busy = shown || rows.some((r) => markOf(r.thread) === "running");
+  const [wasBusy, setWasBusy] = useState(busy);
+  if (busy !== wasBusy) {
+    setWasBusy(busy);
+    if (busy) setChosen(null);
+  }
   if (!rows.length) return null;
-  const busy = rows.some((r) => ["running", "waiting"].includes(markOf(r.thread) ?? "") || r.thread.id === selected);
-  const open = chosen ?? busy;
+  const open = shown || (chosen ?? busy);
   const mark = strongestMark(rows.map((r) => r.thread));
   return (
     <>
@@ -62,7 +71,7 @@ export function SubagentControls() {
   return (
     <div className="composer-area">
       {pending?.request.kind === "question" ? <Question key={pending.id} pending={pending} /> : pending ? <Approval key={pending.id} pending={pending} /> : null}
-      {running && !pending && (
+      {running && (
         <div className="composer composer--subagent">
           <span className="composer-spacer" />
           <button className="send send--stop" aria-label="Stop" title="Stop" onClick={() => store.attempt(() => store.engine.interrupt(thread))}>

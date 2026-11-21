@@ -9,7 +9,7 @@ use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, too
 use crate::api::*;
 
 pub use super::history::unkept_thread;
-pub use super::subagents::{subagent, subagent_stop};
+pub use super::subagents::{subagent, subagent_message, subagent_stop};
 
 async fn project(ctx: &Ctx) -> Project {
     ctx.engine.add_project(ctx.run.project()).await.expect("the project is added")
@@ -230,7 +230,7 @@ pub async fn restart(ctx: &mut Ctx) {
 }
 
 /// A turn whose model calls the application's estimate check with `total`.
-async fn check_turn(ctx: &mut Ctx, thread: Option<&ThreadId>, project: &Project, key: &str, total: i64) -> (ThreadId, Turn) {
+pub(super) async fn check_turn(ctx: &mut Ctx, thread: Option<&ThreadId>, project: &Project, key: &str, total: i64) -> (ThreadId, Turn) {
     ctx.script(key, calls(key, tool_call(&format!("call_{key}"), NAMESPACE, CHECK, json!({ "total": total })), true));
     let message = text(&format!("STUB[{key}] check the estimate"));
     let thread = match thread {
