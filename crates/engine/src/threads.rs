@@ -61,6 +61,7 @@ impl Inner {
         }
         let entry = self.known_thread(thread)?;
         let _: p::ThreadResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
+        self.tool_calls.reopen_thread(&thread.0);
         session.mark_loaded(thread);
         Ok(())
     }
@@ -134,7 +135,7 @@ impl Inner {
         self.known_thread(thread)?;
         session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
         self.store.remove_thread(thread);
-        self.tool_calls.cancel(|place| place.thread == thread.0);
+        self.tool_calls.close_thread(&thread.0);
         Ok(())
     }
 

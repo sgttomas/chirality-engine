@@ -130,10 +130,19 @@ impl Tape {
 impl Ctx {
     /// The real Codex against the stub; with `record`, the frames are kept.
     pub async fn live(name: &str, record: bool) -> Ctx {
+        Ctx::live_with(name, record, None).await
+    }
+
+    /// Live, with `app_tools` in place of the scenario's own; the engine's
+    /// start-up check of them is skipped, so Codex's own can be seen.
+    pub async fn live_with(name: &str, record: bool, app_tools: Option<AppTools>) -> Ctx {
         let run = Run::new(Path::new(SCRATCH), name);
         let stub = Stub::start().await;
         let tools = apptools::for_scenario(name);
-        let config = run.config(tools.as_ref());
+        let mut config = run.config(tools.as_ref());
+        if app_tools.is_some() {
+            config.tools = app_tools;
+        }
         let settings = vec!["analytics.enabled=false".to_string(), "model_provider=\"openai\"".to_string(), format!("openai_base_url=\"{}\"", stub.base_url())];
         let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings, env: Some(run.environment()), cwd: Some(run.project()) };
         let recorder = record.then(Recorder::new);

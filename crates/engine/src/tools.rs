@@ -1,19 +1,17 @@
 //! The application's tools: given to Codex when a thread starts, and each call
 //! Codex sends (`item/tool/call`) answered by the application's handler.
 //!
-//! A call is admitted only while its Codex session is current, run once per
-//! request id, and answered once, unless Codex cancels it first: its item
-//! completes, its turn ends, its thread is archived or closed, or Codex stops.
-//! A cancelled call's handler future is dropped and nothing is sent. Answering
-//! and cancelling take the same lock, so exactly one of them happens.
+//! Codex cancels a call when its item completes unanswered, its turn ends, its
+//! thread is archived, deleted or closed, or Codex stops; the engine then
+//! drops the handler's future and sends nothing (`calls.rs`).
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::task::{AbortHandle, JoinSet};
 
 use crate::api::*;
+use crate::calls::{Admission, Place, ReplyTo};
 use crate::protocol as p;
 use crate::session::{Inner, Session};
 
@@ -29,8 +27,13 @@ pub(crate) fn specs(tools: &AppTools) -> Vec<p::DynamicToolSpec> {
     vec![p::DynamicToolSpec::Namespace { name: tools.namespace.name.clone(), description: tools.namespace.description.clone(), tools: functions }]
 }
 
-/// Namespaces Codex keeps for the Responses API (0.171.0, `validate_dynamic_tools`).
-const RESERVED_NAMESPACES: [&str; 14] = [
+/// Namespaces Codex keeps: for the Responses API (0.171.0, `validate_dynamic_tools`),
+/// and for its own tools (`clock`, and the multi-agent ones), whose names
+/// would win over an application's.
+const RESERVED_NAMESPACES: [&str; 17] = [
+    "clock",
+    "collaboration",
+    "multi_agent_v1",
     "api_tool",
     "browser",
     "computer",
@@ -72,11 +75,23 @@ pub(crate) fn validate(tools: &AppTools) -> Result<()> {
         if !seen.insert(tool.name.as_str()) {
             return invalid(format!("tool {:?} is given twice", tool.name));
         }
-        if !tool.input_schema.is_object() {
-            return invalid(format!("tool {:?} needs a JSON Schema object for its arguments", tool.name));
+        if !schema_supported(&tool.input_schema) {
+            return invalid(format!("tool {:?} needs a JSON Schema of an object for its arguments", tool.name));
         }
     }
     Ok(())
+}
+
+/// Arguments are an object, so their schema describes one: Codex 0.171.0
+/// refuses some other schemas and makes do with the rest.
+pub(crate) fn schema_supported(schema: &Value) -> bool {
+    let Some(schema) = schema.as_object() else { return false };
+    match schema.get("type") {
+        None => true,
+        Some(Value::String(kind)) => kind == "object",
+        Some(Value::Array(kinds)) => kinds.iter().any(|k| k == "object"),
+        Some(_) => false,
+    }
 }
 
 /// Whether a call names one of the configured tools: a thread resumed from a
@@ -98,110 +113,26 @@ fn response(output: ToolOutput) -> Value {
     serde_json::to_value(p::DynamicToolResponse { content_items, success: output.success }).expect("a tool response serialises")
 }
 
-/// Where a call is in Codex: its thread, turn and item, as Codex names them.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Place {
-    pub thread: String,
-    pub turn: String,
-    pub item: String,
-}
-
-struct Running {
-    place: Place,
-    work: AbortHandle,
-}
-
-#[derive(Default)]
-struct State {
-    /// The session calls are admitted for; none while Codex is down or the engine is shut down.
-    open: Option<u64>,
-    /// By request id.
-    running: HashMap<String, Running>,
-    /// Request ids taken this session, so a request Codex sends again is not run again.
-    taken: HashSet<String>,
-    /// Each call's supervisor, joined on shutdown.
-    tasks: JoinSet<()>,
-}
-
-/// The calls being answered.
-#[derive(Clone, Default)]
-pub(crate) struct Calls(Arc<Mutex<State>>);
-
-impl Calls {
-    /// A new session admits calls.
-    pub fn open(&self, generation: u64) {
-        let mut state = self.0.lock().unwrap();
-        state.open = Some(generation);
-        state.taken.clear();
-    }
-
-    /// Admits no more calls and cancels the running ones; returns their
-    /// supervisors, which end once each handler future is dropped.
-    pub fn close(&self) -> JoinSet<()> {
-        let mut state = self.0.lock().unwrap();
-        state.open = None;
-        for (_, running) in state.running.drain() {
-            running.work.abort();
-        }
-        std::mem::take(&mut state.tasks)
-    }
-
-    /// Cancels the calls whose place `matches`.
-    pub fn cancel(&self, matches: impl Fn(&Place) -> bool) {
-        self.0.lock().unwrap().running.retain(|_, running| {
-            let keep = !matches(&running.place);
-            if !keep {
-                running.work.abort();
-            }
-            keep
-        });
-    }
-
-    #[cfg(test)]
-    pub fn running(&self) -> usize {
-        self.0.lock().unwrap().running.len()
-    }
-
-    /// Runs `handler` on the call unless the session is no longer current or
-    /// the request was already taken.
-    fn start(&self, session: Arc<Session>, id: Value, place: Place, call: ToolCall, handler: Arc<dyn ToolHandler>) {
-        let key = id.to_string();
-        let mut state = self.0.lock().unwrap();
-        if state.open != Some(session.generation) || !state.taken.insert(key.clone()) {
-            return;
-        }
-        // The handler is invoked inside the task, so a panic building its future is caught too.
-        let work = tokio::spawn(async move { handler.call(call).await });
-        state.running.insert(key.clone(), Running { place, work: work.abort_handle() });
-        while state.tasks.try_join_next().is_some() {}
-        let calls = self.clone();
-        state.tasks.spawn(async move {
-            let output = match work.await {
-                Ok(output) => output,
-                Err(error) if error.is_cancelled() => return,
-                Err(_) => ToolOutput::failure("The tool failed."),
-            };
-            let reply = response(output);
-            let mut state = calls.0.lock().unwrap();
-            if state.running.remove(&key).is_some() {
-                let _ = session.client.respond(id, reply);
-            }
-        });
-    }
-}
-
 impl Inner {
-    /// Answers a call to the application's tools through its handler; a call
-    /// to a tool it does not have is answered as failed at once.
+    /// Answers a call to the application's tools through its handler, once
+    /// per request; a call to a tool it does not have, or on a thread gone
+    /// from Codex, is answered as failed at once.
     pub(crate) fn on_tool_call(&self, session: Arc<Session>, id: Value, params: Value, tools: &AppTools) {
         let Ok(call) = serde_json::from_value::<p::DynamicToolCall>(params) else {
             let _ = session.client.respond_error(id, -32602, "invalid tool call");
             return;
         };
+        let refuse = |text: String| {
+            let _ = session.client.respond(id.clone(), response(ToolOutput::failure(text)));
+        };
+        match self.tool_calls.admit(session.generation, &id, &call.thread_id) {
+            Admission::Ignore => return,
+            Admission::Refuse => return refuse("The thread is closed.".into()),
+            Admission::Run => {}
+        }
         if !offers(tools, call.namespace.as_deref(), &call.tool) {
             let name = [call.namespace.as_deref(), Some(call.tool.as_str())].into_iter().flatten().collect::<Vec<_>>().join(".");
-            let _ = session.client.respond(id, response(ToolOutput::failure(format!("This application has no tool {name}."))));
-            return;
+            return refuse(format!("This application has no tool {name}."));
         }
         let place = Place { thread: call.thread_id.clone(), turn: call.turn_id.clone(), item: call.call_id.clone() };
         let thread = self.store.owner(ThreadId(call.thread_id));
@@ -215,7 +146,8 @@ impl Inner {
             tool: call.tool,
             arguments: call.arguments,
         };
-        self.tool_calls.start(session, id, place, call, tools.handler.clone());
+        let to = ReplyTo { client: session.client.clone(), generation: session.generation, id };
+        self.tool_calls.run(to, place, call, tools.handler.clone(), response);
     }
 }
 
@@ -245,15 +177,18 @@ mod tests {
         for bad in [tools("estimate", &["check", "check"]), tools("estimate", &["check estimate"]), tools("estimate", &["mcp__x"]), tools("estimate", &[])] {
             assert!(validate(&bad).is_err(), "{bad:?}");
         }
-        for namespace in ["a.b", "", "web", "functions", "mcp", "mcp__x", &"n".repeat(65)] {
+        for namespace in ["a.b", "", "web", "functions", "clock", "mcp", "mcp__x", &"n".repeat(65)] {
             assert!(validate(&tools(namespace, &["check"])).is_err(), "{namespace}");
         }
         let mut long = tools("estimate", &["check"]);
         long.namespace.description = "d".repeat(1025);
         assert!(validate(&long).is_err());
-        let mut schemaless = tools("estimate", &["check"]);
-        schemaless.tools[0].input_schema = json!(true);
-        assert!(validate(&schemaless).is_err());
+        // The cases checked against the pinned Codex (`testkit::catalog`).
+        for (namespace, name, schema, ok) in crate::testkit::catalog::cases() {
+            let mut tools = tools(namespace, &[name]);
+            tools.tools[0].input_schema = schema.clone();
+            assert_eq!(validate(&tools).is_ok(), ok, "{namespace}.{name} {schema}");
+        }
     }
 
     #[test]

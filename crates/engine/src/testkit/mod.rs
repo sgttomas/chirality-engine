@@ -9,6 +9,7 @@
 //!   skipped when the binary is absent.
 
 mod apptools;
+pub(crate) mod catalog;
 mod export;
 mod fake;
 mod tool_calls;

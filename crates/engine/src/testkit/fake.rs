@@ -1,7 +1,8 @@
 //! A scripted Codex for what the real one cannot be made to do on demand:
 //! the test sends Codex's frames itself and reads what the engine answers.
-//! The handshake, account and models are answered for it.
+//! The handshake, account and models are answered for it, unless held.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,6 +31,18 @@ impl Wire {
         self.line.lock().unwrap().take();
     }
 
+    /// Whether the engine has ended this Codex, or it died.
+    pub fn is_ended(&self) -> bool {
+        self.line.lock().unwrap().is_none()
+    }
+
+    /// Reads the engine's next frame, which must be a `method` request, and answers it.
+    pub async fn answer(&mut self, method: &str, result: Value) {
+        let frame = self.next().await;
+        assert_eq!(frame["method"], method, "{frame}");
+        self.send(json!({ "id": frame["id"], "result": result }));
+    }
+
     /// The next frame the engine sends, within a few seconds.
     pub async fn next(&mut self) -> Value {
         tokio::time::timeout(Duration::from_secs(5), self.from_engine.recv()).await.expect("a frame from the engine").expect("the connection is open")
@@ -45,13 +58,20 @@ impl Wire {
 
 pub struct FakeCodex {
     wires: mpsc::UnboundedSender<Wire>,
+    /// Methods given to the test to answer instead.
+    held: Arc<Mutex<HashSet<String>>>,
 }
 
 impl FakeCodex {
     /// The connector, and each connection it makes, in order.
     pub fn new() -> (Arc<FakeCodex>, mpsc::UnboundedReceiver<Wire>) {
         let (wires, rx) = mpsc::unbounded_channel();
-        (Arc::new(FakeCodex { wires }), rx)
+        (Arc::new(FakeCodex { wires, held: Arc::default() }), rx)
+    }
+
+    /// From now on the test answers `method`, on every connection.
+    pub fn hold(&self, method: &str) {
+        self.held.lock().unwrap().insert(method.to_string());
     }
 }
 
@@ -74,14 +94,17 @@ impl Connector for FakeCodex {
         let line: Line = Arc::new(Mutex::new(Some(in_tx)));
         let _ = self.wires.send(Wire { line: line.clone(), from_engine: test_rx });
         let answering = line.clone();
+        let held = self.held.clone();
         tokio::spawn(async move {
             while let Some(text) = out_rx.recv().await {
                 let frame: Value = serde_json::from_str(&text).expect("the engine sends JSON");
-                let result = match frame["method"].as_str() {
-                    Some("initialize") => Some(json!({ "userAgent": "chirality/0.171.0 (fake)" })),
-                    Some("account/read") => Some(json!({ "account": null })),
-                    Some("model/list") => Some(json!({ "data": [], "nextCursor": null })),
-                    Some("initialized") => continue,
+                let method = frame["method"].as_str().unwrap_or_default();
+                let result = match method {
+                    _ if held.lock().unwrap().contains(method) => None,
+                    "initialize" => Some(json!({ "userAgent": "chirality/0.171.0 (fake)" })),
+                    "account/read" => Some(json!({ "account": null })),
+                    "model/list" => Some(json!({ "data": [], "nextCursor": null })),
+                    "initialized" => continue,
                     _ => None,
                 };
                 match result {

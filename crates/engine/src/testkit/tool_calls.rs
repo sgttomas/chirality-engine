@@ -1,7 +1,9 @@
 //! The application's tool calls on the paths a real Codex cannot be made to
 //! take on demand, against the scripted Codex: the same model call id on two
-//! threads, a request sent again, handlers that panic, and calls cancelled by
-//! archiving, Codex dying, shutdown, or the call's item ending first.
+//! threads, a request sent again, handlers that panic, calls cancelled by
+//! archiving (also with the call still queued behind the archive), Codex
+//! dying, shutdown, or the call's item ending first, and shutdown overlapping
+//! a restart.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -45,6 +47,16 @@ impl Probe {
     }
 }
 
+/// Counts a dropped future only after a while, as a handler cleaning up would.
+struct SlowDrop(Arc<Probe>);
+
+impl Drop for SlowDrop {
+    fn drop(&mut self) {
+        std::thread::sleep(Duration::from_millis(700));
+        self.0.dropped.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 struct Unfinished(Arc<Probe>);
 
 impl Drop for Unfinished {
@@ -70,6 +82,10 @@ fn tools(probe: &Arc<Probe>) -> AppTools {
                     ToolOutput::text(format!("held {}", call.thread.0))
                 }
                 "panic_run" => panic!("a handler whose future panics"),
+                "slow_drop" => {
+                    let _slow = SlowDrop(probe.clone());
+                    std::future::pending().await
+                }
                 _ => ToolOutput::text("quick"),
             }
         }
@@ -77,12 +93,18 @@ fn tools(probe: &Arc<Probe>) -> AppTools {
     let tool = |name: &str| AppTool { name: name.into(), description: "A test tool.".into(), input_schema: json!({"type": "object"}) };
     AppTools {
         namespace: ToolNamespace { name: NS.into(), description: "Test tools.".into() },
-        tools: ["hold", "quick", "panic_build", "panic_run"].into_iter().map(tool).collect(),
+        tools: ["hold", "quick", "panic_build", "panic_run", "slow_drop"].into_iter().map(tool).collect(),
         handler: Arc::new(handler),
     }
 }
 
 async fn start(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wire) {
+    let (engine, wires, wire, _, _) = start_with(probe).await;
+    (engine, wires, wire)
+}
+
+/// Also the scripted Codex itself, and a project folder the engine knows nothing of yet.
+async fn start_with(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wire, Arc<FakeCodex>, std::path::PathBuf) {
     let root = std::env::temp_dir().join(format!("chirality-tool-calls-{}-{}", std::process::id(), RUN.fetch_add(1, Ordering::SeqCst)));
     std::fs::create_dir_all(&root).unwrap();
     let config = EngineConfig {
@@ -94,9 +116,10 @@ async fn start(probe: &Arc<Probe>) -> (Engine, mpsc::UnboundedReceiver<Wire>, Wi
         tools: Some(tools(probe)),
     };
     let (connector, mut wires) = FakeCodex::new();
-    let engine = Engine::start_with(config, connector, None).await.expect("the engine starts");
+    let engine = Engine::start_with(config, connector.clone(), None).await.expect("the engine starts");
     let wire = wires.recv().await.expect("a connection");
-    (engine, wires, wire)
+    std::fs::create_dir_all(root.join("project")).unwrap();
+    (engine, wires, wire, connector, root.join("project").canonicalize().unwrap())
 }
 
 static RUN: AtomicUsize = AtomicUsize::new(0);
@@ -240,4 +263,90 @@ async fn a_call_cancelled_before_its_handler_finishes_is_not_answered() {
     assert_eq!(answered, unique, "a call answered twice");
     assert_eq!(engine.inner().tool_calls.running(), 0);
     engine.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_request_sent_again_is_answered_once() {
+    let probe = Arc::new(Probe::default());
+    let (engine, _wires, mut wire) = start(&probe).await;
+    let mut other = call(7, "a", "call_7", "quick");
+    other["params"]["tool"] = json!("not_ours");
+    wire.send(other.clone());
+    wire.send(other);
+    assert_eq!(wire.next().await, reply(7, "This application has no tool estimate.not_ours.", false));
+    wire.quiet().await;
+    engine.shutdown().await;
+}
+
+/// The reader gives Codex's answers to their callers at once but queues its
+/// requests for the session loop, so a call can still be queued when archive returns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_queued_behind_an_archive_is_refused() {
+    let probe = Arc::new(Probe::default());
+    let (engine, _wires, mut wire, codex, folder) = start_with(&probe).await;
+    let adding = tokio::spawn({
+        let engine = engine.clone();
+        let folder = folder.clone();
+        async move { engine.add_project(folder).await }
+    });
+    wire.answer("thread/list", json!({"data": [], "nextCursor": null})).await;
+    adding.await.unwrap().expect("the project is added");
+    wire.send(json!({"method": "thread/started", "params": {"thread": {"id": "t1", "status": {"type": "idle"}, "cwd": folder.display().to_string()}}}));
+    probe.settle(|_| engine.snapshot().threads.iter().any(|t| t.id.0 == "t1")).await;
+    // Hold the session loop on an account read, and queue the call behind it.
+    codex.hold("account/read");
+    wire.send(json!({"method": "account/updated", "params": {}}));
+    let read = wire.next().await;
+    assert_eq!(read["method"], "account/read");
+    wire.send(call(1, "t1", "call_q", "quick"));
+    let archiving = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.archive(&ThreadId("t1".into())).await }
+    });
+    wire.answer("thread/archive", json!({})).await;
+    archiving.await.unwrap().expect("the thread is archived");
+    wire.send(json!({"id": read["id"], "result": {"account": null}}));
+    assert_eq!(wire.next().await, reply(1, "The thread is closed.", false));
+    assert_eq!(probe.called(), 0, "no application work for an archived thread");
+    engine.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn shutdown_waits_for_the_calls_of_a_codex_that_died() {
+    let probe = Arc::new(Probe::default());
+    let (engine, mut wires, wire) = start(&probe).await;
+    wire.send(call(1, "a", "call_a", "slow_drop"));
+    probe.settle(|p| p.called() == 1).await;
+    wire.kill();
+    let _next = tokio::time::timeout(Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
+    probe.settle(|_| matches!(engine.snapshot().codex, CodexStatus::Ready { .. })).await;
+    engine.shutdown().await;
+    assert_eq!(probe.dropped.load(Ordering::SeqCst), 1, "the dead session's handler was still being dropped");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdowns_overlapping_a_restart_wait_for_it_and_end_its_codex() {
+    let probe = Arc::new(Probe::default());
+    let (engine, mut wires, wire, codex, _) = start_with(&probe).await;
+    codex.hold("initialize");
+    wire.kill();
+    let mut next = tokio::time::timeout(Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
+    let init = next.next().await;
+    assert_eq!(init["method"], "initialize");
+    // Two callers shut down while the new Codex is still starting.
+    let first = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.shutdown().await }
+    });
+    let second = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.shutdown().await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!first.is_finished() && !second.is_finished(), "shutdown returned while Codex was starting");
+    next.send(json!({"id": init["id"], "result": {"userAgent": "chirality/0.171.0 (fake)"}}));
+    first.await.unwrap();
+    second.await.unwrap();
+    assert!(next.is_ended(), "the Codex started during shutdown was ended");
+    assert!(engine.inner().session().is_err(), "no session after shutdown");
 }

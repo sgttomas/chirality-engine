@@ -79,17 +79,18 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
             ItemBody::Command { command: command.clone(), cwd: cwd.into(), output: aggregated_output.clone().unwrap_or_default(), exit_code: *exit_code },
         ),
         ThreadItem::FileChange { id, changes } => (id, ItemBody::FileChange { files: file_diffs(changes) }),
-        ThreadItem::McpToolCall { id, server, tool, arguments, result, error, status } => (
-            id,
-            ItemBody::ToolCall {
+        ThreadItem::McpToolCall { id, server, tool, arguments, result, error, status } => {
+            let (text, images) = result.as_ref().map(mcp_result).unwrap_or_default();
+            let body = ItemBody::ToolCall {
                 server: Some(server.clone()),
                 tool: tool.clone(),
                 arguments: arguments.to_string(),
                 status: tool_status(*status, error.is_some(), done),
-                result: error.as_ref().map(|e| e.message.clone()).or_else(|| result.as_ref().map(Value::to_string)),
-                images: Vec::new(),
-            },
-        ),
+                result: error.as_ref().map(|e| e.message.clone()).or(text),
+                images,
+            };
+            (id, body)
+        }
         ThreadItem::DynamicToolCall { id, namespace, tool, arguments, status, content_items } => {
             let content = content_items.as_deref().unwrap_or_default();
             let texts: Vec<&str> = content.iter().filter_map(|c| if let p::ToolContentInfo::InputText { text } = c { Some(text.as_str()) } else { None }).collect();
@@ -108,6 +109,29 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
         ThreadItem::Other => return None,
     };
     Some(Item { id: ItemId(id.clone()), body, done })
+}
+
+/// An MCP result's text and images (`data:` URLs). Text blocks are joined;
+/// other blocks, or structured content alone, are kept as JSON.
+fn mcp_result(result: &Value) -> (Option<String>, Vec<String>) {
+    let blocks = result.get("content").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut texts = Vec::new();
+    let mut images = Vec::new();
+    for block in &blocks {
+        match (block["type"].as_str(), block["text"].as_str(), block["data"].as_str(), block["mimeType"].as_str()) {
+            (Some("text"), Some(text), _, _) => texts.push(text.to_string()),
+            (Some("image"), _, Some(data), Some(mime)) => images.push(format!("data:{mime};base64,{data}")),
+            _ => texts.push(block.to_string()),
+        }
+    }
+    if blocks.is_empty() {
+        match result.get("structuredContent").filter(|v| !v.is_null()) {
+            Some(structured) => texts.push(structured.to_string()),
+            None if result.get("content").is_none() => texts.push(result.to_string()),
+            None => {}
+        }
+    }
+    ((!texts.is_empty()).then(|| texts.join("\n")), images)
 }
 
 /// Codex's status for a tool call; for history without one, what is known.
@@ -315,6 +339,28 @@ mod tests {
         let input = message_input(&message, Some(&picked));
         let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
         assert_eq!(user_message(&content), ItemBody::UserMessage { text: "Go".into(), attachments: message.attachments.clone(), workflow: message.workflow.clone() });
+    }
+
+    #[test]
+    fn tool_results_keep_their_text_images_and_status() {
+        let mcp = json!({"type": "mcpToolCall", "id": "m", "server": "files", "tool": "read", "arguments": {}, "status": "completed", "error": null,
+            "result": {"content": [{"type": "text", "text": "a"}, {"type": "image", "data": "AA", "mimeType": "image/png"}, {"type": "resource", "uri": "x"}], "structuredContent": null}});
+        let ItemBody::ToolCall { status, result, images, .. } = done_body(mcp) else { panic!() };
+        assert_eq!((status, result.as_deref(), images), (ToolCallStatus::Completed, Some("a\n{\"type\":\"resource\",\"uri\":\"x\"}"), vec!["data:image/png;base64,AA".to_string()]));
+        let dynamic = json!({"type": "dynamicToolCall", "id": "d", "namespace": "estimate", "tool": "plot", "arguments": {}, "status": "completed", "success": true,
+            "contentItems": [{"type": "inputImage", "imageUrl": "data:image/png;base64,BB"}]});
+        let ItemBody::ToolCall { status, result, images, .. } = done_body(dynamic) else { panic!() };
+        assert_eq!((status, result, images), (ToolCallStatus::Completed, None, vec!["data:image/png;base64,BB".to_string()]));
+        let running = json!({"type": "dynamicToolCall", "id": "d", "namespace": null, "tool": "t", "arguments": {}, "status": "inProgress", "contentItems": null});
+        assert!(matches!(item_body(running), ItemBody::ToolCall { status: ToolCallStatus::Running, .. }));
+    }
+
+    fn item_body(value: Value) -> ItemBody {
+        item(&serde_json::from_value(value).unwrap(), false).unwrap().body
+    }
+
+    fn done_body(value: Value) -> ItemBody {
+        item(&serde_json::from_value(value).unwrap(), true).unwrap().body
     }
 
     #[test]

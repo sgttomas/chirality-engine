@@ -48,9 +48,14 @@ impl Inner {
             "thread/archived" | "thread/deleted" | "thread/closed" => {
                 let Some(note) = decode::<p::ThreadNote>(params) else { return };
                 // Codex drops a closed thread's requests without saying so.
-                self.tool_calls.cancel(|place| place.thread == note.thread_id);
-                if method != "thread/closed" {
-                    self.store.remove_thread(&ThreadId(note.thread_id));
+                self.tool_calls.close_thread(&note.thread_id);
+                let thread = ThreadId(note.thread_id);
+                if method == "thread/closed" {
+                    if let Ok(session) = self.session() {
+                        session.forget_loaded(&thread);
+                    }
+                } else {
+                    self.store.remove_thread(&thread);
                 }
             }
             "turn/started" => {

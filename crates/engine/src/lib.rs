@@ -6,6 +6,7 @@
 pub mod api;
 
 mod account;
+mod calls;
 mod events;
 mod mapping;
 mod projects;
