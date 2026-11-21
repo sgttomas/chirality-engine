@@ -42,8 +42,9 @@
 :where(.chirality) .send--stop .icon { fill: currentColor; width: 12px; height: 12px; }
 
 :where(.chirality) .composer-area--new { align-self: start; padding-top: 0; }
-:where(.chirality) .conv:has(.composer-area--new) { grid-template-rows: auto minmax(0, 0.8fr) auto minmax(0, 1fr); }
-:where(.chirality) .conv:has(.composer-area--new) .conv-scroll { overflow: hidden; }
+/* Set by the conversation, not found with :has(): WebKit can keep a :has() layout after the class it matched is gone. */
+:where(.chirality) .conv--new { grid-template-rows: auto minmax(0, 0.8fr) auto minmax(0, 1fr); }
+:where(.chirality) .conv--new .conv-scroll { overflow: hidden; }
 
 :where(.chirality) .dropdown { position: relative; }
 :where(.chirality) .dropdown-menu { bottom: calc(100% + 6px); left: 0; max-height: 340px; overflow: auto; }
