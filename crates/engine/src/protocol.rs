@@ -173,6 +173,14 @@ pub struct ThreadResponse {
     pub thread: Thread,
 }
 
+/// `thread/resume`: the thread, and the sandbox Codex resumed it with.
+#[derive(Deserialize)]
+pub struct ResumeResponse {
+    #[allow(dead_code)]
+    pub thread: Thread,
+    pub sandbox: Option<Value>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListResponse {

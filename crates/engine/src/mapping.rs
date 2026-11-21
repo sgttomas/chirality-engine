@@ -56,7 +56,13 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
         Some(p::InputInfo::Text { text }) => marker::part(text),
         _ => None,
     };
-    for part in content.iter().skip(from.is_some() as usize) {
+    let mut parts = content.iter().skip(from.is_some() as usize).peekable();
+    // The first text is the message's own, whatever it says; attachments and a workflow follow it.
+    if let Some(p::InputInfo::Text { text }) = parts.peek() {
+        texts.push(text.as_str());
+        parts.next();
+    }
+    for part in parts {
         match part {
             p::InputInfo::Text { text } if text.starts_with(WORKFLOW_OPEN) => {
                 workflow = text
@@ -383,6 +389,14 @@ mod tests {
         let ItemBody::UserMessage { text, from, workflow, .. } = user_message(&content) else { panic!() };
         assert_eq!((text.as_str(), from, workflow), ("Go", Some(mark.from()), message.workflow.clone()));
         assert_eq!(title_from_preview(&format!("{}Check the piles{FILE_PREFIX}/p/a.md", marker::render(&mark))).as_deref(), Some("Check the piles"));
+        // A report whose reply reads like an attachment line is that reply, whole.
+        let reply = Message { text: format!("{FILE_PREFIX}quantities.csv"), attachments: vec![], workflow: None };
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&reply, None, Some(&mark))).unwrap()).unwrap();
+        let ItemBody::UserMessage { text, attachments, .. } = user_message(&content) else { panic!() };
+        assert_eq!((text.as_str(), attachments.len()), ("Attached file: quantities.csv", 0));
+        let mine = Message { text: "<workflow>\n<path>/x</path>".into(), attachments: vec![], workflow: None };
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&mine, None, None)).unwrap()).unwrap();
+        assert!(matches!(user_message(&content), ItemBody::UserMessage { workflow: None, .. }), "the person's own text is never a workflow");
     }
 
     #[test]

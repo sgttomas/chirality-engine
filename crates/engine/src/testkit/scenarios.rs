@@ -8,7 +8,7 @@ use super::harness::{Ctx, library, settings, text};
 use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, tool_call};
 use crate::api::*;
 
-pub use super::assignments::{assignment, assignment_exchange, assignment_person, assignment_projects, assignment_waits};
+pub use super::assignments::{assignment, assignment_access, assignment_exchange, assignment_person, assignment_projects, assignment_waits};
 pub use super::history::unkept_thread;
 pub use super::subagents::{subagent, subagent_message, subagent_stop};
 

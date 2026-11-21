@@ -61,17 +61,23 @@ impl Inner {
         .await
     }
 
-    /// Starts a turn with another thread's message if no turn runs (none
-    /// steered); `Ok(false)` if one does.
-    pub(crate) async fn start_if_idle(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings, from: Marker) -> Result<bool> {
+    /// Starts a turn with another thread's message if the engine has seen no
+    /// turn run there since the last ended (none steered); `Ok(false)` if one
+    /// does. Its settings are the thread's own as they are now, under its
+    /// admission (see [`crate::assignment::delivery::resolve`]).
+    pub(crate) async fn start_if_idle(self: &Arc<Self>, thread: &ThreadId, message: Message, from: Marker, bound: Access, fallback: TurnSettings) -> Result<bool> {
         let (inner, thread) = (self.clone(), thread.clone());
         let (tx, rx) = tokio::sync::oneshot::channel();
         owned(async move {
             let _admitted = inner.admission.admit(&thread).await;
-            if !inner.store.thread(&thread).is_some_and(|e| crate::store::is_idle(&e)) {
+            let entry = inner.known_thread(&thread)?;
+            if !crate::store::is_idle(&entry) {
                 let _ = tx.send(false);
                 return Ok(());
             }
+            let session = inner.session()?;
+            let resumed = inner.load(&session, &thread).await?;
+            let settings = crate::assignment::delivery::resolve(&entry, resumed, bound, &fallback);
             inner.send_admitted(&thread, message, settings, Some(&from), false).await?;
             let _ = tx.send(true);
             Ok(())
@@ -138,6 +144,7 @@ impl Inner {
         self.store.update_thread(thread, |e| {
             if let Some(settings) = e.starting.take() {
                 e.settings = Some(settings);
+                e.access_known = true;
             }
             e.failed = None;
             if e.active_turn.is_none() && e.last_ended.as_ref() != Some(&turn) {

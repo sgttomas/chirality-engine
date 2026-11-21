@@ -58,7 +58,14 @@ impl Inner {
             let read_at = self.store.renames();
             let page: p::ThreadListResponse = session.call("thread/list", params(cursor)).await?;
             for thread in &page.data {
-                let Some(id) = self.adopt_thread(thread, Some(read_at)) else { continue };
+                let Some(id) = self.adopt_listed(thread, read_at) else { continue };
+                if self.needs_confirming(thread) {
+                    // Whether it is a fork, which the listing leaves out; a thread that cannot be read is not taken as assigned.
+                    let read_at = self.store.renames();
+                    if let Ok(read) = session.call::<p::ThreadResponse>("thread/read", json!({ "threadId": id.0 })).await {
+                        self.refresh_thread(&read.thread, read_at);
+                    }
+                }
                 let unknown_turn = matches!(thread.status, p::ThreadStatus::Active) && self.store.thread(&id).is_some_and(|e| e.active_turn.is_none());
                 if unknown_turn && let Some(turn) = running_turn(&session, &id).await {
                     self.take_running(&id, turn);
@@ -92,14 +99,26 @@ impl Inner {
 
     /// Loads a thread into this Codex process if it is not yet, so turns can run on it.
     pub(crate) async fn ensure_loaded(&self, session: &Session, thread: &ThreadId) -> Result<()> {
+        self.load(session, thread).await.map(|_| ())
+    }
+
+    /// Loads a thread as [`Inner::ensure_loaded`] does; when it resumes it,
+    /// the access Codex resumed it with. Codex 0.171.0 resumes a thread at no
+    /// more than the access of its last turn (one asked of in an untrusted
+    /// folder, read only), so it bounds an access the engine does not know.
+    pub(crate) async fn load(&self, session: &Session, thread: &ThreadId) -> Result<Option<Access>> {
         if session.is_loaded(thread) {
-            return Ok(());
+            return Ok(None);
         }
         let entry = self.known_thread(thread)?;
-        let _: p::ThreadResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
+        let resumed: p::ResumeResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
         self.tool_calls.reopen_thread(&thread.0);
         session.mark_loaded(thread);
-        Ok(())
+        Ok(Some(match resumed.sandbox.as_ref().and_then(|s| s["type"].as_str()) {
+            Some("dangerFullAccess") => Access::FullAccess,
+            Some("workspaceWrite") => Access::Ask,
+            _ => Access::ReadOnly,
+        }))
     }
 
     pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
@@ -194,6 +213,7 @@ impl Inner {
             e.assigned_by = None;
             if let Some(parent) = &parent {
                 e.settings = parent.settings.clone();
+                e.access_known = parent.access_known;
                 if let Some(title) = &parent.title {
                     e.title.get_or_insert_with(|| title.clone());
                 }
@@ -224,6 +244,7 @@ impl Inner {
         let session = self.session()?;
         self.known_thread(thread)?;
         session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
+        self.assignments.deliveries.forget(thread);
         self.store.remove_thread(thread);
         self.tool_calls.close_thread(&thread.0, false);
         session.forget_loaded(thread);

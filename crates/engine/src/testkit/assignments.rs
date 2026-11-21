@@ -290,6 +290,52 @@ pub async fn assignment_person(ctx: &mut Ctx) {
     assert_eq!(summary(ctx, &lead).status, ThreadStatus::Idle);
 }
 
+/// After Codex restarts and the project is listed again, a fork of an assigned thread is not an
+/// assignment (the listing does not say it is a fork, a read does), and a message to the assigned
+/// thread, whose access the engine no longer knows, runs read only as both threads did.
+pub async fn assignment_access(ctx: &mut Ctx) {
+    let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
+    let assign = json!({"title": "Piles", "brief": "STUB[worker] Check the pile lengths."});
+    ctx.script("lead", steps("lead", move || vec![engine_call("call_assign", "assign", assign.clone())], "Assigned."));
+    ctx.script("worker", after(Duration::from_millis(1500), says("worker", "Checked. STUB[heard]")));
+    ctx.script("heard", says("heard", "Noted."));
+    let lead = ctx.engine.start_thread(&project.id, text("STUB[lead] Assign the piles."), settings(Access::ReadOnly)).await.unwrap();
+    let assigned = ctx.wait("the assigned thread", |e| match e {
+        Event::Thread { thread } if thread.assigned_by.as_ref() == Some(&lead) => Some(thread.id.clone()),
+        _ => None,
+    });
+    let assigned = assigned.await;
+    turns_end(ctx, &[(&lead, 2), (&assigned, 1)]).await;
+    until(ctx, "the report looked at", |ctx| reports(ctx) == 1 && idle(ctx, &[&lead, &assigned])).await;
+    assert_eq!(summary(ctx, &assigned).settings.map(|s| s.access), Some(Access::ReadOnly), "the assigner's access");
+    let first = ctx.read_thread(&assigned).await.turns[0].id.clone();
+    let fork = ctx.engine.fork(&assigned, &first).await.unwrap();
+    assert_eq!(summary(ctx, &fork).assigned_by, None);
+
+    ctx.kill_codex();
+    ctx.wait("Codex to be back", |e| matches!(e, Event::Codex { status: CodexStatus::Ready { .. } }).then_some(())).await;
+    ctx.engine.remove_project(&project.id).await.unwrap();
+    ctx.engine.add_project(ctx.run.project()).await.unwrap();
+    assert_eq!(summary(ctx, &fork).assigned_by, None, "a fork, though the listing does not say so");
+    assert_eq!(summary(ctx, &assigned).assigned_by, Some(lead.clone()));
+
+    let target = Later::default();
+    target.set(&assigned);
+    let t = target.clone();
+    ctx.script("again", steps("again", move || vec![engine_call("call_again", "message", json!({"thread": t.get(), "text": "STUB[more] Once more."}))], "Sent."));
+    ctx.script("more", after(Duration::from_millis(1000), says("more", "Again. STUB[heard2]")));
+    ctx.script("heard2", says("heard2", "Noted again."));
+    ctx.engine.send(&lead, text("STUB[again] Ask once more."), settings(Access::ReadOnly)).await.unwrap();
+    turns_end(ctx, &[(&lead, 2), (&assigned, 1)]).await;
+    until(ctx, "the report looked at", |ctx| reports(ctx) == 2 && idle(ctx, &[&lead, &assigned])).await;
+    assert_eq!(summary(ctx, &assigned).settings.map(|s| s.access), Some(Access::ReadOnly), "not invented by the listing");
+    let worker_view = ctx.read_thread(&assigned).await;
+    assert_eq!(worker_view.turns.iter().map(first_text).collect::<Vec<_>>(), ["STUB[worker] Check the pile lengths.", "STUB[more] Once more."]);
+    let lead_view = ctx.read_thread(&lead).await;
+    assert_eq!(lead_view.turns.iter().map(first_text).collect::<Vec<_>>(), ["STUB[lead] Assign the piles.", "Checked. STUB[heard]", "STUB[again] Ask once more.", "Again. STUB[heard2]"]);
+    assert_eq!(ctx.engine.snapshot().threads.len(), 3, "the lead, the assigned thread and its fork");
+}
+
 /// Live: messages to a running thread are delivered in order, each a turn of its own once the one
 /// before has ended, and each of those turns reports back to the assigner, in order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -300,21 +346,36 @@ async fn messages_and_reports_keep_their_order() {
     }
     let mut ctx = Ctx::live("assignment_order", false).await;
     let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
-    let worker = Later::default();
-    let w = worker.clone();
-    let calls = move || {
+    // The messages name the thread the assignment made, from the answer to it.
+    let lead_script: Script = Arc::new(|request| {
+        let assigned = request.outputs.get("call_assign").and_then(|o| serde_json::from_str::<Value>(o).ok()).and_then(|o| o["thread"].as_str().map(str::to_string));
         let mut calls = vec![engine_call("call_assign", "assign", json!({"title": "Piles", "brief": "STUB[w1] First."}))];
-        if !w.get().is_empty() {
-            for n in [2, 3] {
-                calls.push(engine_call(&format!("call_m{n}"), "message", json!({"thread": w.get(), "text": format!("STUB[w{n}] Message {n}.")})));
-            }
+        if let Some(worker) = assigned {
+            calls.extend([2, 3].map(|n| engine_call(&format!("call_m{n}"), "message", json!({"thread": worker, "text": format!("STUB[w{n}] Message {n}.")}))));
         }
-        calls
-    };
-    ctx.script("lead", steps("lead", calls, "Sent."));
+        match calls.into_iter().find(|c| !request.outputs.contains_key(c["call_id"].as_str().unwrap_or_default())) {
+            Some(call) => Reply::Items(vec![call]),
+            None => Reply::Items(vec![message("msg_lead_done", "Sent.")]),
+        }
+    });
+    ctx.script("lead", lead_script);
+    // The worker's first reply waits until both messages wait behind its turn.
+    let engine = ctx.engine.clone();
+    let queued: Script = Arc::new(move |request| {
+        for _ in 0..1500 {
+            if engine.inner().assignments.deliveries.waiting_anywhere() >= 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        says("w1", "Reply 1. STUB[r1]")(request)
+    });
+    ctx.script("w1", queued);
     for n in 1..=3 {
         let (key, reply) = (format!("w{n}"), format!("r{n}"));
-        ctx.script(&key, after(Duration::from_millis(800), says(&key, &format!("Reply {n}. STUB[r{n}]"))));
+        if n > 1 {
+            ctx.script(&key, says(&key, &format!("Reply {n}. STUB[r{n}]")));
+        }
         ctx.script(&reply, says(&reply, "Ok."));
     }
     let lead = ctx.engine.start_thread(&project.id, text("STUB[lead] Assign and follow up."), settings(Access::Ask)).await.unwrap();
@@ -323,7 +384,6 @@ async fn messages_and_reports_keep_their_order() {
         _ => None,
     });
     let assigned = assigned.await;
-    worker.set(&assigned);
     turns_end(&mut ctx, &[(&lead, 4), (&assigned, 3)]).await;
     until(&ctx, "every turn looked at", |ctx| reports(ctx) == 3 && idle(ctx, &[&lead, &assigned])).await;
     let worker_view = ctx.engine.read_thread(&assigned).await.unwrap();

@@ -17,8 +17,11 @@ pub(crate) struct ThreadEntry {
     pub title: Option<String>,
     pub forked_from: Option<ThreadId>,
     pub updated_at: i64,
-    /// The settings of the last turn Codex took.
+    /// The settings of the last turn Codex took. A listing gives the model and
+    /// effort only: the access is known once the engine has started a turn.
     pub settings: Option<TurnSettings>,
+    /// Whether `settings.access` is one the engine started a turn with, not a stand-in.
+    pub access_known: bool,
     /// The settings of a turn being started, until Codex takes or refuses it.
     pub starting: Option<TurnSettings>,
     pub active_turn: Option<TurnId>,
@@ -75,9 +78,10 @@ pub(crate) struct Store {
     events: broadcast::Sender<Numbered>,
 }
 
-/// No turn runs or is being started; a turn a Stop could not settle counts as ended.
+/// No turn runs or is being started, as far as the engine has seen: a turn a
+/// Stop could not settle runs until Codex ends it.
 pub(crate) fn is_idle(entry: &ThreadEntry) -> bool {
-    entry.starting.is_none() && entry.active_turn.as_ref().is_none_or(|t| entry.unsettled.as_ref() == Some(t))
+    entry.starting.is_none() && entry.active_turn.is_none()
 }
 
 pub(crate) fn now() -> i64 {

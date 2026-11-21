@@ -18,8 +18,10 @@ pub(crate) mod delivery;
 pub(crate) mod marker;
 pub(crate) mod tools;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
+
+use tokio::sync::oneshot;
 
 use crate::api::ThreadId;
 
@@ -32,6 +34,8 @@ pub(crate) struct Assignments {
     /// Assignments closed while the engine runs, (assigner, assigned); after a
     /// restart a close is found in the assigner's history.
     closed: Mutex<HashSet<(ThreadId, ThreadId)>>,
+    /// Each assigned thread's last report looked at, so the next waits for it.
+    reports_in_order: Mutex<HashMap<ThreadId, oneshot::Receiver<()>>>,
     /// Turn ends of assigned threads looked at for a report, for tests to wait on.
     #[cfg(test)]
     pub reports: std::sync::atomic::AtomicUsize,
@@ -41,6 +45,12 @@ impl Assignments {
     pub fn close(&self, assigner: &ThreadId, assigned: &ThreadId) {
         self.closed.lock().unwrap().insert((assigner.clone(), assigned.clone()));
         self.deliveries.drop_reports(assigner, assigned);
+    }
+
+    /// A place for a report after the thread's earlier ones: what to wait for, and what to tell when done.
+    pub fn reserve_report(&self, thread: &ThreadId) -> (Option<oneshot::Receiver<()>>, oneshot::Sender<()>) {
+        let (done, next) = oneshot::channel();
+        (self.reports_in_order.lock().unwrap().insert(thread.clone(), next), done)
     }
 
     pub fn is_closed(&self, assigner: &ThreadId, assigned: &ThreadId) -> bool {

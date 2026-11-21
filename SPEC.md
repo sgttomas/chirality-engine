@@ -152,9 +152,19 @@ refused.
   person starts in the assigned thread report nothing unless its agent sends a
   `message`.
 - A message to an idle thread starts a turn in it; to a running one it waits
-  until that turn ends (it does not steer). Messages to a thread are delivered
-  in order, each starting a turn of its own. Each turn runs with the receiving
-  thread's own settings (a report, with the assigner's).
+  until the engine has seen that turn end (it does not steer, nor start on a
+  turn a Stop could not settle). Messages to a thread are delivered in order,
+  each starting a turn of its own; reports in the order their turns ended.
+- A delivered turn runs with the receiving thread's settings as they are when
+  it starts (a report's, the assigner's). The engine knows a thread's access
+  once it has started a turn there; until then (after a restart, a listing)
+  the turn has no more than Ask, the sender's, or the access Codex resumes the
+  thread with.
+- A delivery is made only while its sender is there and, for a report, the
+  assignment is open: archiving either thread drops what waits. A delivery
+  Codex refuses after it waited is told on the receiving thread; one whose
+  start Codex may have taken as it stopped is looked for in that thread's
+  history before it is tried again.
 - Approvals and questions in an assigned thread go to the person on that
   thread, as on any thread. Its assigner is not told; it hears when the turn
   ends.
@@ -172,7 +182,10 @@ thread. The person can open, send to and stop either, at any time.
 reads it from history into the message's sender (`from`), and from the
 listing's preview into the assigned thread's summary (`assignedBy`); the
 reverse relation is the threads that name a thread there. A fork has its
-source's first message, and is not an assignment.
+source's first message, and is not an assignment; the listing does not say
+whether a thread is a fork (`forkedFromId` is null there), so a listed thread
+with a mark is read (`thread/read` says) before it is taken as assigned. The
+first text after the mark is the message's text whatever it says.
 
 **What the engine keeps.** Nothing Codex does not. The relation is read from
 the assigned thread's first message, which names its assigner (Codex's thread
@@ -194,6 +207,10 @@ gives one all of its parent's or none). Codex announces a turn's end before
 the next `turn/start` is taken as a new turn: a start sent once the end is
 heard begins a turn, never steers; and a turn's first message and last reply
 are in its history (`itemsView: summary`) once its end is heard.
+`thread/resume` answers with the sandbox it resumed the thread with: a read
+only or full access thread's own, and read only for one the engine ran at
+Ask in a folder Codex does not trust, so it bounds an access but does not
+give it.
 
 **Decided by the owner (2026-11-21).** Turns the person starts in an assigned
 thread report nothing back. The assigning agent gives the assigned thread its

@@ -91,7 +91,7 @@ impl Engine {
     }
 
     #[cfg(test)]
-    pub(crate) fn inner(&self) -> &Inner {
+    pub(crate) fn inner(&self) -> &Arc<Inner> {
         &self.inner
     }
 

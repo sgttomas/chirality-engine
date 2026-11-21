@@ -1,11 +1,14 @@
 //! Messages from one thread to another, delivered in order: to an idle thread
-//! at once, starting a turn; to a running one once its turn has ended (never
-//! steering it). And the report of an assigned thread's turn that its
-//! assigner started: that turn's last reply and how it ended, delivered to
-//! the assigner the same way.
+//! at once, starting a turn; to a running one once the engine has seen its
+//! turn end (never steering it). And the report of an assigned thread's turn
+//! that its assigner started: that turn's last reply and how it ended,
+//! delivered to the assigner the same way.
 //!
-//! What waits is held in memory only: a delivery waiting when the engine
-//! stops is not made.
+//! A delivery's settings are the receiving thread's, read under its
+//! admission just before its turn starts; where the engine does not know that
+//! thread's access, no more than Ask, the sender's, or what Codex resumes the
+//! thread with. What waits is held in memory only: a delivery waiting when the
+//! engine stops is not made.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -14,42 +17,78 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::marker::{self, Marker};
+use super::tools::lower;
 use crate::api::*;
 use crate::protocol as p;
 use crate::session::{Inner, Session};
-use crate::store::is_idle;
+use crate::store::{ThreadEntry, is_idle};
 
 /// How long a waiting delivery sleeps between looks when no event comes.
 const RECHECK: Duration = Duration::from_millis(500);
+/// How far back a report looks for its turn, in pages of ten.
+const REPORT_PAGES: usize = 10;
 
 /// A message for a thread, as another thread sent it.
 #[derive(Clone, Debug)]
 pub(crate) struct Delivery {
+    /// Its place in the queue, given when queued.
+    id: u64,
     pub from: Marker,
     pub text: String,
-    /// The settings of the turn it starts.
-    pub settings: TurnSettings,
+    /// The most access its turn may have when the receiving thread's is not known: the sender's.
+    pub bound: Access,
+    /// Model and effort for a receiving thread whose own are not known: the sender's.
+    pub fallback: TurnSettings,
+    /// Codex may have taken its turn before it stopped answering.
+    uncertain: bool,
+}
+
+impl Delivery {
+    pub fn new(from: Marker, text: String, bound: Access, fallback: TurnSettings) -> Delivery {
+        Delivery { id: 0, from, text, bound, fallback, uncertain: false }
+    }
+}
+
+/// The settings a delivered turn runs with: the receiving thread's own, and
+/// where its access is not known, no more than Ask, the sender's, or what Codex
+/// resumed it with.
+pub(crate) fn resolve(entry: &ThreadEntry, resumed: Option<Access>, bound: Access, fallback: &TurnSettings) -> TurnSettings {
+    let own = entry.starting.clone().or(entry.settings.clone());
+    let (model, effort) = own.as_ref().map_or_else(|| (fallback.model.clone(), fallback.effort.clone()), |s| (s.model.clone(), s.effort.clone()));
+    let access = match own {
+        Some(own) if entry.access_known => own.access,
+        _ => lower(lower(Access::Ask, bound), resumed.unwrap_or(Access::Ask)),
+    };
+    TurnSettings { model, effort, access }
 }
 
 /// Each thread's deliveries waiting, in order; a thread has an entry while
 /// its deliverer runs.
 #[derive(Default)]
 pub(crate) struct Deliveries {
-    queues: Mutex<HashMap<ThreadId, VecDeque<Delivery>>>,
+    queues: Mutex<Queues>,
+}
+
+#[derive(Default)]
+struct Queues {
+    by_thread: HashMap<ThreadId, VecDeque<Delivery>>,
+    next_id: u64,
 }
 
 impl Deliveries {
     /// Queues a delivery; true when the thread had none waiting, so the
     /// caller delivers it (nothing else is delivering to the thread).
-    fn push(&self, thread: &ThreadId, delivery: Delivery) -> bool {
+    fn push(&self, thread: &ThreadId, mut delivery: Delivery) -> bool {
         let mut queues = self.queues.lock().unwrap();
-        match queues.get_mut(thread) {
+        queues.next_id += 1;
+        delivery.id = queues.next_id;
+        match queues.by_thread.get_mut(thread) {
             Some(queue) => {
                 queue.push_back(delivery);
                 false
             }
             None => {
-                queues.insert(thread.clone(), VecDeque::from([delivery]));
+                queues.by_thread.insert(thread.clone(), VecDeque::from([delivery]));
                 true
             }
         }
@@ -58,34 +97,55 @@ impl Deliveries {
     /// The next delivery for the thread; with none left, its deliverer ends.
     fn next(&self, thread: &ThreadId) -> Option<Delivery> {
         let mut queues = self.queues.lock().unwrap();
-        let next = queues.get(thread).and_then(|q| q.front().cloned());
+        let next = queues.by_thread.get(thread).and_then(|q| q.front().cloned());
         if next.is_none() {
-            queues.remove(thread);
+            queues.by_thread.remove(thread);
         }
         next
     }
 
-    fn pop(&self, thread: &ThreadId) {
-        if let Some(queue) = self.queues.lock().unwrap().get_mut(thread) {
-            queue.pop_front();
+    /// Takes one delivery out, by its own id, wherever it now is in the queue.
+    fn remove(&self, thread: &ThreadId, id: u64) {
+        if let Some(queue) = self.queues.lock().unwrap().by_thread.get_mut(thread) {
+            queue.retain(|d| d.id != id);
+        }
+    }
+
+    fn mark_uncertain(&self, thread: &ThreadId, id: u64) {
+        if let Some(queue) = self.queues.lock().unwrap().by_thread.get_mut(thread) {
+            queue.iter_mut().filter(|d| d.id == id).for_each(|d| d.uncertain = true);
         }
     }
 
     /// Nothing more for a thread that is gone.
     fn clear(&self, thread: &ThreadId) {
-        self.queues.lock().unwrap().remove(thread);
+        self.queues.lock().unwrap().by_thread.remove(thread);
+    }
+
+    /// The thread is archived: nothing more is delivered to it or from it.
+    pub fn forget(&self, thread: &ThreadId) {
+        let mut queues = self.queues.lock().unwrap();
+        queues.by_thread.remove(thread);
+        for queue in queues.by_thread.values_mut() {
+            queue.retain(|d| &d.from.from != thread);
+        }
     }
 
     /// Reports from `assigned` still waiting for `assigner` are not made.
     pub fn drop_reports(&self, assigner: &ThreadId, assigned: &ThreadId) {
-        if let Some(queue) = self.queues.lock().unwrap().get_mut(assigner) {
+        if let Some(queue) = self.queues.lock().unwrap().by_thread.get_mut(assigner) {
             queue.retain(|d| !(&d.from.from == assigned && d.from.report.is_some()));
         }
     }
 
     #[cfg(test)]
     pub fn waiting(&self, thread: &ThreadId) -> usize {
-        self.queues.lock().unwrap().get(thread).map_or(0, VecDeque::len)
+        self.queues.lock().unwrap().by_thread.get(thread).map_or(0, VecDeque::len)
+    }
+
+    #[cfg(test)]
+    pub fn waiting_anywhere(&self) -> usize {
+        self.queues.lock().unwrap().by_thread.values().map(VecDeque::len).sum()
     }
 }
 
@@ -98,20 +158,27 @@ fn end_of(state: &TurnState) -> Option<TurnEnd> {
     }
 }
 
-/// The mark a turn's first message carries, and the turn's last reply.
-fn opener_and_reply(turn: &p::Turn) -> (Option<Marker>, String) {
-    let opener = turn.items.iter().find_map(|item| match item {
-        p::ThreadItem::UserMessage { content, .. } => Some(match content.first() {
-            Some(p::InputInfo::Text { text }) => marker::part(text),
-            _ => None,
-        }),
+/// The mark and text a turn's first message carries.
+fn opened_with(turn: &p::Turn) -> Option<(Marker, String)> {
+    let content = turn.items.iter().find_map(|item| match item {
+        p::ThreadItem::UserMessage { content, .. } => Some(content),
         _ => None,
-    });
+    })?;
+    let text = |part: Option<&p::InputInfo>| match part {
+        Some(p::InputInfo::Text { text }) => Some(text.clone()),
+        _ => None,
+    };
+    let mark = marker::part(&text(content.first())?)?;
+    Some((mark, text(content.get(1)).unwrap_or_default()))
+}
+
+/// A turn's last reply.
+fn last_reply(turn: &p::Turn) -> String {
     let reply = turn.items.iter().rev().find_map(|item| match item {
         p::ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
         _ => None,
     });
-    (opener.flatten(), reply.unwrap_or_default())
+    reply.unwrap_or_default()
 }
 
 /// What became of a message posted to a thread.
@@ -123,7 +190,7 @@ pub(crate) enum Posted {
     Later,
     /// Codex refused the turn.
     Refused(String),
-    /// The thread is gone.
+    /// The thread is gone, or the message's sender or assignment is.
     Gone,
 }
 
@@ -133,6 +200,8 @@ enum Step {
     Empty,
     Started,
     Refused(String),
+    /// Its sender is gone, or the assignment it reports on is closed: not made.
+    Dropped,
     /// A turn runs there, or Codex is restarting.
     Wait,
     Gone,
@@ -155,22 +224,35 @@ impl Inner {
             Step::Started => Posted::Now,
             Step::Refused(message) => Posted::Refused(message),
             Step::Wait => Posted::Later,
-            Step::Empty | Step::Gone => Posted::Gone,
+            Step::Empty | Step::Gone | Step::Dropped => Posted::Gone,
         }
     }
 
-    /// Delivers the thread's waiting messages one at a time, each once no turn runs there.
+    /// Delivers the thread's waiting messages one at a time, each once no turn
+    /// runs there. A turn Codex refuses is told on the thread.
     async fn deliver(self: Arc<Self>, thread: ThreadId) {
         let mut events = self.store.subscribe();
         loop {
             match self.step(&thread).await {
                 Step::Empty | Step::Gone => return,
-                Step::Started | Step::Refused(_) => {}
+                Step::Started | Step::Dropped => {}
+                Step::Refused(message) => self.not_delivered(&thread, &message),
                 Step::Wait => {
                     let _ = tokio::time::timeout(RECHECK, events.recv()).await;
                 }
             }
         }
+    }
+
+    fn not_delivered(&self, thread: &ThreadId, message: &str) {
+        self.store.update_thread(thread, |e| e.failed = Some(format!("A message from another thread was not delivered: {message}")));
+    }
+
+    /// Whether a delivery still has a place: its sender is still there, and a
+    /// report goes to the thread that assigned its sender, whose assignment is open.
+    fn still_holds(&self, thread: &ThreadId, delivery: &Delivery) -> bool {
+        let Some(sender) = self.store.thread(&delivery.from.from) else { return false };
+        delivery.from.report.is_none() || (sender.assigned_by.as_ref() == Some(thread) && !self.assignments.is_closed(thread, &delivery.from.from))
     }
 
     async fn step(self: &Arc<Self>, thread: &ThreadId) -> Step {
@@ -184,32 +266,69 @@ impl Inner {
         if self.is_shut_down() {
             return gone();
         }
-        match self.store.thread(thread) {
-            None => gone(),
-            Some(entry) if !is_idle(&entry) => Step::Wait,
-            Some(_) => {
-                let message = Message { text: next.text.clone(), attachments: Vec::new(), workflow: None };
-                match self.start_if_idle(thread, message, next.settings.clone(), next.from.clone()).await {
-                    Ok(true) => {
-                        deliveries.pop(thread);
-                        Step::Started
-                    }
-                    // A turn began first, or Codex is restarting.
-                    Ok(false) | Err(EngineError::CodexUnavailable { .. }) => Step::Wait,
-                    Err(EngineError::NotFound { .. }) => gone(),
-                    Err(e) => {
-                        deliveries.pop(thread);
-                        Step::Refused(e.to_string())
-                    }
+        let Some(entry) = self.store.thread(thread) else { return gone() };
+        if !self.still_holds(thread, &next) {
+            deliveries.remove(thread, next.id);
+            return Step::Dropped;
+        }
+        if !is_idle(&entry) {
+            return Step::Wait;
+        }
+        if next.uncertain {
+            match self.delivered_already(thread, &next).await {
+                Some(true) => {
+                    deliveries.remove(thread, next.id);
+                    return Step::Started;
                 }
+                Some(false) => {}
+                None => return Step::Wait,
+            }
+        }
+        let message = Message { text: next.text.clone(), attachments: Vec::new(), workflow: None };
+        match self.start_if_idle(thread, message, next.from.clone(), next.bound, next.fallback.clone()).await {
+            Ok(true) => {
+                deliveries.remove(thread, next.id);
+                Step::Started
+            }
+            Ok(false) => Step::Wait,
+            // Codex may have taken the turn before it stopped answering: look before trying again.
+            Err(EngineError::CodexUnavailable { .. }) => {
+                deliveries.mark_uncertain(thread, next.id);
+                Step::Wait
+            }
+            Err(EngineError::NotFound { .. }) => gone(),
+            Err(e) => {
+                deliveries.remove(thread, next.id);
+                Step::Refused(e.to_string())
             }
         }
     }
 
-    /// A turn of an assigned thread ended: if its assigner started it, its
-    /// last reply and how it ended go to the assigner, unless the assigner
-    /// has closed the assignment.
-    pub(crate) async fn report(self: Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
+    /// Whether the thread's latest turns already open with this delivery; `None` while Codex cannot say.
+    async fn delivered_already(&self, thread: &ThreadId, delivery: &Delivery) -> Option<bool> {
+        let session = self.session().ok()?;
+        let params = json!({ "threadId": thread.0, "limit": 2, "sortDirection": "desc", "itemsView": "summary" });
+        let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
+        Some(page.data.iter().filter_map(opened_with).any(|(mark, text)| mark == delivery.from && text == delivery.text))
+    }
+
+    /// A turn of an assigned thread ended: its report is looked at after
+    /// those of the thread's earlier turns, in the order the turns ended.
+    pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
+        let (before, done) = self.assignments.reserve_report(&thread);
+        let inner = self.clone();
+        tokio::spawn(async move {
+            if let Some(before) = before {
+                let _ = before.await;
+            }
+            inner.report(thread, turn, state).await;
+            let _ = done.send(());
+        });
+    }
+
+    /// If the assigner started the turn, its last reply and how it ended go
+    /// to the assigner, unless the assigner has closed the assignment.
+    async fn report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
         self.check_report(thread, turn, state).await;
         #[cfg(test)]
         self.assignments.reports.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -220,16 +339,17 @@ impl Inner {
         let Some(assigner) = entry.assigned_by.clone() else { return };
         let Ok(session) = self.session() else { return };
         // The turn as Codex keeps it: its first message and its last reply.
-        let params = json!({ "threadId": thread.0, "limit": 4, "sortDirection": "desc", "itemsView": "summary" });
-        let Ok(page) = session.call::<p::TurnsListResponse>("thread/turns/list", params).await else { return };
-        let Some(kept) = page.data.iter().find(|t| t.id == turn.0) else { return };
-        let (opener, reply) = opener_and_reply(kept);
+        let Some(kept) = find_turn(&session, &thread, &turn).await else { return };
+        let opener = opened_with(&kept).map(|(mark, _)| mark);
         if !opener.is_some_and(|m| m.from == assigner && m.report.is_none()) || self.closed(&session, &assigner, &thread).await {
             return;
         }
-        let Some(settings) = self.store.thread(&assigner).and_then(|e| e.starting.or(e.settings)) else { return };
+        let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::Ask, |s| s.access) } else { Access::Ask };
+        let Some(fallback) = self.settings_of(&assigner).or(entry.settings.clone()) else { return };
         let from = Marker { from: thread, title: entry.title, report: Some(end) };
-        self.post(assigner, Delivery { from, text: reply, settings }).await;
+        if let Posted::Refused(message) = self.post(assigner.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
+            self.not_delivered(&assigner, &message);
+        }
     }
 
     /// Whether the assigner has closed the assignment: this run, or by its own call in its history.
@@ -248,25 +368,89 @@ impl Inner {
     }
 }
 
+/// The turn, by its id, from the newest back.
+async fn find_turn(session: &Session, thread: &ThreadId, turn: &TurnId) -> Option<p::Turn> {
+    let mut cursor: Option<String> = None;
+    for _ in 0..REPORT_PAGES {
+        let params = json!({ "threadId": thread.0, "cursor": cursor, "limit": 10, "sortDirection": "desc", "itemsView": "summary" });
+        let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
+        if let Some(found) = page.data.iter().find(|t| t.id == turn.0) {
+            return Some(found.clone());
+        }
+        cursor = page.next_cursor.filter(|_| !page.data.is_empty());
+        cursor.as_ref()?;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn a_turn_names_who_opened_it_and_its_last_reply() {
-        let mark = marker::render(&Marker { from: ThreadId("lead".into()), title: None, report: None });
+        let lead = Marker { from: ThreadId("lead".into()), title: None, report: None };
         let turn: p::Turn = serde_json::from_value(json!({"id": "t", "status": "completed", "error": null, "items": [
-            {"type": "userMessage", "id": "u", "content": [{"type": "text", "text": mark}, {"type": "text", "text": "Check the piles."}]},
+            {"type": "userMessage", "id": "u", "content": [{"type": "text", "text": marker::render(&lead)}, {"type": "text", "text": "Check the piles."}]},
             {"type": "agentMessage", "id": "a", "text": "First."},
             {"type": "agentMessage", "id": "b", "text": "The piles are fine."}
         ]}))
         .unwrap();
-        let (opener, reply) = opener_and_reply(&turn);
-        assert_eq!((opener.map(|m| m.from), reply.as_str()), (Some(ThreadId("lead".into())), "The piles are fine."));
+        assert_eq!(opened_with(&turn), Some((lead, "Check the piles.".into())));
+        assert_eq!(last_reply(&turn), "The piles are fine.");
         let person: p::Turn = serde_json::from_value(json!({"id": "t", "status": "failed", "error": null, "items": [
             {"type": "userMessage", "id": "u", "content": [{"type": "text", "text": "Mine."}]}
         ]}))
         .unwrap();
-        assert_eq!(opener_and_reply(&person), (None, String::new()));
+        assert_eq!((opened_with(&person), last_reply(&person)), (None, String::new()));
+    }
+
+    #[test]
+    fn a_delivery_is_taken_out_by_its_own_id_whatever_was_taken_out_before() {
+        let deliveries = Deliveries::default();
+        let lead = ThreadId("lead".into());
+        let one = |from: &str, report| Delivery::new(Marker { from: ThreadId(from.into()), title: None, report }, "x".into(), Access::Ask, TurnSettings { model: "m".into(), effort: None, access: Access::Ask });
+        assert!(deliveries.push(&lead, one("worker", Some(TurnEnd::Completed))));
+        assert!(!deliveries.push(&lead, one("other", None)));
+        // The deliverer has the report in hand when the assignment is closed, then delivers it.
+        let held = deliveries.next(&lead).unwrap();
+        deliveries.drop_reports(&lead, &ThreadId("worker".into()));
+        deliveries.remove(&lead, held.id);
+        assert_eq!(deliveries.next(&lead).map(|d| d.from.from), Some(ThreadId("other".into())), "the message after it is still there");
+    }
+
+    fn entry(settings: Option<TurnSettings>, access_known: bool) -> ThreadEntry {
+        ThreadEntry {
+            project: ProjectId("p".into()),
+            cwd: "/p".into(),
+            title: None,
+            forked_from: None,
+            updated_at: 0,
+            settings,
+            access_known,
+            starting: None,
+            active_turn: None,
+            last_ended: None,
+            unsettled: None,
+            failed: None,
+            unread: false,
+            subagent: None,
+            assigned_by: None,
+        }
+    }
+
+    #[test]
+    fn a_delivered_turn_never_has_access_the_engine_invents() {
+        let with = |access| TurnSettings { model: "m".into(), effort: Some(Effort("high".into())), access };
+        let sender = TurnSettings { model: "s".into(), effort: None, access: Access::FullAccess };
+        // Known: the receiving thread's own, whatever the sender's.
+        assert_eq!(resolve(&entry(Some(with(Access::FullAccess)), true), None, Access::ReadOnly, &sender), with(Access::FullAccess));
+        assert_eq!(resolve(&entry(Some(with(Access::ReadOnly)), true), Some(Access::FullAccess), Access::FullAccess, &sender), with(Access::ReadOnly));
+        // Listed only: its model and effort, and no more than Ask, the sender's, or what Codex resumed it with.
+        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), None, Access::FullAccess, &sender), with(Access::Ask));
+        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), None, Access::ReadOnly, &sender), with(Access::ReadOnly));
+        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), Some(Access::ReadOnly), Access::FullAccess, &sender), with(Access::ReadOnly));
+        // Nothing known of it: the sender's model and effort.
+        assert_eq!(resolve(&entry(None, false), Some(Access::FullAccess), Access::FullAccess, &sender), TurnSettings { access: Access::Ask, ..sender });
     }
 }

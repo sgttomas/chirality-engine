@@ -67,6 +67,7 @@ impl Inner {
                 if method == "thread/closed" {
                     self.store.drop_requests(&thread);
                 } else {
+                    self.assignments.deliveries.forget(&thread);
                     self.store.remove_thread(&thread);
                 }
             }
@@ -105,7 +106,7 @@ impl Inner {
                     self.store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: state.clone() });
                     // An assigned thread's turn its assigner started reports back.
                     if self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some()) {
-                        tokio::spawn(self.clone().report(thread, turn, state));
+                        self.report_in_order(thread, turn, state);
                     }
                 }
             }
@@ -204,12 +205,27 @@ impl Inner {
     /// Records a thread Codex reports if it belongs to one of the projects.
     /// `read_at`: [`crate::store::Store::renames`] when the reply holding `thread` was asked for.
     pub(crate) fn adopt_thread(&self, thread: &p::Thread, read_at: Option<u64>) -> Option<ThreadId> {
-        self.take_thread(thread, read_at, false)
+        self.take_thread(thread, read_at, false, true)
+    }
+
+    /// A thread as Codex's listing gives it. The listing does not say whether a
+    /// thread is a fork, so a marked first message is not taken as an
+    /// assignment from it (see [`Inner::needs_confirming`]).
+    pub(crate) fn adopt_listed(&self, thread: &p::Thread, read_at: u64) -> Option<ThreadId> {
+        self.take_thread(thread, Some(read_at), false, false)
     }
 
     /// What a read says of a thread, for a thread still in the snapshot.
     pub(crate) fn refresh_thread(&self, thread: &p::Thread, read_at: u64) {
-        self.take_thread(thread, Some(read_at), true);
+        self.take_thread(thread, Some(read_at), true, true);
+    }
+
+    /// A listed thread whose first message names an assigner, not yet taken as
+    /// assigned: a read of it says whether it is a fork, which a listing does not.
+    pub(crate) fn needs_confirming(&self, thread: &p::Thread) -> bool {
+        let marked = marker::from_preview(&thread.preview).0.is_some_and(|m| m.report.is_none() && m.from.0 != thread.id);
+        let known = self.store.thread(&ThreadId(thread.id.clone()));
+        marked && thread.parent_thread_id.is_none() && known.is_some_and(|e| e.assigned_by.is_none() && e.forked_from.is_none() && e.subagent.is_none())
     }
 
     /// A subagent the engine has not seen, started by a thread it has, in that
@@ -235,6 +251,7 @@ impl Inner {
                 updated_at: now(),
                 // The settings of the turn that started it, whether or not Codex's answer to that turn's start is in yet.
                 settings: of.starting.or(of.settings),
+                access_known: false,
                 starting: None,
                 active_turn: None,
                 last_ended: None,
@@ -247,7 +264,8 @@ impl Inner {
         });
     }
 
-    fn take_thread(&self, thread: &p::Thread, read_at: Option<u64>, known_only: bool) -> Option<ThreadId> {
+    /// `trusted`: the reply says whether the thread is a fork, so its first message's mark can be taken.
+    fn take_thread(&self, thread: &p::Thread, read_at: Option<u64>, known_only: bool, trusted: bool) -> Option<ThreadId> {
         let parent = thread.parent_thread_id.clone().map(ThreadId);
         if let Some(parent) = &parent {
             self.store.set_parent(ThreadId(thread.id.clone()), parent.clone());
@@ -257,7 +275,7 @@ impl Inner {
         // An assignment is read from the first message's mark; a fork has that message too, and is none.
         let forked = thread.forked_from_id.is_some() || existing_forked(&self.store, &id);
         let assigned_by = match marker::from_preview(&thread.preview).0 {
-            Some(mark) if parent.is_none() && !forked && mark.report.is_none() && mark.from != id => Some(mark.from),
+            Some(mark) if trusted && parent.is_none() && !forked && mark.report.is_none() && mark.from != id => Some(mark.from),
             _ => None,
         };
         let active_turn = match &thread.status {
@@ -271,6 +289,7 @@ impl Inner {
             // A fork made from this thread keeps the parent it was given.
             forked_from: thread.forked_from_id.clone().map(ThreadId).or_else(|| existing.and_then(|e| e.forked_from.clone())),
             updated_at: existing.map(|e| e.updated_at.max(thread.updated_at)).unwrap_or(thread.updated_at),
+            access_known: existing.is_some_and(|e| e.access_known),
             settings: existing.and_then(|e| e.settings.clone()).or_else(|| {
                 thread.model.clone().map(|model| TurnSettings { model, effort: thread.reasoning_effort.clone().map(Effort), access: Access::default() })
             }),

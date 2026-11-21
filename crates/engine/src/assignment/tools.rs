@@ -178,9 +178,17 @@ impl Inner {
         }
     }
 
-    /// The settings the thread's turns run with.
-    fn settings_of(&self, thread: &ThreadId) -> Option<TurnSettings> {
+    /// The settings the thread's turns run with; the access is a stand-in (Ask) unless known.
+    pub(crate) fn settings_of(&self, thread: &ThreadId) -> Option<TurnSettings> {
         self.store.thread(thread).and_then(|e| e.starting.or(e.settings))
+    }
+
+    /// The thread's own settings, with its access no more than Ask unless the engine knows it.
+    fn sender_settings(&self, thread: &ThreadId) -> Option<TurnSettings> {
+        let entry = self.store.thread(thread)?;
+        let known = entry.access_known || entry.starting.is_some();
+        let settings = entry.starting.or(entry.settings)?;
+        Some(if known { settings } else { TurnSettings { access: lower(settings.access, Access::Ask), ..settings } })
     }
 
     fn find_project(&self, named: &str) -> std::result::Result<Project, String> {
@@ -195,7 +203,7 @@ impl Inner {
 
     async fn assign(self: &Arc<Self>, caller: &ThreadId, args: AssignArgs) -> Answer {
         let entry = self.known_thread(caller).map_err(|e| e.to_string())?;
-        let base = self.settings_of(caller).ok_or("This thread's settings are not known yet.")?;
+        let base = self.sender_settings(caller).ok_or("This thread's settings are not known yet.")?;
         let project = match &args.project {
             Some(named) => self.find_project(named)?,
             None => self.project(&entry.project).map_err(|e| e.to_string())?,
@@ -225,12 +233,11 @@ impl Inner {
         if entry.subagent.is_some() {
             return Err("A subagent takes its messages from the agent that started it.".into());
         }
-        // The receiving thread's own settings; never more access than the sender's for one whose are not known.
-        let settings = self.settings_of(&target).or_else(|| self.settings_of(caller).map(|s| TurnSettings { access: lower(s.access, Access::Ask), ..s }));
-        let settings = settings.ok_or("That thread's settings are not known yet.")?;
+        // The receiving thread's own settings when its turn starts; the sender's bound one whose access is not known.
+        let sender = self.sender_settings(caller).ok_or("This thread's settings are not known yet.")?;
         let title = self.store.thread(caller).and_then(|e| e.title);
         let from = Marker { from: caller.clone(), title, report: None };
-        let delivered = match self.post(target.clone(), Delivery { from, text: args.text, settings }).await {
+        let delivered = match self.post(target.clone(), Delivery::new(from, args.text, sender.access, sender)).await {
             Posted::Now => "now",
             Posted::Later => "when its running turn ends",
             Posted::Refused(message) => return Err(message),
