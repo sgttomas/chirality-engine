@@ -468,6 +468,7 @@
     },
     {
       "item": "msg_check_done",
+      "kind": "agentMessage",
       "text": "Done: The estimate of 120 checks out.",
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000003",
@@ -637,6 +638,7 @@
     },
     {
       "item": "msg_none_done",
+      "kind": "agentMessage",
       "text": "Done: The estimate has no total.",
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000006",

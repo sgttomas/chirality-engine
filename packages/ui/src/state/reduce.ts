@@ -1,5 +1,5 @@
 // Keeps the interface's copy of the engine's state current, one event at a time.
-import type { Event, Item, ItemBody, Snapshot, ThreadId, ThreadView, Turn } from "../engine/types";
+import type { Event, Item, ItemBody, Snapshot, TextKind, ThreadId, ThreadView, Turn } from "../engine/types";
 
 export interface Model {
   /** Its `seq` is the last event applied (when `applyEvent` is given the event's number). */
@@ -11,6 +11,25 @@ export interface Model {
 const upsert = <T extends { id: unknown }>(list: T[], value: T) => {
   const at = list.findIndex((v) => v.id === value.id);
   return at < 0 ? [...list, value] : list.map((v, i) => (i === at ? value : v));
+};
+
+/** A finished item is not replaced by an unfinished update of it. */
+const withItem = (items: Item[], item: Item) => {
+  const held = items.find((i) => i.id === item.id);
+  return held?.done && !item.done ? items : upsert(items, item);
+};
+
+/** The item streamed text begins, when the view does not have it yet (a plan's text has none). */
+const begun = (id: string, kind: TextKind, text: string): Item | null => {
+  const body: ItemBody | null =
+    kind === "agentMessage"
+      ? { kind, text }
+      : kind === "reasoning"
+        ? { kind, summary: text }
+        : kind === "command"
+          ? { kind, command: "", cwd: "", output: text, exitCode: null }
+          : null;
+  return body && { id, body, done: false };
 };
 
 const withTurn = (view: ThreadView, id: string, change: (turn: Turn) => Turn): ThreadView => {
@@ -42,13 +61,16 @@ export function applyToView(view: ThreadView, event: Event): ThreadView {
     case "turnEnded":
       return withTurn(view, event.turn, (t) => ({ ...t, state: event.state }));
     case "item":
-      return withTurn(view, event.turn, (t) => ({ ...t, items: upsert<Item>(t.items, event.item) }));
+      return withTurn(view, event.turn, (t) => ({ ...t, items: withItem(t.items, event.item) }));
     case "itemDelta":
-      // A done item's text is whole.
-      return withTurn(view, event.turn, (t) => ({
-        ...t,
-        items: t.items.map((i) => (i.id === event.item && !i.done ? { ...i, body: appended(i.body, event.text) } : i)),
-      }));
+      return withTurn(view, event.turn, (t) => {
+        if (!t.items.some((i) => i.id === event.item)) {
+          const item = begun(event.item, event.kind, event.text);
+          return item ? { ...t, items: [...t.items, item] } : t;
+        }
+        // A done item's text is whole.
+        return { ...t, items: t.items.map((i) => (i.id === event.item && !i.done ? { ...i, body: appended(i.body, event.text) } : i)) };
+      });
     default:
       return view;
   }

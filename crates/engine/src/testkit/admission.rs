@@ -134,7 +134,8 @@ async fn a_send_after_a_stop_starts_a_turn_once_codex_has_ended_the_stopped_one(
 }
 
 /// A Stop Codex never ends the turn for: after a while the Stop is reported
-/// as not taken, and no end is made up; the next send goes to Codex as a start.
+/// as not taken, and no end is made up; the turn still shows as running and
+/// can be stopped again, and the next send goes to Codex as a start.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stop_codex_answers_but_never_ends_is_reported_and_lets_the_thread_go() {
     let (engine, mut wire) = running_turn("admission-stop-unended").await;
@@ -142,12 +143,27 @@ async fn a_stop_codex_answers_but_never_ends_is_reported_and_lets_the_thread_go(
     let stopping = stop(&engine);
     wire.answer("turn/interrupt", json!({})).await;
     assert!(matches!(stopping.await.unwrap(), Err(EngineError::Codex { .. })), "the Stop is reported as not taken");
+    assert_eq!(summary(&engine).status, ThreadStatus::Working, "the turn may still run");
+    let again = stop(&engine);
+    let interrupt = wire.next().await;
+    assert_eq!(interrupt["method"], "turn/interrupt", "a second Stop goes to Codex");
+    assert_eq!(interrupt["params"]["turnId"], "turn-1");
+    wire.send(json!({"id": interrupt["id"], "result": {}}));
+    assert!(again.await.unwrap().is_err());
     let next = send(&engine, "next", "m");
-    assert_eq!(wire.next().await["method"], "turn/start");
+    let start = wire.next().await;
+    assert_eq!(start["method"], "turn/start");
     while let Ok(n) = events.try_recv() {
         assert!(!matches!(n.event, Event::TurnEnded { .. }), "no end is made up");
     }
-    next.abort();
+    wire.send(json!({"id": start["id"], "result": turn("turn-2")}));
+    next.await.unwrap().unwrap();
+    wire.send(completed("turn-1"));
+    wire.send(json!({"method": "turn/started", "params": {"threadId": "t", "turn": turn("turn-2")["turn"]}}));
+    wire.quiet().await;
+    let steer = send(&engine, "more", "m");
+    assert_eq!(wire.next().await["method"], "turn/steer", "a turn started after it is steered as usual");
+    steer.abort();
     engine.shutdown().await;
 }
 
@@ -161,6 +177,7 @@ async fn a_stop_codex_never_answers_is_bounded_and_the_next_send_goes_on() {
     let queued = send(&engine, "next", "m");
     let within = std::time::Duration::from_secs(2);
     assert!(tokio::time::timeout(within, stopping).await.expect("the Stop returns").unwrap().is_err());
+    assert_eq!(summary(&engine).status, ThreadStatus::Working, "the turn may still run");
     let start = tokio::time::timeout(within, wire.next()).await.expect("the send goes on");
     assert_eq!(start["method"], "turn/start");
     wire.send(json!({"id": start["id"], "result": turn("turn-1")}));
@@ -386,6 +403,7 @@ async fn shutdown_ends_a_codex_still_starting() {
     assert!(asked.elapsed() < std::time::Duration::from_secs(3));
     assert!(starting.await.unwrap().is_err(), "the start fails");
     assert!(engine.connect().await.is_err(), "and stays failed");
+    assert_eq!(engine.snapshot().codex, CodexStatus::Failed { message: "the engine has shut down".into() }, "the snapshot says so");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -407,6 +425,7 @@ async fn a_start_shut_down_while_it_reads_is_not_started() {
     assert!(wire.is_ended());
     assert!(starting.await.unwrap().is_err(), "the start fails");
     assert!(engine.connect().await.is_err(), "and stays failed");
+    assert_eq!(engine.snapshot().codex, CodexStatus::Failed { message: "the engine has shut down".into() }, "the snapshot says so");
     let _ = std::fs::remove_dir_all(root);
 }
 

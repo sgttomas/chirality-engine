@@ -432,6 +432,7 @@
     },
     {
       "item": "msg_hello",
+      "kind": "agentMessage",
       "text": "Hello from the stub.",
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000003",

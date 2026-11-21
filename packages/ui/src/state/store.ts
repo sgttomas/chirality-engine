@@ -27,6 +27,9 @@ export class Store {
   private held: Numbered[] | null = [];
   /** The highest number the host has marked as sent. */
   private marked = 0;
+  /** Events received while the snapshot was read, until they are told to `onEvent`; kept
+   * across a recovery that fails, so each is told once. */
+  private untold = new Map<number, Event>();
   /** The failure of the last recovery, shown until one succeeds. */
   private recoveryError: string | null = null;
   /** While a thread is read: the events that arrive meanwhile, for each read. */
@@ -64,6 +67,7 @@ export class Store {
     this.stop = null;
     this.held = [];
     this.marked = 0;
+    this.untold.clear();
     this.reads.clear();
     this.latestRead.clear();
   }
@@ -82,15 +86,20 @@ export class Store {
 
   private receive(n: Numbered) {
     for (const read of this.reads) read.push(n);
-    if (this.held) return void this.held.push(n);
+    if (this.held) return this.hold(n);
     const seq = this.state.model!.snapshot.seq;
     if (n.seq <= seq) return;
     if (n.seq !== seq + 1) {
       this.recover();
-      // Held, so it is applied (and told) after the snapshot.
-      return void (this.held as Numbered[] | null)?.push(n);
+      return this.hold(n);
     }
     this.apply(n);
+  }
+
+  /** Holds an event received while the snapshot is read, to apply after it and tell `onEvent`. */
+  private hold(n: Numbered) {
+    this.held?.push(n);
+    this.untold.set(n.seq, n.event);
   }
 
   /** The host sent events through `last`: any not received are read again. */
@@ -105,6 +114,7 @@ export class Store {
     const generation = this.generation;
     void this.resync(generation).then(
       () => {
+        if (generation !== this.generation) return;
         if (this.recoveryError && this.state.error === this.recoveryError) this.set({ error: null });
         this.recoveryError = null;
       },
@@ -122,33 +132,33 @@ export class Store {
   }
 
   /** Reads the snapshot (and the thread in view) again; at the start, or once events were missed.
-   * The events that arrived meanwhile are applied after it, and told to `onEvent`. */
+   * The events that arrived meanwhile are applied after it, and told to `onEvent`. A snapshot
+   * that misses events received or marked is read again (after 0.25 s, doubling to 4 s). */
   private async resync(generation: number) {
     this.held ??= [];
     // Every event received from now is told to `onEvent` once, the snapshot holding it or not;
     // at the start, those after the snapshot.
     const applied = this.state.model?.snapshot.seq ?? null;
-    const received = new Map<number, Event>();
     let model: Model;
-    let after: Numbered[];
     let read = 0;
-    for (;;) {
+    for (let tries = 0; ; tries++) {
+      if (tries) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(250 * 2 ** (tries - 1), 4000)));
+        if (generation !== this.generation) return;
+      }
       const snapshot = await this.engine.snapshot();
       read = snapshot.seq;
       if (generation !== this.generation) return;
-      for (const n of this.held) received.set(n.seq, n.event);
-      after = this.held.filter((n) => n.seq > snapshot.seq);
+      const after = this.held.filter((n) => n.seq > snapshot.seq);
       const gap = after.some((n, i) => n.seq !== snapshot.seq + i + 1);
-      if (gap || this.marked > snapshot.seq + after.length) {
-        this.held = [];
-        continue;
-      }
+      if (gap || this.marked > snapshot.seq + after.length) continue;
       model = { snapshot, views: {} };
       for (const n of after) model = applyEvent(model, n.event, n.seq);
       break;
     }
     this.held = null;
-    const told = [...received].filter(([seq]) => seq > (applied ?? read)).sort(([a], [b]) => a - b);
+    const told = [...this.untold].filter(([seq]) => seq > (applied ?? read)).sort(([a], [b]) => a - b);
+    this.untold.clear();
     const before = this.state;
     const { project, thread } = before;
     const projects = model.snapshot.projects;
@@ -161,7 +171,10 @@ export class Store {
 
   private apply({ seq, event }: Numbered) {
     const before = this.state;
+    this.untold.delete(seq);
     this.set({ model: applyEvent(before.model!, event, seq) });
+    // Codex's history of the turn replaces what the view gathered while it ran.
+    if (event.type === "turnEnded" && event.thread === this.state.thread) void this.reload(event.thread);
     if (event.type === "thread" && event.thread.id === this.state.thread && event.thread.unread) this.markRead(event.thread.id);
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
     if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });

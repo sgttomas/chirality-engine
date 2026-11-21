@@ -9,8 +9,11 @@ export type ThreadView = { summary: ThreadSummary, turns: Array<Turn>,
 /**
  * The [`Numbered::seq`] of the last event before the read began: the
  * view is Codex's history, which holds that and every event before it.
- * Apply each event after it, except text for an item the view has as
- * done. Text Codex has not kept (of a reply still streaming, or one a
- * Stop cut short) is not in the view; the events after it bring the rest.
+ * Apply each event after it: an item the view has as done stays done,
+ * with its text whole, and text for an item it lacks begins that item.
+ * History lacks a reply still streaming, and can name the items of a turn
+ * that ended while it was read differently from its events: when a turn
+ * of the thread in view ends, read it again. Text Codex has not kept (of
+ * a reply a Stop cut short) is in no read.
  */
 seq: number, };

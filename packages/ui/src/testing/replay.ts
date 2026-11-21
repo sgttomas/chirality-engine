@@ -4,6 +4,7 @@
 import { createEngineClient, type EngineClient, type Transport } from "../engine/client";
 import { engineEvent, type EngineCommand } from "../engine/commands";
 import type { Answer, Event, Numbered, Snapshot, ThreadView } from "../engine/types";
+import { threadOf } from "../state/reduce";
 
 export interface EngineData {
   before: Snapshot;
@@ -93,9 +94,13 @@ export class ReplayTransport implements Transport {
     }
   }
 
-  /** The engine's own read when there is one by now; a thread not yet read has no turns. */
+  /** The engine's own read when there is one by now, or the next one when only summaries come
+   * before it (as a read after a turn's end is); a thread not yet read has no turns. */
   private readThread(thread: string): ThreadView {
-    const read = this.data.reads.filter((r) => r.view.summary.id === thread && r.afterEvents <= this.at).at(-1);
+    const mine = this.data.reads.filter((r) => r.view.summary.id === thread);
+    const next = mine.find((r) => r.afterEvents > this.at);
+    const onlySummaries = next && this.data.events.slice(this.at, next.afterEvents).every((e) => e.type === "thread" || threadOf(e) !== thread);
+    const read = mine.filter((r) => r.afterEvents <= this.at).at(-1) ?? (onlySummaries ? next : undefined);
     if (read) return structuredClone(read.view);
     const summary = [...this.data.events.slice(0, this.at)].reverse().find((e) => e.type === "thread" && e.thread.id === thread);
     if (summary?.type !== "thread") throw { kind: "notFound", what: thread };

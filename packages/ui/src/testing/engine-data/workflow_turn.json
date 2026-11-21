@@ -450,6 +450,7 @@
     },
     {
       "item": "msg_flow",
+      "kind": "agentMessage",
       "text": "Following the workflow.",
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000003",

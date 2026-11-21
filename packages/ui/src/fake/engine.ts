@@ -392,7 +392,8 @@ export class FakeEngine implements EngineClient {
     if (body.kind === "agentMessage") body.text += text;
     else if (body.kind === "reasoning") body.summary += text;
     else if (body.kind === "command") body.output += text;
-    this.emit({ type: "itemDelta", thread, turn: turn.id, item: id, text });
+    else return;
+    this.emit({ type: "itemDelta", thread, turn: turn.id, item: id, kind: body.kind, text });
   }
   private itemIn(turn: Turn, id: ItemId) {
     return turn.items.find((i) => i.id === id)!;

@@ -186,6 +186,9 @@ pub async fn interrupt(ctx: &mut Ctx) {
     ctx.engine.interrupt(&thread).await.unwrap();
     assert_eq!(ctx.turn_ended(&thread).await.1, TurnState::Interrupted);
     assert_eq!(status(ctx, &thread).status, ThreadStatus::Idle);
+    let turns = turns(ctx, &thread).await;
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].state, TurnState::Interrupted);
 }
 
 pub async fn fork(ctx: &mut Ctx) {

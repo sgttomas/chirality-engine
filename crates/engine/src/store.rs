@@ -24,6 +24,9 @@ pub(crate) struct ThreadEntry {
     pub active_turn: Option<TurnId>,
     /// The last turn Codex ended, so a late `turn/start` answer does not revive it.
     pub last_ended: Option<TurnId>,
+    /// A running turn a Stop could not settle: it still shows as running and
+    /// can be stopped again, and the next send goes to Codex as a start.
+    pub unsettled: Option<TurnId>,
     pub failed: Option<String>,
     pub unread: bool,
 }

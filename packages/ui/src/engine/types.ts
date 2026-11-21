@@ -23,6 +23,7 @@ export type { Question } from "./bindings/Question";
 export type { Request } from "./bindings/Request";
 export type { RequestId } from "./bindings/RequestId";
 export type { Snapshot } from "./bindings/Snapshot";
+export type { TextKind } from "./bindings/TextKind";
 export type { ThreadId } from "./bindings/ThreadId";
 export type { ThreadStatus } from "./bindings/ThreadStatus";
 export type { ThreadSummary } from "./bindings/ThreadSummary";

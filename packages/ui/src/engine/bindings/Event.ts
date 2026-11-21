@@ -7,6 +7,7 @@ import type { Model } from "./Model";
 import type { PendingRequest } from "./PendingRequest";
 import type { Project } from "./Project";
 import type { RequestId } from "./RequestId";
+import type { TextKind } from "./TextKind";
 import type { ThreadId } from "./ThreadId";
 import type { ThreadSummary } from "./ThreadSummary";
 import type { TurnId } from "./TurnId";
@@ -15,4 +16,4 @@ import type { TurnState } from "./TurnState";
 /**
  * A change to the [`Snapshot`] or to a thread being shown.
  */
-export type Event = { "type": "codex", status: CodexStatus, } | { "type": "account", account: Account, } | { "type": "models", models: Array<Model>, } | { "type": "projects", projects: Array<Project>, } | { "type": "thread", thread: ThreadSummary, } | { "type": "threadRemoved", thread: ThreadId, } | { "type": "turnStarted", thread: ThreadId, turn: TurnId, } | { "type": "turnEnded", thread: ThreadId, turn: TurnId, state: TurnState, } | { "type": "item", thread: ThreadId, turn: TurnId, item: Item, } | { "type": "itemDelta", thread: ThreadId, turn: TurnId, item: ItemId, text: string, } | { "type": "pending", request: PendingRequest, } | { "type": "resolved", request: RequestId, };
+export type Event = { "type": "codex", status: CodexStatus, } | { "type": "account", account: Account, } | { "type": "models", models: Array<Model>, } | { "type": "projects", projects: Array<Project>, } | { "type": "thread", thread: ThreadSummary, } | { "type": "threadRemoved", thread: ThreadId, } | { "type": "turnStarted", thread: ThreadId, turn: TurnId, } | { "type": "turnEnded", thread: ThreadId, turn: TurnId, state: TurnState, } | { "type": "item", thread: ThreadId, turn: TurnId, item: Item, } | { "type": "itemDelta", thread: ThreadId, turn: TurnId, item: ItemId, kind: TextKind, text: string, } | { "type": "pending", request: PendingRequest, } | { "type": "resolved", request: RequestId, };

@@ -23,6 +23,8 @@ const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 /// More deaths than this within [`DEATH_WINDOW`] and the engine stops restarting.
 const MAX_DEATHS: usize = 3;
 const DEATH_WINDOW: Duration = Duration::from_secs(60);
+/// The engine's status, and what it says to every request, once it has shut down.
+const SHUT_DOWN: &str = "the engine has shut down";
 
 /// Work the engine does once, as its own task; every caller waits for the same result.
 pub(crate) struct Once<T>(Mutex<Option<tokio::sync::watch::Receiver<Option<T>>>>);
@@ -152,7 +154,7 @@ impl Inner {
             }
             if inner.shutting_down.load(Ordering::SeqCst) {
                 // Shut down while it read: not started.
-                return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+                return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
             }
             tokio::spawn(inner.clone().run(incoming));
             Ok(())
@@ -184,6 +186,7 @@ impl Inner {
         let reaped = {
             let mut current = self.current.lock().unwrap();
             self.shutting_down.store(true, Ordering::SeqCst);
+            self.store.set_codex(CodexStatus::Failed { message: SHUT_DOWN.into() });
             let mut reaped = Vec::new();
             if let Some(session) = current.take() {
                 session.client.close();
@@ -208,10 +211,18 @@ impl Inner {
     fn begin_attempt(&self) -> Result<Attempt<'_>> {
         let _current = self.current.lock().unwrap();
         if self.shutting_down.load(Ordering::SeqCst) {
-            return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
         }
         self.attempts.send_modify(|n| *n += 1);
         Ok(Attempt(&self.attempts))
+    }
+
+    /// Sets Codex's status unless the engine has shut down, whose status is the last.
+    fn set_status(&self, status: CodexStatus) {
+        let _current = self.current.lock().unwrap();
+        if !self.shutting_down.load(Ordering::SeqCst) {
+            self.store.set_codex(status);
+        }
     }
 
     /// Ends the Codex process as if it had died.
@@ -224,9 +235,9 @@ impl Inner {
 
     async fn open(&self) -> Result<mpsc::UnboundedReceiver<Incoming>> {
         let _attempt = self.begin_attempt()?;
-        self.store.set_codex(CodexStatus::Starting);
+        self.set_status(CodexStatus::Starting);
         let failed = |message: String| {
-            self.store.set_codex(CodexStatus::Failed { message: message.clone() });
+            self.set_status(CodexStatus::Failed { message: message.clone() });
             EngineError::CodexUnavailable { message }
         };
         let connection = self.connector.connect().await.map_err(failed)?;
@@ -249,7 +260,7 @@ impl Inner {
             client.close();
             stopper.kill();
             let _ = tokio::time::timeout(REAP_TIMEOUT, stopper.reaped()).await;
-            return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
         }
         let _opening = Opening(&self.opening);
         let params = p::InitializeParams {
@@ -278,15 +289,15 @@ impl Inner {
             } else {
                 *current = Some(Arc::new(Session { client, generation, stopper, loaded: Mutex::default() }));
                 self.tool_calls.open(generation);
+                self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
                 None
             }
         };
         if let Some(reaped) = refused {
             // Shutdown waits for this attempt, so for this Codex to be reaped too.
             let _ = tokio::time::timeout(REAP_TIMEOUT, reaped).await;
-            return Err(EngineError::CodexUnavailable { message: "the engine has shut down".into() });
+            return Err(EngineError::CodexUnavailable { message: SHUT_DOWN.into() });
         }
-        self.store.set_codex(CodexStatus::Ready { version: version(&response.user_agent) });
         Ok(incoming)
     }
 
@@ -308,7 +319,7 @@ impl Inner {
             deaths.retain(|at| at.elapsed() < DEATH_WINDOW);
             deaths.push(Instant::now());
             if deaths.len() > MAX_DEATHS {
-                self.store.set_codex(CodexStatus::Failed { message: "Codex keeps stopping".into() });
+                self.set_status(CodexStatus::Failed { message: "Codex keeps stopping".into() });
                 return;
             }
             match self.open().await {

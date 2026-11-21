@@ -496,6 +496,7 @@
     },
     {
       "item": "msg_ask_done",
+      "kind": "agentMessage",
       "text": "Done: {\"answers\":{\"colour\":{\"answers\":[\"Blue\"]}}}",
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000003",

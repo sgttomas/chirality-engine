@@ -1,0 +1,472 @@
+{
+  "frames": [
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+          "project": "4b54337bcd5c8d75",
+          "settings": {
+            "access": "ask",
+            "effort": null,
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": null,
+          "unread": false,
+          "updatedAt": 1795277571
+        },
+        "type": "thread"
+      },
+      "seq": 6
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+          "project": "4b54337bcd5c8d75",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": null,
+          "unread": false,
+          "updatedAt": 1795277571
+        },
+        "type": "thread"
+      },
+      "seq": 7
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+          "project": "4b54337bcd5c8d75",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "working"
+          },
+          "title": null,
+          "unread": false,
+          "updatedAt": 1795277571
+        },
+        "type": "thread"
+      },
+      "seq": 8
+    },
+    {
+      "event": {
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "turnStarted"
+      },
+      "seq": 9
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "attachments": [],
+            "kind": "userMessage",
+            "text": "STUB[review_stream]",
+            "workflow": null
+          },
+          "done": false,
+          "id": "01a1fee1-c7d1-7ae3-bba8-80361db01ff9"
+        },
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "item"
+      },
+      "seq": 10
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "attachments": [],
+            "kind": "userMessage",
+            "text": "STUB[review_stream]",
+            "workflow": null
+          },
+          "done": true,
+          "id": "01a1fee1-c7d1-7ae3-bba8-80361db01ff9"
+        },
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "item"
+      },
+      "seq": 11
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "agentMessage",
+            "text": ""
+          },
+          "done": false,
+          "id": "msg_review_chunk"
+        },
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "item"
+      },
+      "seq": 12
+    },
+    {
+      "event": {
+        "item": "msg_review_chunk",
+        "kind": "agentMessage",
+        "text": "First half.",
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "itemDelta"
+      },
+      "seq": 13
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+          "project": "4b54337bcd5c8d75",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "working"
+          },
+          "title": "STUB[review_stream]",
+          "unread": false,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 14
+    },
+    {
+      "event": {
+        "item": "msg_review_chunk",
+        "kind": "agentMessage",
+        "text": " Second half.",
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "itemDelta"
+      },
+      "seq": 15
+    },
+    {
+      "event": {
+        "item": {
+          "body": {
+            "kind": "agentMessage",
+            "text": "First half. Second half."
+          },
+          "done": true,
+          "id": "msg_review_chunk"
+        },
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "item"
+      },
+      "seq": 16
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+          "project": "4b54337bcd5c8d75",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": "STUB[review_stream]",
+          "unread": false,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 17
+    },
+    {
+      "event": {
+        "thread": {
+          "forkedFrom": null,
+          "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+          "project": "4b54337bcd5c8d75",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": "STUB[review_stream]",
+          "unread": true,
+          "updatedAt": 1795277572
+        },
+        "type": "thread"
+      },
+      "seq": 18
+    },
+    {
+      "event": {
+        "state": {
+          "state": "completed"
+        },
+        "thread": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "turn": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "type": "turnEnded"
+      },
+      "seq": 19
+    }
+  ],
+  "initial": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [
+      {
+        "id": "4b54337bcd5c8d75",
+        "name": "project",
+        "path": "/work/project"
+      }
+    ],
+    "seq": 13,
+    "threads": [
+      {
+        "forkedFrom": null,
+        "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+        "project": "4b54337bcd5c8d75",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795277571
+      }
+    ]
+  },
+  "view": {
+    "seq": 13,
+    "summary": {
+      "forkedFrom": null,
+      "id": "01a1fee1-c6e0-7391-8f6a-88a7b7f1440a",
+      "project": "4b54337bcd5c8d75",
+      "settings": {
+        "access": "ask",
+        "effort": "low",
+        "model": "gpt-6.2-sol"
+      },
+      "status": {
+        "state": "working"
+      },
+      "title": "STUB[review_stream]",
+      "unread": false,
+      "updatedAt": 1795277572
+    },
+    "turns": [
+      {
+        "id": "01a1fee1-c726-76a2-9b2e-70e5ba537bb2",
+        "items": [
+          {
+            "body": {
+              "attachments": [],
+              "kind": "userMessage",
+              "text": "STUB[review_stream]",
+              "workflow": null
+            },
+            "done": true,
+            "id": "01a1fee1-c7d1-7ae3-bba8-80361db01ff9"
+          }
+        ],
+        "state": {
+          "state": "running"
+        }
+      }
+    ]
+  }
+}

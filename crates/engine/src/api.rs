@@ -312,9 +312,12 @@ pub struct ThreadView {
     pub turns: Vec<Turn>,
     /// The [`Numbered::seq`] of the last event before the read began: the
     /// view is Codex's history, which holds that and every event before it.
-    /// Apply each event after it, except text for an item the view has as
-    /// done. Text Codex has not kept (of a reply still streaming, or one a
-    /// Stop cut short) is not in the view; the events after it bring the rest.
+    /// Apply each event after it: an item the view has as done stays done,
+    /// with its text whole, and text for an item it lacks begins that item.
+    /// History lacks a reply still streaming, and can name the items of a turn
+    /// that ended while it was read differently from its events: when a turn
+    /// of the thread in view ends, read it again. Text Codex has not kept (of
+    /// a reply a Stop cut short) is in no read.
     #[ts(type = "number")]
     pub seq: u64,
 }
@@ -474,10 +477,26 @@ pub enum Event {
     TurnEnded { thread: ThreadId, turn: TurnId, state: TurnState },
     /// An item appeared or changed; the whole item, so no state is lost.
     Item { thread: ThreadId, turn: TurnId, item: Item },
-    /// Text appended to an item while it streams.
-    ItemDelta { thread: ThreadId, turn: TurnId, item: ItemId, text: String },
+    /// Text appended to an item while it streams; `kind` is what the text is,
+    /// so a view that does not have the item yet can begin it.
+    ItemDelta { thread: ThreadId, turn: TurnId, item: ItemId, kind: TextKind, text: String },
     Pending { request: PendingRequest },
     Resolved { request: RequestId },
+}
+
+/// What streamed text extends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum TextKind {
+    /// An agent message's text.
+    AgentMessage,
+    /// A reasoning summary.
+    Reasoning,
+    /// A command's output.
+    Command,
+    /// A plan's text, which the plan's steps replace.
+    Plan,
 }
 
 /// An [`Event`] with its place in the engine's stream: numbered from 1, each

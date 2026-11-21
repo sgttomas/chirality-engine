@@ -76,7 +76,9 @@ impl Inner {
         };
         let input = mapping::message_input(&message, workflow.as_ref());
 
-        if let Some(turn) = entry.active_turn {
+        // A turn a Stop could not settle may have ended unannounced: the send is
+        // a start, which Codex takes as a steer if that turn still runs.
+        if let Some(turn) = entry.active_turn.filter(|t| entry.unsettled.as_ref() != Some(t)) {
             let params = p::TurnSteerParams { thread_id: thread.0.clone(), expected_turn_id: turn.0, input };
             session.call_value("turn/steer", params).await?;
             return Ok(());
@@ -133,11 +135,11 @@ impl Inner {
         })
         .await;
         stopped.unwrap_or_else(|_| {
-            // Codex has neither answered nor ended the turn. The thread is let go: the next
-            // send goes to Codex as a start, which Codex takes as a steer if the turn still runs.
+            // Codex has not ended the turn, which may still run: it shows as running and can be
+            // stopped again, and the thread is let go for the next send.
             self.store.update_thread(thread, |e| {
                 if e.active_turn.as_ref() == Some(&turn) {
-                    e.active_turn = None;
+                    e.unsettled = Some(turn.clone());
                 }
             });
             Err(EngineError::Codex { message: "Codex did not stop the turn".into() })

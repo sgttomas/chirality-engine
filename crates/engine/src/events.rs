@@ -115,7 +115,13 @@ impl Inner {
             "item/agentMessage/delta" | "item/reasoning/summaryTextDelta" | "item/commandExecution/outputDelta" | "item/plan/delta" => {
                 let Some(note) = decode::<p::DeltaNote>(params) else { return };
                 let item = ItemId(note.item_id);
-                self.emit_for(note.thread_id, note.turn_id, |thread, turn| Event::ItemDelta { thread, turn, item, text: note.delta });
+                let kind = match method {
+                    "item/agentMessage/delta" => TextKind::AgentMessage,
+                    "item/reasoning/summaryTextDelta" => TextKind::Reasoning,
+                    "item/commandExecution/outputDelta" => TextKind::Command,
+                    _ => TextKind::Plan,
+                };
+                self.emit_for(note.thread_id, note.turn_id, |thread, turn| Event::ItemDelta { thread, turn, item, kind, text: note.delta });
             }
             "turn/plan/updated" => {
                 let Some(note) = decode::<p::PlanNote>(params) else { return };
@@ -206,6 +212,7 @@ impl Inner {
             starting: existing.and_then(|e| e.starting.clone()),
             active_turn: existing.and_then(|e| e.active_turn.clone()).or(active_turn),
             last_ended: existing.and_then(|e| e.last_ended.clone()),
+            unsettled: existing.and_then(|e| e.unsettled.clone()),
             failed: existing.and_then(|e| e.failed.clone()),
             unread: existing.is_some_and(|e| e.unread),
         });

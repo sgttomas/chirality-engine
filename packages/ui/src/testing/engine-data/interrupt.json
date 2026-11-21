@@ -167,7 +167,7 @@
         "path": "/work/run/project"
       }
     ],
-    "seq": 7,
+    "seq": 8,
     "threads": [
       {
         "forkedFrom": null,
@@ -181,7 +181,7 @@
         "status": {
           "state": "idle"
         },
-        "title": null,
+        "title": "STUB[wait] take your time",
         "unread": true,
         "updatedAt": 1795000000
       }
@@ -443,7 +443,69 @@
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000003",
       "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "title": "STUB[wait] take your time",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
     }
   ],
-  "reads": []
+  "reads": [
+    {
+      "afterEvents": 8,
+      "view": {
+        "seq": 8,
+        "summary": {
+          "forkedFrom": null,
+          "id": "00000000-0000-0000-0000-000000000002",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "title": "STUB[wait] take your time",
+          "unread": true,
+          "updatedAt": 1795000000
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "kind": "userMessage",
+                  "text": "STUB[wait] take your time",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000004"
+              }
+            ],
+            "state": {
+              "state": "interrupted"
+            }
+          }
+        ]
+      }
+    }
+  ]
 }

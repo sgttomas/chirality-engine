@@ -110,15 +110,15 @@ describe("the store follows the engine's numbered events", () => {
     const selecting = store.selectThread("t");
     await tick();
     // The read holds 1 and 2 (its number is 2); 3 and 4 came after.
-    wire.emit(1, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: " world" });
-    wire.emit(2, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: "!" });
+    wire.emit(1, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: " world" });
+    wire.emit(2, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: "!" });
     wire.emit(3, { type: "item", thread: "t", turn: "turn-1", item: message("b", "next") });
-    wire.emit(4, { type: "itemDelta", thread: "t", turn: "turn-1", item: "b", text: " one" });
+    wire.emit(4, { type: "itemDelta", thread: "t", turn: "turn-1", item: "b", kind: "agentMessage", text: " one" });
     answerRead({ summary, turns: [{ id: "turn-1", items: [message("a", "hello world!")], state: { state: "running" } }], seq: 2 });
     await selecting;
     const items = store.get().model!.views.t.turns[0].items;
     expect(items.map((i) => (i.body.kind === "agentMessage" ? i.body.text : ""))).toEqual(["hello world!", "next one"]);
-    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: "?" });
+    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: "?" });
     expect(store.get().model!.views.t.turns[0].items[0].body).toEqual({ kind: "agentMessage", text: "hello world!?" });
   });
 });
@@ -138,7 +138,7 @@ describe("the store recovers what it missed, and starts and stops cleanly", () =
     await store.start();
     wire.emit(1, { type: "item", thread: "t", turn, item: message("a", "") });
     const reading = store.selectThread("t");
-    wire.emit(2, { type: "itemDelta", thread: "t", turn, item: "a", text: "partial response" });
+    wire.emit(2, { type: "itemDelta", thread: "t", turn, item: "a", kind: "agentMessage", text: "partial response" });
     // The engine's read holds the live item through event 1.
     answerRead({ summary, turns: [{ id: turn, items: [message("a", "")], state: { state: "running" } }], seq: 1 });
     await reading;
@@ -180,9 +180,9 @@ describe("the store recovers what it missed, and starts and stops cleanly", () =
     wire.emit(2, { type: "codex", status: { state: "starting" } });
     wire.emit(4, signedIn);
     answerSnapshot(snapshot(2));
-    for (let i = 0; i < 3; i++) await tick();
+    // The snapshot misses 3: it is read again after a moment.
+    await vi.waitFor(() => expect(store.get().model?.snapshot.seq).toBe(4), { timeout: 1000 });
     expect(reads).toBe(3);
-    expect(store.get().model?.snapshot.seq).toBe(4);
     expect(store.get().model?.snapshot.account.state).toBe("signedIn");
   });
 
@@ -295,8 +295,8 @@ describe("the store's views and recovery, on the engine's recorded data", () => 
     const store = new Store(createEngineClient(wire), testHost);
     await store.start();
     await store.selectThread("t");
-    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: "Half" });
-    wire.emit(6, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: " more" });
+    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: "Half" });
+    wire.emit(6, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: " more" });
     expect(store.get().model?.views.t.turns[0].items[0].body).toEqual({ kind: "agentMessage", text: "Half more" });
     expect(store.get().model?.views.t.seq).toBe(6);
   });
@@ -311,7 +311,7 @@ describe("the store's views and recovery, on the engine's recorded data", () => 
     const store = new Store(createEngineClient(wire), testHost);
     await store.start();
     await store.selectThread("t");
-    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", text: "Whole" });
+    wire.emit(5, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: "Whole" });
     expect(store.get().model?.views.t.turns[0].items[0].body).toEqual({ kind: "agentMessage", text: "Whole" });
   });
 
@@ -410,5 +410,167 @@ describe("the store's views and recovery, on the engine's recorded data", () => 
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(store.get().model?.snapshot.seq).toBe(2);
     expect(store.get().error).toBeNull();
+  });
+});
+
+describe("recovery keeps what it received, and backs off", () => {
+  it("tells an approval received during a recovery whose first snapshot fails", async () => {
+    const data = engineData("command_approved");
+    const at = data.events.findIndex((e) => e.type === "thread" && e.thread.status.state === "needsApproval");
+    const approval = data.events[at];
+    if (approval.type !== "thread") throw new Error("expected a recorded approval");
+    const working = data.events.slice(0, at).reverse().find((e) => e.type === "thread" && e.thread.id === approval.thread.id && e.thread.status.state === "working");
+    if (working?.type !== "thread") throw new Error("expected a recorded running thread");
+    let calls = 0;
+    const base = { ...data.before, projects: data.after.projects, threads: [working.thread], seq: data.before.seq + at - 1 };
+    const latest = { ...base, threads: [approval.thread], seq: base.seq + 2 };
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      if (++calls === 1) return base;
+      if (calls === 2) throw new Error("temporary snapshot failure");
+      return latest;
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    const notices: unknown[] = [];
+    store.onEvent((event, before) => {
+      const notice = noticeFor(event, before, false);
+      if (notice) notices.push(notice);
+    });
+    wire.emit(latest.seq, approval);
+    wire.mark(latest.seq);
+    await vi.waitFor(() => expect(store.get().model?.snapshot.seq).toBe(latest.seq), { timeout: 1000 });
+    store.dispose();
+    expect(notices).toHaveLength(1);
+  });
+
+  it("backs off while the host returns a snapshot behind its mark", async () => {
+    let count = 0;
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      return snapshot(++count < 20 ? 0 : 2);
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    wire.mark(2);
+    await tick();
+    store.dispose();
+    expect(count).toBeLessThan(5);
+  });
+
+  it("leaves a previous generation's recovery from clearing a new one's recovery error", async () => {
+    let calls = 0;
+    let answerOld: (value: Snapshot) => void = () => {};
+    const wire = new Wire(async (command) => {
+      if (command !== "snapshot") return [];
+      switch (++calls) {
+        case 1:
+          return snapshot(0);
+        case 2:
+          return new Promise((resolve) => (answerOld = resolve));
+        case 3:
+          return snapshot(2);
+        default:
+          throw new Error("the new recovery failed");
+      }
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    wire.mark(2);
+    store.dispose();
+    await store.start();
+    wire.mark(4);
+    await tick();
+    expect(store.get().error).toBe("the new recovery failed");
+    answerOld(snapshot(2));
+    await tick();
+    const error = store.get().error;
+    store.dispose();
+    expect(error).toBe("the new recovery failed");
+  });
+});
+
+describe("a view and the turn running in it", () => {
+  it("keeps an item finished when its start event arrives after the read", async () => {
+    const data = engineData("text_turn");
+    const read = data.reads[0].view;
+    const at = data.events.findIndex((e) => e.type === "item" && e.item.body.kind === "agentMessage" && !e.item.done);
+    const started = data.events[at];
+    if (started.type !== "item") throw new Error("expected a recorded item start");
+    const initial = { ...data.before, seq: data.before.seq + at, projects: data.after.projects, threads: [read.summary] };
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return initial;
+      if (command === "read_thread") return { ...read, seq: initial.seq };
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    await store.selectThread(read.summary.id);
+    wire.emit(initial.seq + 1, started);
+    const delta = data.events[at + 1];
+    if (delta.type !== "itemDelta") throw new Error("expected a recorded delta");
+    wire.emit(initial.seq + 2, delta);
+    const item = store.get().model?.views[read.summary.id].turns[0].items.find((i) => i.id === started.item.id);
+    store.dispose();
+    expect(item).toEqual(read.turns[0].items.find((i) => i.id === started.item.id));
+  });
+
+  // The engine's own reads and events against the pinned Codex and its stub, a turn running while
+  // the thread is read (captured for the fourth review of the engine; the project path made fixed).
+  interface Overlap {
+    initial: Snapshot;
+    view: ThreadView;
+    frames: Numbered[];
+  }
+  const overlaps = import.meta.glob<Overlap>("../testing/overlap-data/*.json", { eager: true, import: "default" });
+  const overlap = (name: string) => structuredClone(overlaps[`../testing/overlap-data/${name}.json`]);
+
+  it.each(["legacy", "paginated"])("shows one exchange when a turn of a %s thread completes during a read", async (mode) => {
+    const { initial, view, frames } = overlap(mode);
+    const answers: Array<(value: ThreadView) => void> = [];
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return initial;
+      if (command === "read_thread") return new Promise((resolve) => answers.push(resolve));
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    const reading = store.selectThread(view.summary.id);
+    await tick();
+    for (const frame of frames) wire.emit(frame.seq, frame.event);
+    // The first read is Codex's history from before the turn's events; each after the turn's end, from after them.
+    answers.forEach((answer, i) => answer(i === 0 ? view : { ...view, seq: frames.at(-1)!.seq }));
+    await reading;
+    await tick();
+    const shown = store.get().model?.views[view.summary.id].turns[0].items.map((item) => item.body.kind);
+    store.dispose();
+    expect(answers.length).toBeGreaterThan(1);
+    expect(shown).toEqual(["userMessage", "agentMessage"]);
+  });
+
+  it("streams text into a thread opened mid-reply, and settles on the turn's end", async () => {
+    const { initial, view, frames } = overlap("streaming");
+    let reads = 0;
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return initial;
+      if (command === "read_thread") return reads++ === 0 ? view : { ...view, seq: frames.at(-1)!.seq };
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    await store.selectThread(view.summary.id);
+    const after = frames.filter((n) => n.seq > view.seq);
+    const agent = () =>
+      store
+        .get()
+        .model?.views[view.summary.id].turns[0].items.flatMap((item) => (item.body.kind === "agentMessage" ? [item.body.text] : []));
+    const delta = after.findIndex((n) => n.event.type === "itemDelta");
+    for (const frame of after.slice(0, delta + 1)) wire.emit(frame.seq, frame.event);
+    expect(agent()).toEqual([" Second half."]);
+    for (const frame of after.slice(delta + 1)) wire.emit(frame.seq, frame.event);
+    expect(agent()).toEqual(["First half. Second half."]);
+    await tick();
+    expect(reads).toBe(2);
+    store.dispose();
   });
 });
