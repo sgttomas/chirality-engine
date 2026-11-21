@@ -69,6 +69,9 @@ impl Inner {
     async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
+        if entry.subagent.is_some() {
+            return Err(EngineError::Invalid { message: "A subagent takes its messages from the agent that started it.".into() });
+        }
         let project = self.project(&entry.project)?;
         let workflow = match &message.workflow {
             Some(id) => Some(crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?),
@@ -156,8 +159,13 @@ impl Inner {
         let gone = || EngineError::NotFound { what: format!("request {}", request.0) };
         let pending = self.store.take_pending(request).ok_or_else(gone)?;
         session.client.respond(pending.rpc_id.clone(), reply).map_err(crate::session::engine_error)?;
+        // The turn of the thread that asked, whichever thread the request is shown on; for one the
+        // engine has not taken in, the turn Codex named.
         if stop {
-            self.interrupt(&pending.request.thread).await?;
+            match (self.store.thread(&pending.asked_by), pending.params["turnId"].as_str()) {
+                (None, Some(turn)) => session.call_value("turn/interrupt", json!({ "threadId": pending.asked_by.0, "turnId": turn })).await.map(|_| ())?,
+                _ => self.interrupt(&pending.asked_by).await?,
+            }
         }
         Ok(())
     }

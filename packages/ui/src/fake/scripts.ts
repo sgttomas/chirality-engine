@@ -1,5 +1,5 @@
 // Scripted turns the fake engine plays: what a real Codex turn would emit.
-import type { Answer, ItemBody, ItemId, Message, PlanStep, Request } from "../engine/types";
+import type { Answer, ItemBody, ItemId, Message, PlanStep, Request, ThreadId } from "../engine/types";
 import { alternativeDiff, basisDiff, quantitiesDiff, sowDiff } from "./fixtures";
 
 /** What a script can do inside its turn. */
@@ -17,6 +17,10 @@ export interface Run {
   ask(request: Request): Promise<Answer>;
   /** A named point a scene can stop at. */
   mark(label: string): Promise<void>;
+  /** Starts a subagent named `task` on `script`. */
+  delegate(task: string, script: Script): ThreadId;
+  /** Waits until each subagent has finished its turn. */
+  waitFor(subagents: ThreadId[]): Promise<void>;
 }
 
 export type Script = (run: Run) => Promise<void>;
@@ -140,8 +144,38 @@ export const replyTurn: Script = async (run) => {
   );
 };
 
+/** A subagent's task: check the pile lengths against the survey. */
+export const pilesCheck: Script = async (run) => {
+  await run.stream("reasoning", "Compare each pier's pile length in the basis with the rock head the survey found there.");
+  await run.mark("checking");
+  await run.command('rg -n "P[1-4]" brief/geotech-summary.md', "brief/geotech-summary.md:21:P1 rock head 14 m\nbrief/geotech-summary.md:22:P2 rock head 17 m\nbrief/geotech-summary.md:23:P3 rock head 19 m\nbrief/geotech-summary.md:24:P4 rock head 18 m\n");
+  await run.stream("agentMessage", "P3 is the deepest at 19 m to rock, so 21 m piles there; 19 m covers the other three.");
+};
+
+/** A subagent's task: rerun the deck takeoff, which needs a command approved. */
+export const deckCheck: Script = async (run) => {
+  await run.stream("reasoning", "The deck quantities come from the takeoff script; run it on S-102.");
+  const command = "python3 tools/takeoff.py drawings/S-102-deck.pdf";
+  if (run.asks) {
+    const answer = await run.ask({ kind: "command", command, cwd, reason: "Rerun the deck takeoff" });
+    if (!allowed(answer)) return void (await run.stream("agentMessage", "Left the takeoff as it was."));
+  }
+  await run.command(command, "Precast beams  48 no.\nDeck slab      1,920 m2\n");
+  await run.stream("agentMessage", "The deck takeoff matches the quantities: 48 beams and 1,920 m² of slab.");
+};
+
+/** Hands two checks to subagents and waits for both. */
+export const delegateTurn: Script = async (run) => {
+  await run.stream("reasoning", "Two independent checks: the pile lengths and the deck takeoff. A subagent each, then compare.");
+  const piles = run.delegate("piles", pilesCheck);
+  const deck = run.delegate("deck", deckCheck);
+  await run.waitFor([piles, deck]);
+  await run.stream("agentMessage", "Both checks are back: P3 needs **21 m** piles, the other piers 19 m, and the deck takeoff matches the quantities.");
+};
+
 /** The script for a message, by what it asks. */
 export function scriptFor(message: Message): Script {
+  if (/subagent|in parallel/i.test(message.text)) return delegateTurn;
   if (/instead/i.test(message.text)) return alternativeTurn;
   if (/estimate|quantit/i.test(message.text)) return classTurn;
   if (/scope/i.test(message.text)) return scopeTurn;

@@ -145,6 +145,8 @@ impl Connector for FakeCodex {
                     "initialize" => Some(json!({ "userAgent": "chirality/0.171.0 (fake)" })),
                     "account/read" => Some(json!({ "account": null })),
                     "model/list" => Some(json!({ "data": [], "nextCursor": null })),
+                    // A thread's subagents, which these threads have none of.
+                    "thread/list" if frame["params"]["ancestorThreadId"].is_string() => Some(json!({ "data": [], "nextCursor": null })),
                     "initialized" => continue,
                     _ => None,
                 };

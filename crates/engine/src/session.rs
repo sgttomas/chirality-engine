@@ -345,6 +345,11 @@ impl Inner {
                 Ok(next) => incoming = next,
                 Err(_) => return,
             }
+            // What Codex did while the engine could not hear it (a subagent it started, a
+            // thread it ended) is in its listing, as at the start.
+            for project in self.store.projects() {
+                let _ = self.list_threads(&project).await;
+            }
         }
     }
 

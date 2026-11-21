@@ -10,7 +10,7 @@ use crate::api::*;
 
 /// A view with the events after its number applied, as an interface applies them:
 /// an item replaces the one with its id (or is added), streamed text extends it.
-fn rebuilt(view: &ThreadView, events: &[Numbered]) -> Vec<(String, ItemBody)> {
+pub(super) fn rebuilt(view: &ThreadView, events: &[Numbered]) -> Vec<(String, ItemBody)> {
     let mut items: Vec<(String, ItemBody)> = view.turns.iter().flat_map(|t| &t.items).map(|i| (i.id.0.clone(), i.body.clone())).collect();
     for n in events.iter().filter(|n| n.seq > view.seq) {
         match &n.event {
@@ -31,7 +31,7 @@ fn rebuilt(view: &ThreadView, events: &[Numbered]) -> Vec<(String, ItemBody)> {
     items
 }
 
-fn kept(view: &ThreadView) -> Vec<(String, ItemBody)> {
+pub(super) fn kept(view: &ThreadView) -> Vec<(String, ItemBody)> {
     view.turns.iter().flat_map(|t| &t.items).map(|i| (i.id.0.clone(), i.body.clone())).collect()
 }
 

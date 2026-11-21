@@ -265,10 +265,27 @@ pub struct ThreadSummary {
     pub unread: bool,
     /// The thread this one was forked from.
     pub forked_from: Option<ThreadId>,
+    /// Set when the thread is a subagent another thread's agent started.
+    pub subagent: Option<Subagent>,
     /// Seconds since the Unix epoch.
     #[ts(type = "number")]
     pub updated_at: i64,
     pub settings: Option<TurnSettings>,
+}
+
+/// A subagent: a thread of its own, which its parent's agent started and
+/// directs. Codex takes no message from the person for it; it can be read,
+/// followed and stopped like any thread, and its approvals are its own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct Subagent {
+    /// The thread whose agent started it.
+    pub parent: ThreadId,
+    /// Its task path as Codex gives it (`/root/worker`), the last part its name.
+    pub path: String,
+    /// The nickname Codex gave it, once the engine has read or listed it.
+    pub nickname: Option<String>,
 }
 
 /// One status per thread, highest first: what the person most needs to know.
@@ -366,7 +383,41 @@ pub enum ItemBody {
     /// its namespace). `result` is its text; `images` are `data:` URLs.
     ToolCall { server: Option<String>, tool: String, arguments: String, status: ToolCallStatus, result: Option<String>, images: Vec<String> },
     WebSearch { query: String },
+    /// The agent's work with a subagent: `thread` is the subagent's.
+    Subagent { thread: ThreadId, path: String, activity: SubagentActivity },
+    /// One of the agent's own tools for its subagents: a wait (on whichever
+    /// finishes; `threads` empty), or a start that failed. Codex gives
+    /// `prompt` only for some.
+    SubagentTool { tool: SubagentTool, status: ToolCallStatus, threads: Vec<ThreadId>, prompt: Option<String> },
     Error { message: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum SubagentActivity {
+    Started,
+    /// Sent a message, or a further task.
+    Messaged,
+    Interrupted,
+    /// Ended a turn; its answer is the subagent's last message.
+    Finished,
+}
+
+/// The agent's subagent tools, as Codex names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum SubagentTool {
+    SpawnAgent,
+    SendInput,
+    ResumeAgent,
+    Wait,
+    CloseAgent,
+    SendMessage,
+    FollowupTask,
+    InterruptAgent,
+    ListAgents,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ThreadSummary } from "../../engine/types";
+import { nameOf } from "../../state/selectors";
 import { useStoreHandle } from "../../state/store";
 import { Icon } from "../Icon";
 
@@ -51,7 +52,7 @@ export function ThreadTitle({ thread }: { thread: ThreadSummary }) {
           }}
         />
       ) : (
-        <h1 onDoubleClick={startRename}>{thread.title ?? "New thread"}</h1>
+        <h1 onDoubleClick={startRename}>{nameOf(thread)}</h1>
       )}
       <div className="conv-menu" ref={menuRoot}>
         <button className="quiet" aria-label="Thread actions" aria-expanded={menu} onClick={() => setMenu(!menu)}>

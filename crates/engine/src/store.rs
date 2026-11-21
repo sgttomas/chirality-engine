@@ -29,6 +29,7 @@ pub(crate) struct ThreadEntry {
     pub unsettled: Option<TurnId>,
     pub failed: Option<String>,
     pub unread: bool,
+    pub subagent: Option<Subagent>,
 }
 
 /// A request Codex waits on, with what is needed to answer it.
@@ -39,6 +40,14 @@ pub(crate) struct Pending {
     pub rpc_id: Value,
     pub method: String,
     pub params: Value,
+    /// The thread Codex named, which a request shown on an ancestor is still about.
+    pub asked_by: ThreadId,
+}
+
+impl Pending {
+    fn about(&self, thread: &ThreadId) -> bool {
+        &self.request.thread == thread || &self.asked_by == thread
+    }
 }
 
 #[derive(Default)]
@@ -51,7 +60,7 @@ struct State {
     pending: Vec<Pending>,
     /// File changes by Codex item id, for the approval that names only the item.
     file_changes: HashMap<String, Vec<FileDiff>>,
-    /// Subagent threads, by the thread that started them.
+    /// Each subagent's parent, the engine's or not.
     parents: HashMap<ThreadId, ThreadId>,
     /// Counts renames, so a read sent before one does not undo it.
     renames: u64,
@@ -205,11 +214,18 @@ impl Store {
         Some(result)
     }
 
+    /// Removes a thread, and the requests about it, which no one can answer once it is gone.
     pub fn remove_thread(&self, id: &ThreadId) {
+        self.drop_requests(id);
         let mut state = self.state.lock().unwrap();
         if state.threads.remove(id).is_some() {
             { let event = Event::ThreadRemoved { thread: id.clone() }; self.send(&mut state, event); }
         }
+    }
+
+    /// Drops the requests about a thread Codex has archived, deleted or closed.
+    pub fn drop_requests(&self, thread: &ThreadId) {
+        self.resolve(|p| p.about(thread));
     }
 
     pub fn remember_file_change(&self, item: &str, files: Vec<FileDiff>) {
@@ -225,7 +241,8 @@ impl Store {
         let thread = pending.request.thread.clone();
         { let event = Event::Pending { request: pending.request.clone() }; self.send(&mut state, event); }
         state.pending.push(pending);
-        if let Some(entry) = state.threads.get_mut(&thread) {
+        // A subagent's finishing is its parent's to tell, so its request leaves no mark once answered.
+        if let Some(entry) = state.threads.get_mut(&thread).filter(|e| e.subagent.is_none()) {
             entry.unread = true;
         }
         if state.threads.contains_key(&thread) {
@@ -246,18 +263,25 @@ impl Store {
         found.then_some(taken)
     }
 
+    /// Records a thread's parent, unless that would make a thread its own ancestor.
     pub fn set_parent(&self, child: ThreadId, parent: ThreadId) {
-        self.state.lock().unwrap().parents.insert(child, parent);
+        let mut state = self.state.lock().unwrap();
+        if !ancestors(&state.parents, parent.clone()).any(|a| a == child) {
+            state.parents.insert(child, parent);
+        }
     }
 
-    /// The thread a subagent's requests are shown on: its root ancestor.
+    /// The thread a request is shown on: its own, or for a subagent the engine
+    /// does not have, the nearest ancestor it has.
+    pub fn shown_on(&self, thread: ThreadId) -> ThreadId {
+        let state = self.state.lock().unwrap();
+        ancestors(&state.parents, thread.clone()).find(|t| state.threads.contains_key(t)).unwrap_or(thread)
+    }
+
+    /// The thread an application's tool call shows on: its root ancestor.
     pub fn owner(&self, thread: ThreadId) -> ThreadId {
         let state = self.state.lock().unwrap();
-        let mut current = thread;
-        while let Some(parent) = state.parents.get(&current) {
-            current = parent.clone();
-        }
-        current
+        ancestors(&state.parents, thread.clone()).last().unwrap_or(thread)
     }
 
     pub fn pending(&self, id: &RequestId) -> Option<Pending> {
@@ -276,6 +300,12 @@ impl Store {
             }
         }
     }
+}
+
+/// A thread, then each ancestor in turn; it ends at a thread seen before, so a cycle cannot hold it.
+fn ancestors(parents: &HashMap<ThreadId, ThreadId>, thread: ThreadId) -> impl Iterator<Item = ThreadId> + '_ {
+    let mut seen = std::collections::HashSet::new();
+    std::iter::successors(Some(thread), |t| parents.get(t).cloned()).take_while(move |t| seen.insert(t.clone()))
 }
 
 fn summary(state: &State, id: &ThreadId) -> ThreadSummary {
@@ -299,6 +329,7 @@ fn summary(state: &State, id: &ThreadId) -> ThreadSummary {
         status,
         unread: entry.unread,
         forked_from: entry.forked_from.clone(),
+        subagent: entry.subagent.clone(),
         updated_at: entry.updated_at,
         settings: entry.starting.clone().or_else(|| entry.settings.clone()),
     }
@@ -322,5 +353,44 @@ mod tests {
         // No change, no event, no number.
         store.set_account(Account::SignedOut);
         assert_eq!(store.snapshot().seq, 3);
+    }
+
+    #[test]
+    fn no_thread_becomes_its_own_ancestor_and_every_walk_ends() {
+        let id = |s: &str| ThreadId(s.into());
+        let store = Store::new();
+        store.set_parent(id("worker"), id("root"));
+        store.set_parent(id("inner"), id("worker"));
+        // A worker's message to its root names the root; were it a parent, the two would be each other's.
+        store.set_parent(id("root"), id("worker"));
+        store.set_parent(id("root"), id("inner"));
+        store.set_parent(id("root"), id("root"));
+        assert_eq!(store.owner(id("inner")), id("root"));
+        assert_eq!(store.owner(id("root")), id("root"));
+        // A map that holds a cycle all the same ends where the walk comes back.
+        store.state.lock().unwrap().parents.insert(id("root"), id("inner"));
+        assert_eq!(store.owner(id("inner")), id("root"));
+        assert_eq!(store.shown_on(id("inner")), id("inner"));
+    }
+
+    #[test]
+    fn a_thread_removed_takes_the_requests_about_it() {
+        let id = |s: &str| ThreadId(s.into());
+        let store = Store::new();
+        let ask = |n: &str, shown: &str, asked: &str| Pending {
+            request: PendingRequest { id: RequestId(n.into()), thread: id(shown), request: Request::Permissions { reason: None } },
+            generation: 1,
+            rpc_id: Value::from(n),
+            method: "item/permissions/requestApproval".into(),
+            params: Value::Null,
+            asked_by: id(asked),
+        };
+        store.add_pending(ask("1", "worker", "worker"));
+        store.add_pending(ask("2", "lead", "inner"));
+        store.add_pending(ask("3", "lead", "lead"));
+        store.remove_thread(&id("worker"));
+        store.drop_requests(&id("inner"));
+        let left: Vec<_> = store.snapshot().pending.into_iter().map(|p| p.id.0).collect();
+        assert_eq!(left, ["3"]);
     }
 }

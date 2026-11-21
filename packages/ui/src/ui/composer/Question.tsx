@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { PendingRequest } from "../../engine/types";
 import { useStoreHandle } from "../../state/store";
+import { forShortcut } from "./shortcuts";
 
 /** The agent's questions, one at a time: a press answers and moves on. */
 export function Question({ pending }: { pending: PendingRequest }) {
@@ -28,7 +29,7 @@ export function Question({ pending }: { pending: PendingRequest }) {
 
   useEffect(() => {
     const keys = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if (!forShortcut(e)) return;
       const n = Number(e.key);
       if (n >= 1 && n <= (question?.options.length ?? 0)) give(question.options[n - 1]);
     };

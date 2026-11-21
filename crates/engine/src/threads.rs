@@ -27,23 +27,58 @@ async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result
     }
 }
 
+/// The turn Codex runs on a thread it lists as active: a listing leaves its turns out.
+async fn running_turn(session: &Session, thread: &ThreadId) -> Option<TurnId> {
+    let params = json!({ "threadId": thread.0, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded" });
+    let page: p::TurnsListResponse = session.client.request("thread/turns/list", params).await.ok()?;
+    page.data.into_iter().next().filter(|t| t.status == p::TurnStatus::InProgress).map(|t| TurnId(t.id))
+}
+
 impl Inner {
-    /// Reads a project's threads from Codex into the snapshot.
+    /// Reads a project's threads from Codex into the snapshot, then each one's
+    /// subagents, which Codex lists only by the thread they descend from.
     pub(crate) async fn list_threads(&self, project: &Project) -> Result<()> {
+        let mut roots = Vec::new();
+        let folder = Some(vec![project.path.display().to_string()]);
+        self.list_pages(|cursor| p::ThreadListParams { cwd: folder.clone(), ancestor_thread_id: None, limit: PAGE, cursor }, &mut roots).await?;
+        for root in roots {
+            let ancestor = Some(root.0);
+            // A thread whose subagents cannot be listed is still listed itself.
+            let _ = self.list_pages(|cursor| p::ThreadListParams { cwd: None, ancestor_thread_id: ancestor.clone(), limit: PAGE, cursor }, &mut Vec::new()).await;
+        }
+        Ok(())
+    }
+
+    /// Takes in every page of a listing; `taken` gets the threads taken in.
+    async fn list_pages(&self, params: impl Fn(Option<String>) -> p::ThreadListParams, taken: &mut Vec<ThreadId>) -> Result<()> {
         let session = self.session()?;
         let mut cursor = None;
         loop {
-            let params = p::ThreadListParams { cwd: vec![project.path.display().to_string()], limit: PAGE, cursor };
             let read_at = self.store.renames();
-            let page: p::ThreadListResponse = session.call("thread/list", params).await?;
+            let page: p::ThreadListResponse = session.call("thread/list", params(cursor)).await?;
             for thread in &page.data {
-                self.adopt_thread(thread, Some(read_at));
+                let Some(id) = self.adopt_thread(thread, Some(read_at)) else { continue };
+                let unknown_turn = matches!(thread.status, p::ThreadStatus::Active) && self.store.thread(&id).is_some_and(|e| e.active_turn.is_none());
+                if unknown_turn && let Some(turn) = running_turn(&session, &id).await {
+                    self.take_running(&id, turn);
+                }
+                taken.push(id);
             }
             match page.next_cursor {
                 Some(next) if !page.data.is_empty() => cursor = Some(next),
                 _ => return Ok(()),
             }
         }
+    }
+
+    /// A turn Codex says runs, unless the engine already has one running or has
+    /// since seen this one end.
+    fn take_running(&self, thread: &ThreadId, turn: TurnId) {
+        self.store.update_thread(thread, |e| {
+            if e.active_turn.is_none() && e.last_ended.as_ref() != Some(&turn) {
+                e.active_turn = Some(turn);
+            }
+        });
     }
 
     pub(crate) fn project(&self, id: &ProjectId) -> Result<Project> {
@@ -80,6 +115,9 @@ impl Inner {
         let (turns, seq) = match history.await {
             Ok(turns) => {
                 session.mark_kept(thread);
+                if let Some(turn) = turns.last().filter(|t| t.state == TurnState::Running) {
+                    self.take_running(thread, turn.id.clone());
+                }
                 (turns, seq)
             }
             // A thread the engine started, before Codex has kept it and before any turn of it has

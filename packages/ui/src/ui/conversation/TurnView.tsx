@@ -4,6 +4,7 @@ import type { ThreadId, Turn, Workflow } from "../../engine/types";
 import { useStoreHandle } from "../../state/store";
 import { Icon } from "../Icon";
 import { blocksOf } from "./group";
+import { Delegation } from "../Subagents";
 import { AgentMessage, ErrorItem, FileChange, Plan, UserMessage, Work } from "./Items";
 
 export function TurnView(props: { thread: ThreadId; turn: Turn; workflows: Workflow[]; canAct: boolean }) {
@@ -40,6 +41,8 @@ export function TurnView(props: { thread: ThreadId; turn: Turn; workflows: Workf
             return <Plan key={item.id} steps={item.body.steps} />;
           case "fileChange":
             return <FileChange key={item.id} item={item} />;
+          case "subagent":
+            return <Delegation key={item.id} item={item} />;
           case "error":
             return <ErrorItem key={item.id} message={item.body.message} />;
           default:

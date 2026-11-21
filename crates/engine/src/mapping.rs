@@ -97,6 +97,26 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
             (id, body)
         }
         ThreadItem::WebSearch { id, query } => (id, ItemBody::WebSearch { query: query.clone() }),
+        ThreadItem::SubAgentActivity { id, kind, agent_thread_id, agent_path } => {
+            let activity = match kind.as_str() {
+                "started" => SubagentActivity::Started,
+                "interacted" => SubagentActivity::Messaged,
+                "interrupted" => SubagentActivity::Interrupted,
+                "completed" => SubagentActivity::Finished,
+                _ => return None,
+            };
+            (id, ItemBody::Subagent { thread: ThreadId(agent_thread_id.clone()), path: agent_path.clone(), activity })
+        }
+        ThreadItem::CollabAgentToolCall { id, tool, status, receiver_thread_ids, prompt } => {
+            let tool = serde_json::from_value(Value::String(tool.clone())).ok()?;
+            let status = match status.as_str() {
+                "inProgress" => ToolCallStatus::Running,
+                "completed" => ToolCallStatus::Completed,
+                _ => ToolCallStatus::Failed,
+            };
+            let threads = receiver_thread_ids.iter().cloned().map(ThreadId).collect();
+            (id, ItemBody::SubagentTool { tool, status, threads, prompt: prompt.clone() })
+        }
         ThreadItem::Other => return None,
     };
     Some(Item { id: ItemId(id.clone()), body, done })
@@ -365,6 +385,16 @@ mod tests {
         assert_eq!(result.as_deref(), Some("ok\n{\"size\":3}"));
         let running = json!({"type": "dynamicToolCall", "id": "d", "namespace": null, "tool": "t", "arguments": {}, "status": "inProgress", "contentItems": null});
         assert!(matches!(item_body(running), ItemBody::ToolCall { status: ToolCallStatus::Running, .. }));
+    }
+
+    #[test]
+    fn subagent_items_name_the_subagent() {
+        let started = json!({"type": "subAgentActivity", "id": "call_spawn", "kind": "started", "agentThreadId": "c", "agentPath": "/root/worker", "model": "m"});
+        assert_eq!(done_body(started), ItemBody::Subagent { thread: ThreadId("c".into()), path: "/root/worker".into(), activity: SubagentActivity::Started });
+        let wait = json!({"type": "collabAgentToolCall", "id": "call_wait", "tool": "wait", "status": "inProgress", "senderThreadId": "p", "receiverThreadIds": [], "prompt": null, "agentsStates": {}});
+        assert_eq!(item_body(wait), ItemBody::SubagentTool { tool: SubagentTool::Wait, status: ToolCallStatus::Running, threads: vec![], prompt: None });
+        let unknown = json!({"type": "subAgentActivity", "id": "x", "kind": "renamed", "agentThreadId": "c", "agentPath": "/root/worker"});
+        assert!(item(&serde_json::from_value(unknown).unwrap(), true).is_none());
     }
 
     fn item_body(value: Value) -> ItemBody {

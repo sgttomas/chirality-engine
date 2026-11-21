@@ -3,7 +3,8 @@
 //! network.
 //!
 //! The script for a request is picked by a marker `STUB[key]` in the last user
-//! message, so turns are keyed on content, never on request order.
+//! message (or a subagent's task after it), so turns are keyed on content,
+//! never on request order.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -164,17 +165,22 @@ fn sse(event: &str, data: Value) -> Vec<u8> {
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
 }
 
-/// The text of the last user message, and the call outputs that follow it.
+/// The text that keys the turn, and the call outputs that follow it: the
+/// last user message, or a later message from another agent (a subagent's
+/// task, which Codex gives as an `agent_message`) that carries a key.
 fn turn_view(body: &Value) -> (String, HashMap<String, String>) {
     let entries = body["input"].as_array().cloned().unwrap_or_default();
-    let Some(last) = entries.iter().rposition(|e| e["role"] == "user" && e.get("type").and_then(Value::as_str).unwrap_or("message") == "message") else {
-        return (String::new(), HashMap::new());
-    };
-    let text = match &entries[last]["content"] {
+    let text_of = |entry: &Value| match &entry["content"] {
         Value::String(s) => s.clone(),
-        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str().or(p["encrypted_content"].as_str())).collect::<Vec<_>>().join("\n"),
         _ => String::new(),
     };
+    let user = |e: &Value| e["role"] == "user" && e.get("type").and_then(Value::as_str).unwrap_or("message") == "message";
+    let Some(last_user) = entries.iter().rposition(user) else {
+        return (String::new(), HashMap::new());
+    };
+    let last = entries.iter().rposition(|e| e["type"] == "agent_message" && text_of(e).contains("STUB[")).filter(|&at| at > last_user).unwrap_or(last_user);
+    let text = text_of(&entries[last]);
     let outputs = entries[last + 1..]
         .iter()
         .filter(|e| e["type"].as_str().is_some_and(|t| t.ends_with("_output")))
