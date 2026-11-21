@@ -19,8 +19,11 @@ export function TurnView(props: { thread: ThreadId; turn: Turn; workflows: Workf
   };
   const revert = async () => {
     setConfirmRevert(false);
-    await store.attempt(() => store.engine.revert(thread, turn.id));
-    await store.reload(thread);
+    const reverted = await store.attempt(async () => {
+      await store.engine.revert(thread, turn.id);
+      return true;
+    });
+    if (reverted) await store.reload(thread);
   };
 
   return (

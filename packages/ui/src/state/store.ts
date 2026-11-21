@@ -37,6 +37,8 @@ export class Store {
   /** Each thread's latest read: an earlier one that answers later, or one begun before a disposal, is dropped. */
   private latestRead = new Map<ThreadId, number>();
   private readsBegun = 0;
+  /** The workflow kept attached in each composer (a thread's, or a project's new thread), for this session. */
+  private pins = new Map<string, Workflow>();
 
   constructor(
     readonly engine: EngineClient,
@@ -202,6 +204,15 @@ export class Store {
     this.set({ error: null });
   }
 
+  /** The workflow kept attached in the composer named `key`, if any. */
+  pinned(key: string): Workflow | undefined {
+    return this.pins.get(key);
+  }
+  pin(key: string, workflow: Workflow | null) {
+    if (workflow) this.pins.set(key, workflow);
+    else this.pins.delete(key);
+  }
+
   /** Asks the person for a folder, adds it as a project and selects it. */
   async addProjectFolder() {
     const path = await this.host.pickFolder();
@@ -223,7 +234,8 @@ export class Store {
   }
   /** Reads the thread again, with the events after the read applied. The latest read of a thread wins;
    * one an earlier start began, or a later read overtook, changes nothing, its failure included. After
-   * `completed` ends, the plan the view holds for it is kept: Codex leaves it out of the history. */
+   * `completed` ends, the plan the view holds for it is kept: Codex leaves it out of the history; that
+   * read failing leaves the view as the events made it, and the next read reconciles it. */
   async reload(thread: ThreadId, completed?: TurnId) {
     const ticket = ++this.readsBegun;
     const generation = this.generation;
@@ -235,7 +247,7 @@ export class Store {
     try {
       read = await this.engine.readThread(thread);
     } catch (e) {
-      if (current()) this.set({ error: describe(e) });
+      if (current() && !completed) this.set({ error: describe(e) });
       return;
     } finally {
       this.reads.delete(during);

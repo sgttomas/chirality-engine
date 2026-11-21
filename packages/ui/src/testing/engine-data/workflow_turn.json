@@ -576,5 +576,14 @@
         ]
       }
     }
+  ],
+  "workflows": [
+    {
+      "id": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md",
+      "name": "estimate",
+      "path": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md",
+      "source": "project",
+      "summary": "Estimate the work."
+    }
   ]
 }

@@ -3,7 +3,7 @@
 // to the real client.
 import { createEngineClient, type EngineClient, type Transport } from "../engine/client";
 import { engineEvent, type EngineCommand } from "../engine/commands";
-import type { Answer, Event, Numbered, Snapshot, ThreadView } from "../engine/types";
+import type { Answer, EngineError, Event, Numbered, Snapshot, ThreadView, Workflow } from "../engine/types";
 import { threadOf } from "../state/reduce";
 
 export interface EngineData {
@@ -12,6 +12,8 @@ export interface EngineData {
   after: Snapshot;
   /** Each thread view the scenario read, after how many of the events. */
   reads: { afterEvents: number; view: ThreadView }[];
+  /** The workflows the engine found in the scenario's project. */
+  workflows: Workflow[];
 }
 
 const files = import.meta.glob<EngineData>("./engine-data/*.json", { eager: true, import: "default" });
@@ -34,6 +36,10 @@ export class ReplayTransport implements Transport {
   /** Commands the recording has no answer for, by name. */
   readonly calls: EngineCommand[] = [];
   readonly reads: string[] = [];
+  /** Each send and start, with what it carried. */
+  readonly sent: { command: EngineCommand; args: Record<string, unknown> }[] = [];
+  /** Commands to answer with an error instead, as the engine refuses them. */
+  readonly refuse = new Map<EngineCommand, EngineError>();
   /** The engine client over this transport. */
   readonly client: EngineClient = createEngineClient(this);
 
@@ -68,6 +74,9 @@ export class ReplayTransport implements Transport {
   }
 
   private async answer(command: EngineCommand, args: Record<string, unknown>): Promise<unknown> {
+    const refused = this.refuse.get(command);
+    if (refused) throw refused;
+    if (command === "send" || command === "start_thread") this.sent.push({ command, args: structuredClone(args) });
     switch (command) {
       case "snapshot":
         return this.patch(structuredClone(this.data.before));
@@ -79,19 +88,29 @@ export class ReplayTransport implements Transport {
       case "mark_read":
         return null;
       case "workflows":
+        return structuredClone(this.data.workflows);
       case "find_files":
         return [];
       case "read_file":
         this.reads.push(args.path as string);
         return "hello\n";
-      case "add_project":
       case "start_thread":
+        return this.startThread();
+      case "add_project":
       case "fork":
         throw notRecorded;
       default:
         this.calls.push(command);
         return null;
     }
+  }
+
+  /** The recording's first thread, as the engine started it: its events up to its summary are played. */
+  private startThread() {
+    if (this.data.events.slice(0, this.at).some((e) => e.type === "thread")) throw notRecorded;
+    const started = this.play((e) => e.type === "thread");
+    if (started?.type !== "thread") throw notRecorded;
+    return started.thread.id;
   }
 
   /** The engine's own read when there is one by now, or the next one when only summaries come

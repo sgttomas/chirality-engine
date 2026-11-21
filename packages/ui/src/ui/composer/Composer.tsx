@@ -1,6 +1,6 @@
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import type { Attachment, Message, ThreadId, TurnSettings, Workflow } from "../../engine/types";
+import type { Attachment, Message, TurnSettings, Workflow } from "../../engine/types";
 import { isRunning, pendingFor, shortPath } from "../../state/selectors";
 import { remember, remembered, resolveSettings } from "../../state/settings";
 import { useProjectRoot, useStore, useStoreHandle } from "../../state/store";
@@ -20,14 +20,13 @@ const imageExt = /\.(png|jpe?g|gif|webp|heic|tiff?)$/i;
  * approval or question waiting on the person. */
 export function Composer() {
   const key = useStore((s) => s.thread ?? s.project);
-  const kept = useRef<Kept | null>(null);
-  return key ? <ThreadComposer key={key} kept={kept} /> : null;
+  return key ? <ThreadComposer key={key} /> : null;
 }
 
-/** A workflow kept attached when its message started a thread, for that thread's composer. */
-type Kept = { thread: ThreadId; workflow: Workflow };
+/** A picked workflow, and whether the person keeps it attached to every message. */
+type Picked = { workflow: Workflow | null; keep: boolean };
 
-function ThreadComposer({ kept }: { kept: RefObject<Kept | null> }) {
+function ThreadComposer() {
   const store = useStoreHandle();
   const thread = useStore((s) => s.thread);
   const project = useStore((s) => s.project)!;
@@ -38,49 +37,74 @@ function ThreadComposer({ kept }: { kept: RefObject<Kept | null> }) {
   const workflows = useStore((s) => s.workflows[project]) ?? [];
   const running = isRunning(view);
   const root = useProjectRoot();
+  // The pin is kept with its thread (or the project's new thread) for the session.
+  const pinKey = thread ?? `new:${project}`;
 
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const carried = kept.current?.thread === thread ? kept.current.workflow : null;
-  const [workflow, setWorkflow] = useState<Workflow | null>(carried);
   // A picked workflow goes with the next message only, unless the person keeps it attached.
-  const [keep, setKeep] = useState(carried !== null);
+  const [picked, setPicked] = useState<Picked>(() => {
+    const kept = store.pinned(pinKey);
+    return { workflow: kept ?? null, keep: kept !== undefined };
+  });
+  // The selection as it is now, for a send that resolves after the person changed it.
+  const current = useRef(picked);
+  const sending = useRef(false);
   const [settings, setSettings] = useState<TurnSettings>(() => resolveSettings(models, summary?.settings ?? remembered()));
   const [mention, setMention] = useState<Mention | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const { workflow, keep } = picked;
 
   useEffect(() => {
     if (!pending) input.current?.focus();
   }, [pending]);
-  useEffect(() => {
-    if (kept.current?.thread === thread) kept.current = null;
-  }, [kept, thread]);
 
   const choose = (next: TurnSettings) => {
     setSettings(next);
     remember(next);
   };
 
-  const send = async () => {
-    const body = text.trim();
-    if (!body) return;
-    const message: Message = { text: body, attachments, workflow: workflow?.id ?? null };
-    setText("");
-    setAttachments([]);
-    if (!keep) setWorkflow(null);
-    setMention(null);
-    if (thread) {
-      await store.attempt(() => store.engine.send(thread, message, settings));
-    } else {
-      const id = await store.attempt(() => store.engine.startThread(project, message, settings));
-      if (id && keep && workflow) kept.current = { thread: id, workflow };
-      if (id) await store.selectThread(id);
-    }
+  const select = (next: Workflow | null, keepIt: boolean) => {
+    const value = { workflow: next, keep: next !== null && keepIt };
+    current.current = value;
+    setPicked(value);
+    store.pin(pinKey, value.keep ? next : null);
   };
 
-  const pick = (next: Workflow | null) => {
-    setWorkflow(next);
-    if (!next) setKeep(false);
+  /** What a message took, once the engine has it: the text and attachments it carried, and its
+   * workflow unless kept attached; anything the person changed meanwhile stays. */
+  const sent = (draft: string, carried: Attachment[], workflowSent: Workflow | null) => {
+    setText((t) => (t === draft ? "" : t));
+    setAttachments((a) => (a === carried ? [] : a));
+    if (!current.current.keep && current.current.workflow === workflowSent) select(null, false);
+  };
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || sending.current) return;
+    const message: Message = { text: body, attachments, workflow: workflow?.id ?? null };
+    const draft = { text, attachments, workflow };
+    sending.current = true;
+    setMention(null);
+    try {
+      if (thread) {
+        const ok = await store.attempt(async () => {
+          await store.engine.send(thread, message, settings);
+          return true;
+        });
+        if (ok) sent(draft.text, draft.attachments, draft.workflow);
+      } else {
+        const id = await store.attempt(() => store.engine.startThread(project, message, settings));
+        if (!id) return;
+        // A kept workflow moves to the thread its message started.
+        if (current.current.keep) store.pin(id, current.current.workflow);
+        store.pin(pinKey, null);
+        sent(draft.text, draft.attachments, draft.workflow);
+        await store.selectThread(id);
+      }
+    } finally {
+      sending.current = false;
+    }
   };
 
   const stop = () => thread && store.attempt(() => store.engine.interrupt(thread));
@@ -120,10 +144,10 @@ function ThreadComposer({ kept }: { kept: RefObject<Kept | null> }) {
             {workflow && (
               <span className="chip chip--workflow">
                 <Icon name="book" /> {workflow.name}
-                <button className="chip-pin" aria-label="Keep attached" title="Keep attached" aria-pressed={keep} onClick={() => setKeep((k) => !k)}>
+                <button className="chip-pin" aria-label="Keep attached" title="Keep attached" aria-pressed={keep} onClick={() => select(workflow, !keep)}>
                   <Icon name="pin" />
                 </button>
-                <button className="chip-x" aria-label={`Remove ${workflow.name}`} onClick={() => pick(null)}>
+                <button className="chip-x" aria-label={`Remove ${workflow.name}`} onClick={() => select(null, false)}>
                   <Icon name="x" />
                 </button>
               </span>
@@ -160,7 +184,7 @@ function ThreadComposer({ kept }: { kept: RefObject<Kept | null> }) {
           <button className="quiet" aria-label="Reference a file" title="Reference a file" onClick={() => onChange(`${text}@`, text.length + 1)}>
             <Icon name="at" />
           </button>
-          <WorkflowPicker workflows={workflows} picked={workflow} onPick={pick} />
+          <WorkflowPicker workflows={workflows} picked={workflow} onPick={(w) => select(w, keep)} />
           <Controls models={models} settings={settings} onChange={choose} />
           <span className="composer-spacer" />
           {running && text.trim() === "" ? (
