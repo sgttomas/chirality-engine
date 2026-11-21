@@ -38,6 +38,12 @@ async fn project_count<R: Runtime>(app: AppHandle<R>) -> Result<usize, EngineErr
     Ok(engine(&app).await?.snapshot().projects.len())
 }
 
+/// An application's own command with the name of an engine method: the engine's are `engine:<method>`.
+#[tauri::command(rename = "snapshot")]
+fn own_snapshot() -> &'static str {
+    "the application's snapshot"
+}
+
 fn tools(namespace: &str) -> AppTools {
     AppTools {
         namespace: ToolNamespace { name: namespace.into(), description: "The estimate.".into() },
@@ -58,12 +64,12 @@ fn config(codex: PathBuf, root: &std::path::Path, tools: Option<AppTools>) -> En
 }
 
 fn app(config: EngineConfig) -> App<MockRuntime> {
-    mock_builder().plugin(plugin(move |_| Ok(config))).invoke_handler(commands![project_count]).build(mock_context(noop_assets())).unwrap()
+    mock_builder().plugin(plugin(move |_| Ok(config))).invoke_handler(commands(tauri::generate_handler![project_count, own_snapshot])).build(mock_context(noop_assets())).unwrap()
 }
 
 /// Codex processes this test process has started and not yet reaped.
 fn codex_children() -> String {
-    let out = std::process::Command::new("pgrep").args(["-P", &std::process::id().to_string()]).output().unwrap();
+    let out = std::process::Command::new("pgrep").args(["-f", "-P", &std::process::id().to_string(), "app-server"]).output().unwrap();
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -74,7 +80,7 @@ fn the_applications_tools_are_given_to_the_engine() {
     let root = std::env::temp_dir().join(format!("chirality-tauri-tools-{}", std::process::id()));
     let app = app(config(root.join("no-codex"), &root, Some(tools("web"))));
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
-    let refused = call(&webview, "snapshot", json!({})).unwrap_err();
+    let refused = call(&webview, "engine:snapshot", json!({})).unwrap_err();
     assert!(refused.to_string().contains("tool namespace \\\"web\\\""), "{refused}");
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -98,38 +104,43 @@ fn the_interface_reaches_the_real_engine_without_a_window() {
     }
 
     let app = app(config(codex.clone(), &root, Some(tools("estimate"))));
-    let events = Arc::new(Mutex::new(Vec::<Numbered>::new()));
+    let events = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = events.clone();
     app.listen_any(EVENT, move |e| seen.lock().unwrap().push(serde_json::from_str(e.payload()).unwrap()));
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
 
-    let snapshot: Snapshot = serde_json::from_value(call(&webview, "snapshot", json!({})).unwrap()).unwrap();
+    let snapshot: Snapshot = serde_json::from_value(call(&webview, "engine:snapshot", json!({})).unwrap()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut ready = matches!(snapshot.codex, CodexStatus::Ready { .. });
     while !ready && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(100));
-        let snapshot: Snapshot = serde_json::from_value(call(&webview, "snapshot", json!({})).unwrap()).unwrap();
+        let snapshot: Snapshot = serde_json::from_value(call(&webview, "engine:snapshot", json!({})).unwrap()).unwrap();
         ready = matches!(snapshot.codex, CodexStatus::Ready { .. });
     }
     assert!(ready, "Codex did not become ready with the application's tools");
 
-    let project: Project = serde_json::from_value(call(&webview, "add_project", json!({ "path": root.join("project") })).unwrap()).unwrap();
-    let found = call(&webview, "find_files", json!({ "project": project.id, "query": "brief" })).unwrap();
+    let project: Project = serde_json::from_value(call(&webview, "engine:add_project", json!({ "path": root.join("project") })).unwrap()).unwrap();
+    let found = call(&webview, "engine:find_files", json!({ "project": project.id, "query": "brief" })).unwrap();
     assert!(found.to_string().contains("notes/brief.md"), "{found}");
-    let text = call(&webview, "read_file", json!({ "project": project.id, "path": "notes/brief.md" })).unwrap();
+    let text = call(&webview, "engine:read_file", json!({ "project": project.id, "path": "notes/brief.md" })).unwrap();
     assert_eq!(text, json!("# Brief\n"));
-    assert!(call(&webview, "read_thread", json!({ "thread": "no-such-thread" })).is_err());
+    assert!(call(&webview, "engine:read_thread", json!({ "thread": "no-such-thread" })).is_err());
     assert_eq!(call(&webview, "project_count", json!({})).unwrap(), json!(1), "the application's own command");
+    assert_eq!(call(&webview, "snapshot", json!({})).unwrap(), json!("the application's snapshot"), "named like an engine method");
     assert!(call(&webview, "not_a_command", json!({})).is_err());
 
-    std::thread::sleep(Duration::from_millis(300));
+    // Past the next mark.
+    std::thread::sleep(Duration::from_millis(1500));
     {
-        let events = events.lock().unwrap();
-        let projects_event = events.iter().any(|n| matches!(&n.event, Event::Projects { projects } if projects.iter().any(|p| p.id == project.id)));
+        let sent = events.lock().unwrap();
+        let numbered: Vec<Numbered> = sent.iter().filter(|v| v.get("event").is_some()).map(|v| serde_json::from_value(v.clone()).unwrap()).collect();
+        let projects_event = numbered.iter().any(|n| matches!(&n.event, Event::Projects { projects } if projects.iter().any(|p| p.id == project.id)));
         assert!(projects_event, "the projects event was not forwarded");
-        assert!(events.windows(2).all(|w| w[1].seq == w[0].seq + 1), "forwarded in order, numbered without gaps");
-        let snapshot: Snapshot = serde_json::from_value(call(&webview, "snapshot", json!({})).unwrap()).unwrap();
-        assert_eq!(snapshot.seq, events.last().unwrap().seq, "the snapshot holds the last event forwarded");
+        assert!(numbered.windows(2).all(|w| w[1].seq == w[0].seq + 1), "forwarded in order, numbered without gaps");
+        let last = numbered.last().unwrap().seq;
+        let snapshot: Snapshot = serde_json::from_value(call(&webview, "engine:snapshot", json!({})).unwrap()).unwrap();
+        assert_eq!(snapshot.seq, last, "the snapshot holds the last event forwarded");
+        assert_eq!(sent.last().unwrap(), &json!({ "last": last }), "a mark follows the events, with the last number sent");
     }
 
     tauri::async_runtime::block_on(shutdown(app.handle()));

@@ -61,13 +61,13 @@ give it another home.
 - **Models:** the models Codex lists, each with its reasoning levels.
 - **Projects:** folders the person adds; each thread belongs to one.
 - **Threads:** list (from Codex, which keeps them), start, resume, fork, archive, rename; title as Codex gives it.
-- **Turns:** send a message with text, attachments (images, files) and file references; steer or interrupt a running turn; model, reasoning level and access level per turn. A thread takes one send or Stop at a time: a send while a turn runs (or starts) steers it, and Stop during a start stops that turn.
+- **Turns:** send a message with text, attachments (images, files) and file references; steer or interrupt a running turn; model, reasoning level and access level per turn. A thread takes one send or Stop at a time, each carried through by the engine even if its caller gives up: a send while a turn runs (or starts) steers it, Stop during a start stops that turn, and after a Stop the thread waits for Codex to end the turn (a while at most) so the next send starts a new one.
 - **Events:** one typed stream of everything a thread does: agent text as it streams, reasoning summaries, plans, commands with output, file changes with diffs, tool calls, turn start and end, errors. Each event is numbered; a gap means some were missed.
 - **The person's part:** approvals (commands, file changes, permissions) and questions, each answered through the API; nothing is answered on the person's behalf.
 - **Application tools:** the application gives the agent its own tools (in its own namespace: name, description, JSON Schema of the arguments) and its handler answers every call; Codex keeps a thread's tools with it through resume and fork.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
-- **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds.
+- **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds; a read holds Codex's history with the last turn as its events told it (text still streaming, an item a Stop cut short).
 
 The API is Rust types. Bindings for an application's interface are generated
 from them (TypeScript, in the interface package); nothing crosses as
@@ -79,9 +79,11 @@ Versioned with the engine, so its types, the adapter and the interface move
 together. An application pins one engine revision for all of them.
 
 - **Tauri adapter** (`crates/tauri`, crate `chirality-engine-tauri`): one
-  command per engine method, every engine event forwarded to the webview, the
-  engine shut down (Codex ended and reaped) before the app exits. An application registers it on its
-  Tauri builder (`plugin(config)` and `commands![its own commands]`), gives its
+  command per engine method (named `engine:<method>`), every engine event
+  forwarded to the webview with a mark after each burst, the engine made when
+  the app starts and shut down (Codex, started or starting, ended and reaped)
+  before the app exits. An application registers it on its
+  Tauri builder (`plugin(config)` and `commands(its own handler)`), gives its
   own tools in the engine's setup, and reaches the engine from its own
   commands. Tested headless against the pinned Codex.
 - **Interface package** (`packages/ui`, package `@chirality/engine-ui`): the

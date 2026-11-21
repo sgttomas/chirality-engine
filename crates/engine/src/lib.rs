@@ -40,17 +40,35 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Starts Codex and reads the account, models, projects and threads.
+    /// Starts Codex and reads the account, models, projects and threads:
+    /// [`Engine::new`], then [`Engine::connect`].
     pub async fn start(config: EngineConfig) -> Result<Engine> {
+        let engine = Engine::new(config)?;
+        engine.connect().await?;
+        Ok(engine)
+    }
+
+    /// The engine with its projects, before Codex has started: it can be
+    /// shut down from here on, which ends a Codex still starting.
+    pub fn new(config: EngineConfig) -> Result<Engine> {
         if let Some(tools) = &config.tools {
             tools::validate(tools)?;
         }
         let launch = Launch { bin: config.codex_bin.clone(), home: config.codex_home.clone(), settings: transport::settings(&config), env: None, cwd: None };
-        Engine::start_with(config, Arc::new(ProcessConnector { launch }), None).await
+        Ok(Engine { inner: Inner::new(config, Arc::new(ProcessConnector { launch }), None)? })
     }
 
+    /// Starts Codex and reads the account, models and threads, once: every
+    /// caller waits for the same start, and has its result.
+    pub async fn connect(&self) -> Result<()> {
+        self.inner.connect().await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn start_with(config: EngineConfig, connector: Arc<dyn transport::Connector>, tap: Option<rpc::Tap>) -> Result<Engine> {
-        Ok(Engine { inner: Inner::start(config, connector, tap).await? })
+        let engine = Engine { inner: Inner::new(config, connector, tap)? };
+        engine.connect().await?;
+        Ok(engine)
     }
 
     #[cfg(test)]
@@ -58,7 +76,8 @@ impl Engine {
         &self.inner
     }
 
-    /// Ends Codex and every turn in it.
+    /// Ends Codex (one still starting too) and every turn in it, once; every
+    /// caller returns when that is done.
     pub async fn shutdown(&self) {
         self.inner.shutdown().await
     }

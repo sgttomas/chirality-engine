@@ -313,7 +313,7 @@ async fn shutdown_waits_for_the_calls_of_a_codex_that_died() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shutdowns_overlapping_a_restart_wait_for_it_and_end_its_codex() {
+async fn shutdowns_overlapping_a_restart_end_its_codex_and_both_return() {
     let probe = Arc::new(Probe::default());
     let (engine, mut wires, wire, codex, _) = start_with(&probe).await;
     codex.hold("initialize");
@@ -321,7 +321,8 @@ async fn shutdowns_overlapping_a_restart_wait_for_it_and_end_its_codex() {
     let mut next = tokio::time::timeout(Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
     let init = next.next().await;
     assert_eq!(init["method"], "initialize");
-    // Two callers shut down while the new Codex is still starting.
+    // Two callers shut down while the new Codex is still starting: it is
+    // ended without waiting for it to answer, and both return.
     let first = tokio::spawn({
         let engine = engine.clone();
         async move { engine.shutdown().await }
@@ -330,12 +331,14 @@ async fn shutdowns_overlapping_a_restart_wait_for_it_and_end_its_codex() {
         let engine = engine.clone();
         async move { engine.shutdown().await }
     });
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(!first.is_finished() && !second.is_finished(), "shutdown returned while Codex was starting");
-    next.send(json!({"id": init["id"], "result": {"userAgent": "chirality/0.171.0 (fake)"}}));
-    first.await.unwrap();
-    second.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        first.await.unwrap();
+        second.await.unwrap();
+    })
+    .await
+    .expect("both shutdowns return");
     assert!(next.is_ended(), "the Codex started during shutdown was ended");
+    next.send(json!({"id": init["id"], "result": {"userAgent": "chirality/0.171.0 (fake)"}}));
     assert!(engine.inner().session().is_err(), "no session after shutdown");
 }
 

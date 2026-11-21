@@ -7,12 +7,13 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { createEngineClient, type EngineClient, type Host, type Transport } from "../engine/client";
+import { enginePrefix } from "../engine/commands";
 
 /** Whether the interface runs inside a Tauri app. */
 export const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export const tauriTransport: Transport = {
-  invoke: <T>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args),
+  invoke: <T>(command: string, args?: Record<string, unknown>) => invoke<T>(enginePrefix + command, args),
   listen: <T>(event: string, handler: (payload: T) => void) => listen<T>(event, (e) => handler(e.payload)),
 };
 

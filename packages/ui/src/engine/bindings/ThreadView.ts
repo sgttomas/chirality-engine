@@ -7,7 +7,8 @@ import type { Turn } from "./Turn";
  */
 export type ThreadView = { summary: ThreadSummary, turns: Array<Turn>, 
 /**
- * The [`Numbered::seq`] of the last event before the read began: the
- * view holds at least what that and the events before it did.
+ * The [`Numbered::seq`] of the last event the view holds: Codex's
+ * history with the thread's last turn as its events told it (text still
+ * streaming, an item a Stop cut short). Apply the events after it.
  */
 seq: number, };

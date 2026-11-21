@@ -10,8 +10,8 @@
 export type * from "./engine/types";
 
 // Reaching the engine
-export { createEngineClient, type EngineClient, type Host, type Transport } from "./engine/client";
-export { engineCommands, engineEvent, type EngineCommand } from "./engine/commands";
+export { createEngineClient, type EngineClient, type Host, type Mark, type Transport } from "./engine/client";
+export { engineCommands, engineEvent, enginePrefix, type EngineCommand } from "./engine/commands";
 
 // The engine half of the interface's state
 export { describe as describeError, EngineProvider, Store, StoreContext, useProjectRoot, useStore, useStoreHandle, type State } from "./state/store";
@@ -23,7 +23,7 @@ export { remember, remembered, resolveSettings } from "./state/settings";
 export { ErrorNotice, StandardLayout, useWindowTitle, type StandardLayoutProps } from "./ui/StandardLayout";
 export { PanelContext, usePanel, usePanelState, type Panel, type PanelControl, type PanelTab } from "./ui/panel";
 export { useNotifications, noticeFor } from "./ui/notify";
-export { applyTheme, storedTheme, type Theme } from "./ui/theme";
+export { applyTheme, storedTheme, useTheme, type Theme } from "./ui/theme";
 
 // Projects, threads and the account
 export { AccountMenu, Navigator, ThreadList } from "./ui/Navigator";

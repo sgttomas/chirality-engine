@@ -40,24 +40,35 @@ tauri-plugin-opener = "2"
 ```rust
 tauri::Builder::default()
     .plugin(chirality_engine_tauri::plugin(|app| Ok(engine_config(app)?)))
-    .invoke_handler(chirality_engine_tauri::commands![/* the app's own commands */])
+    .invoke_handler(chirality_engine_tauri::commands(tauri::generate_handler![/* the app's own */]))
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_opener::init())
 ```
 
-`commands!` registers the engine's commands beside the app's own, and refuses
-(when the app is built) an app command named like one of the engine's. The
-engine's commands are the app's own, so they need no permission; the
-plugins' do, in `src-tauri/capabilities/default.json`:
+`commands` answers the engine's commands, each named `engine:<method>`, and
+gives every other command to the app's own handler (`|_| false` for none), so
+the app's names never meet the engine's. The engine's commands are the app's
+own, so they need no permission; the plugins' do, in
+`src-tauri/capabilities/default.json`, no more than the interface uses:
 
 ```json
 {
   "identifier": "default",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "notification:default", "opener:allow-open-url", "opener:allow-default-urls"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://*" }, { "url": "http://*" }] }
+  ]
 }
 ```
+
+The engine starts with the app, and the window can show before Codex has
+started; quitting ends Codex, started or still starting.
 
 The interface ships as TypeScript and CSS for the app's Vite build; it brings
 `@tauri-apps/api` and the three plugins' packages itself, and needs `react` and
@@ -76,9 +87,12 @@ createRoot(root).render(<EngineProvider store={store}><StandardLayout brand="My 
 void store.start();
 ```
 
-The parts' styles apply only inside the `EngineProvider`. Every engine event
-reaches the interface numbered; on a gap the store reads the snapshot and the
-thread in view again. `@chirality/engine-ui/fake` runs an interface in a
+The parts' styles and the theme (`applyTheme`) apply only on and inside the
+`EngineProvider`'s root. Every engine event reaches the interface numbered,
+and after each burst a mark with the last number sent; on a gap, or a mark
+past what arrived, the store reads the snapshot and the thread in view again.
+A thread read holds the text still streaming, so the events after it apply
+on top. `@chirality/engine-ui/fake` runs an interface in a
 browser on a scripted engine; `@chirality/engine-ui/testing` (with
 `@testing-library/react`) has the data the engine produced from recorded Codex
 sessions and a transport that replays it.

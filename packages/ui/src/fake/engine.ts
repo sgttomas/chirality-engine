@@ -113,6 +113,7 @@ export class FakeEngine implements EngineClient {
   async snapshot() {
     return structuredClone({ ...this.snap, seq: this.seq });
   }
+  /** The fake loses no events, so it sends no marks. */
   async subscribe(onEvent: (event: Numbered) => void) {
     this.listeners.add(onEvent);
     return () => void this.listeners.delete(onEvent);

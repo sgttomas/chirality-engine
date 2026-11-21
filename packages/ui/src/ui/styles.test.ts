@@ -1,5 +1,5 @@
-// The parts' styles reach only the parts: every rule is inside the engine's
-// root or names one of the parts' classes; the page's own rules are page.css.
+// The parts' styles reach only the parts: every rule, theme rules too, is on
+// the engine's root or inside it; the page's own rules are page.css.
 import { describe, expect, it } from "vitest";
 
 const sheets = import.meta.glob<string>("./styles/*.css", { eager: true, query: "?raw", import: "default" });
@@ -26,7 +26,7 @@ function selectors(css: string): string[] {
   return found;
 }
 
-const scoped = (selector: string) => /^(\.|:root\b|:where\(\.chirality\)|[a-z]+\.[a-z])/.test(selector);
+const scoped = (selector: string) => /^(:where\(\.chirality\) |\.chirality(\[data-theme="[a-z]+"\])?$)/.test(selector);
 
 describe("the parts' styles", () => {
   it("stay inside the engine's parts", () => {
@@ -35,5 +35,6 @@ describe("the parts' styles", () => {
       .flatMap(([path, css]) => selectors(css).filter((s) => !scoped(s)).map((s) => `${path}: ${s}`));
     expect(loose).toEqual([]);
     expect(Object.keys(sheets)).toContain("./styles/page.css");
+    expect(sheets["./styles/page.css"]).not.toMatch(/var\(--/);
   });
 });

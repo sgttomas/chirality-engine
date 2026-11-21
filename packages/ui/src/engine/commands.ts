@@ -1,4 +1,5 @@
-// The adapter's command names (`chirality_engine_tauri::COMMANDS`; a Rust test checks they match).
+// The adapter's command names (`chirality_engine_tauri::COMMANDS`; a Rust test checks they match),
+// each called as `engine:<name>` (`chirality_engine_tauri::PREFIX`).
 export const engineCommands = [
   "snapshot",
   "sign_in",
@@ -23,5 +24,8 @@ export const engineCommands = [
 
 export type EngineCommand = (typeof engineCommands)[number];
 
-/** The event every engine event arrives as (`chirality_engine_tauri::EVENT`). */
+/** What the adapter's command names begin with. */
+export const enginePrefix = "engine:";
+
+/** The event every engine event arrives as (`chirality_engine_tauri::EVENT`), and the marks after them. */
 export const engineEvent = "engine";

@@ -4,6 +4,7 @@ import { createContext, createElement, useContext, useSyncExternalStore, type Re
 
 import type { EngineClient, Host } from "../engine/client";
 import type { Event, Numbered, ProjectId, ThreadId, ThreadView, Workflow } from "../engine/types";
+import { useTheme } from "../ui/theme";
 import { applyEvent, applyToView, threadOf, type Model } from "./reduce";
 
 export interface State {
@@ -17,12 +18,20 @@ export interface State {
 export class Store {
   private state: State = { model: null, project: null, thread: null, workflows: {}, error: null };
   private listeners = new Set<() => void>();
-  private stop: (() => void) | null = null;
   private eventListeners = new Set<(event: Event, before: State) => void>();
+  private stop: (() => void) | null = null;
+  /** Counts disposals: what an earlier start, read or listener began is dropped. */
+  private generation = 0;
+  private starting: Promise<void> | null = null;
   /** While the snapshot is read: the events that arrive meanwhile. */
   private held: Numbered[] | null = [];
+  /** The highest number the host has marked as sent. */
+  private marked = 0;
   /** While a thread is read: the events that arrive meanwhile, for each read. */
   private reads = new Set<Numbered[]>();
+  /** Each thread's latest read: an earlier one that answers later, or one begun before a disposal, is dropped. */
+  private latestRead = new Map<ThreadId, number>();
+  private readsBegun = 0;
 
   constructor(
     readonly engine: EngineClient,
@@ -40,14 +49,32 @@ export class Store {
     return () => void this.eventListeners.delete(listener);
   }
 
-  /** Follows the engine: listens first, then reads the snapshot and applies the events after it. */
-  async start() {
-    this.stop = await this.engine.subscribe((n) => this.receive(n));
-    await this.resync();
-    if (this.state.project) void this.loadWorkflows(this.state.project);
+  /** Follows the engine: listens first, then reads the snapshot and applies the events after it.
+   * Once: a start while one is under way is that one. */
+  start(): Promise<void> {
+    return (this.starting ??= this.follow(this.generation));
   }
+  /** Stops following; what is under way is dropped. A later `start` follows again. */
   dispose() {
+    this.generation++;
+    this.starting = null;
     this.stop?.();
+    this.stop = null;
+    this.held = [];
+    this.reads.clear();
+    this.latestRead.clear();
+  }
+
+  private async follow(generation: number) {
+    const current = () => generation === this.generation;
+    const stop = await this.engine.subscribe(
+      (n) => current() && this.receive(n),
+      (m) => current() && this.mark(m.last),
+    );
+    if (!current()) return stop();
+    this.stop = stop;
+    await this.resync(generation);
+    if (current() && this.state.project) void this.loadWorkflows(this.state.project);
   }
 
   private receive(n: Numbered) {
@@ -55,31 +82,50 @@ export class Store {
     if (this.held) return void this.held.push(n);
     const seq = this.state.model!.snapshot.seq;
     if (n.seq <= seq) return;
-    if (n.seq !== seq + 1) return void this.resync();
+    if (n.seq !== seq + 1) return void this.recover();
     this.apply(n);
   }
 
-  /** Reads the snapshot (and the thread in view) again; at the start, or once events were missed. */
-  private async resync() {
+  /** The host sent events through `last`: any not received are read again. */
+  private mark(last: number) {
+    this.marked = Math.max(this.marked, last);
+    if (!this.held && last > this.state.model!.snapshot.seq) this.recover();
+  }
+
+  private recover() {
+    void this.resync(this.generation).catch((e) => {
+      this.held = null;
+      this.set({ error: describe(e) });
+    });
+  }
+
+  /** Reads the snapshot (and the thread in view) again; at the start, or once events were missed.
+   * The events that arrived meanwhile are applied after it, and told to `onEvent`. */
+  private async resync(generation: number) {
     this.held ??= [];
     let model: Model;
+    let after: Numbered[];
     for (;;) {
       const snapshot = await this.engine.snapshot();
-      model = { snapshot, views: {} };
-      const after = this.held.filter((n) => n.seq > snapshot.seq);
-      if (after.some((n, i) => n.seq !== snapshot.seq + i + 1)) {
+      if (generation !== this.generation) return;
+      after = this.held.filter((n) => n.seq > snapshot.seq);
+      const gap = after.some((n, i) => n.seq !== snapshot.seq + i + 1);
+      if (gap || this.marked > snapshot.seq + after.length) {
         this.held = [];
         continue;
       }
+      model = { snapshot, views: {} };
       for (const n of after) model = numbered(applyEvent(model, n.event), n.seq);
       break;
     }
     this.held = null;
-    const { project, thread } = this.state;
+    const before = this.state;
+    const { project, thread } = before;
     const projects = model.snapshot.projects;
     const keptProject = projects.some((p) => p.id === project) ? project : (projects[0]?.id ?? null);
     const keptThread = model.snapshot.threads.some((t) => t.id === thread && t.project === keptProject) ? thread : null;
     this.set({ model, project: keptProject, thread: keptThread });
+    for (const { event } of after) for (const listener of this.eventListeners) listener(event, before);
     if (keptThread) await this.reload(keptThread);
   }
 
@@ -131,24 +177,21 @@ export class Store {
     if (!this.state.model?.views[thread]) await this.reload(thread);
     if (summary?.unread) this.markRead(thread);
   }
-  /** Reads the thread again, with the events after the read applied. */
+  /** Reads the thread again, with the events after the read applied. The latest read of a thread wins. */
   async reload(thread: ThreadId) {
+    const ticket = ++this.readsBegun;
+    this.latestRead.set(thread, ticket);
     const during: Numbered[] = [];
     this.reads.add(during);
     const read = await this.attempt(() => this.engine.readThread(thread)).finally(() => this.reads.delete(during));
-    if (!read || !this.state.model) return;
+    if (!read || !this.state.model || this.latestRead.get(thread) !== ticket) return;
     const after = during.filter((n) => n.seq > read.seq);
     // A gap: the snapshot is read again, and this thread with it if it is in view.
     if (after.some((n, i) => n.seq !== read.seq + i + 1)) return;
     if (!this.state.model.snapshot.threads.some((t) => t.id === thread)) return;
-    const had = new Set(read.turns.flatMap((t) => t.items.map((i) => i.id)));
+    // The read holds every event through its number; the rest apply on top.
     let view: ThreadView = read;
-    for (const { event } of after) {
-      if (threadOf(event) !== thread) continue;
-      // Text the read already holds; the item's last event brings all of it in any case.
-      if (event.type === "itemDelta" && had.has(event.item)) continue;
-      view = applyToView(view, event);
-    }
+    for (const { event } of after) if (threadOf(event) === thread) view = applyToView(view, event);
     this.set({ model: { ...this.state.model, views: { ...this.state.model.views, [thread]: view } } });
   }
   async loadWorkflows(project: ProjectId) {
@@ -177,10 +220,11 @@ export function describe(error: unknown): string {
 export const StoreContext = createContext<Store | null>(null);
 
 /** The root of the engine's parts: gives them the store, and shows them once it has followed the
- * engine to its first snapshot (`fallback` until then). Their styles apply inside it. */
+ * engine to its first snapshot (`fallback` until then). Their styles and theme apply inside it. */
 export function EngineProvider({ store, fallback = null, children }: { store: Store; fallback?: ReactNode; children?: ReactNode }) {
   const ready = useSyncExternalStore(store.subscribe, () => store.get().model !== null);
-  return createElement(StoreContext.Provider, { value: store }, createElement("div", { className: "chirality" }, ready ? children : fallback));
+  const theme = useTheme();
+  return createElement(StoreContext.Provider, { value: store }, createElement("div", { className: "chirality", "data-theme": theme }, ready ? children : fallback));
 }
 
 export function useStoreHandle(): Store {

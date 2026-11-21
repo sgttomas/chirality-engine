@@ -3,7 +3,8 @@ import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { mount, settle } from "../testing/render";
+import { fakeEngine, mount, settle } from "../testing/render";
+import { applyTheme } from "./theme";
 import { engineData, ReplayTransport } from "../testing/replay";
 import { Composer } from "./composer/Composer";
 import { Conversation, Turns } from "./Conversation";
@@ -16,6 +17,15 @@ const signedIn = (name: string) => new ReplayTransport(engineData(name), (s) => 
 beforeEach(() => localStorage.clear());
 
 describe("parts in an application's own layout", () => {
+  it("show the theme on their own root, not the page's", async () => {
+    const { container } = await mount(fakeEngine(), <Conversation />);
+    act(() => applyTheme("dark"));
+    expect(container.querySelector(".chirality")).toHaveAttribute("data-theme", "dark");
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+    act(() => applyTheme("light"));
+    expect(container.querySelector(".chirality")).toHaveAttribute("data-theme", "light");
+  });
+
   it("runs a conversation with no side panel: the change shows, the approval is answered", async () => {
     const engine = signedIn("file_change");
     const { store } = await mount(

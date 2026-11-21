@@ -351,6 +351,7 @@ name = "chirality-engine-tauri"
 version = "0.1.0"
 dependencies = [
  "chirality-engine",
+ "serde",
  "serde_json",
  "tauri",
  "tokio",

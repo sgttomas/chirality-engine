@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::json;
 
@@ -12,9 +13,18 @@ use crate::mapping;
 use crate::protocol as p;
 use crate::session::Inner;
 
+/// How long a Stop holds the thread for Codex to end the turn it stopped
+/// (Codex answers `turn/interrupt` before it ends the turn).
+#[cfg(not(test))]
+const STOP_SETTLE: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const STOP_SETTLE: Duration = Duration::from_millis(400);
+
 /// One admission at a time per thread: starting a turn, steering it and
 /// interrupting it each wait for the one before, so two sends cannot both see
 /// an idle thread, and a Stop sent while a turn is starting stops that turn.
+/// Each runs as the engine's own task, so a caller that gives up does not end
+/// it halfway: the thread stays admitted until Codex has answered.
 #[derive(Default)]
 pub(crate) struct Admission(Mutex<HashMap<ThreadId, Arc<tokio::sync::Mutex<()>>>>);
 
@@ -25,9 +35,37 @@ impl Admission {
     }
 }
 
+/// Runs `op` as the engine's own task; the caller only waits for it.
+async fn owned<F>(op: F) -> Result<()>
+where
+    F: Future<Output = Result<()>> + Send + 'static,
+{
+    tokio::spawn(op).await.unwrap_or_else(|e| Err(EngineError::Invalid { message: format!("the engine's task ended: {e}") }))
+}
+
 impl Inner {
-    pub(crate) async fn send(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
-        let _admitted = self.admission.admit(thread).await;
+    /// Sends a message: starts a turn, or steers the one running.
+    pub(crate) async fn send(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
+        let (inner, thread) = (self.clone(), thread.clone());
+        owned(async move {
+            let _admitted = inner.admission.admit(&thread).await;
+            inner.send_admitted(&thread, message, settings).await
+        })
+        .await
+    }
+
+    /// Stops the running turn, and holds the thread until Codex has ended it;
+    /// a turn still starting is stopped once Codex has started it.
+    pub(crate) async fn interrupt(self: &Arc<Self>, thread: &ThreadId) -> Result<()> {
+        let (inner, thread) = (self.clone(), thread.clone());
+        owned(async move {
+            let _admitted = inner.admission.admit(&thread).await;
+            inner.interrupt_admitted(&thread).await
+        })
+        .await
+    }
+
+    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
         let project = self.project(&entry.project)?;
@@ -78,16 +116,36 @@ impl Inner {
         Ok(())
     }
 
-    /// Stops the running turn; a turn still starting is stopped once Codex has started it.
-    pub(crate) async fn interrupt(&self, thread: &ThreadId) -> Result<()> {
-        let _admitted = self.admission.admit(thread).await;
+    async fn interrupt_admitted(&self, thread: &ThreadId) -> Result<()> {
         let session = self.session()?;
         let Some(turn) = self.known_thread(thread)?.active_turn else { return Ok(()) };
+        let mut events = self.store.subscribe();
         session.call_value("turn/interrupt", json!({ "threadId": thread.0, "turnId": turn.0 })).await?;
+        let running = || self.store.thread(thread).is_some_and(|e| e.active_turn.as_ref() == Some(&turn));
+        let ended = tokio::time::timeout(STOP_SETTLE, async {
+            while running() {
+                if let Err(tokio::sync::broadcast::error::RecvError::Closed) = events.recv().await {
+                    return;
+                }
+            }
+        })
+        .await;
+        if ended.is_err() {
+            // Codex has not said the turn ended: it is taken as stopped, and the next send starts a turn.
+            let stopped = self.store.update_thread(thread, |e| {
+                (e.active_turn.as_ref() == Some(&turn)).then(|| {
+                    e.active_turn = None;
+                    e.last_ended = Some(turn.clone());
+                })
+            });
+            if let Some(Some(())) = stopped {
+                self.store.emit(Event::TurnEnded { thread: thread.clone(), turn, state: TurnState::Interrupted });
+            }
+        }
         Ok(())
     }
 
-    pub(crate) async fn answer(&self, request: &RequestId, answer: Answer) -> Result<()> {
+    pub(crate) async fn answer(self: &Arc<Self>, request: &RequestId, answer: Answer) -> Result<()> {
         let pending = self.store.pending(request).ok_or_else(|| EngineError::NotFound { what: format!("request {}", request.0) })?;
         let session = self.session()?;
         if session.generation != pending.generation {

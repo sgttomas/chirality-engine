@@ -25,6 +25,8 @@ pub enum Reply {
     Items(Vec<Value>),
     /// Starts a response and never finishes it, until Codex hangs up.
     Hang,
+    /// Starts a message, streams this much of its text, and hangs as [`Reply::Hang`].
+    Partial(String),
 }
 
 pub type Script = Arc<dyn Fn(&Request) -> Reply + Send + Sync>;
@@ -94,8 +96,14 @@ async fn serve(mut stream: TcpStream, scripts: Arc<Mutex<HashMap<String, Script>
     }
     let response_id = format!("resp_{}", key.unwrap_or_default());
     let _ = stream.write_all(&sse("response.created", json!({"type": "response.created", "response": {"id": response_id}}))).await;
+    if let Reply::Partial(text) = &reply {
+        let item = message("msg_partial", "");
+        let _ = stream.write_all(&sse("response.output_item.added", json!({"type": "response.output_item.added", "output_index": 0, "item": item}))).await;
+        let delta = json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "item_id": "msg_partial", "delta": text});
+        let _ = stream.write_all(&sse("response.output_text.delta", delta)).await;
+    }
     match reply {
-        Reply::Hang => {
+        Reply::Hang | Reply::Partial(_) => {
             let _ = stream.flush().await;
             let mut buffer = [0u8; 64];
             let _ = tokio::time::timeout(Duration::from_secs(120), stream.read(&mut buffer)).await;

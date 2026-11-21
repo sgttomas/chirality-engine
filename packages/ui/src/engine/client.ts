@@ -19,8 +19,9 @@ import type {
 /** One method per engine method, with the engine's own types. */
 export interface EngineClient {
   snapshot(): Promise<Snapshot>;
-  /** Every engine event from now on, numbered, in order. Resolves once listening, with a function that stops it. */
-  subscribe(onEvent: (event: Numbered) => void): Promise<() => void>;
+  /** Every engine event from now on, numbered, in order, and the host's marks after them.
+   * Resolves once listening, with a function that stops it. */
+  subscribe(onEvent: (event: Numbered) => void, onMark?: (mark: Mark) => void): Promise<() => void>;
 
   signIn(): Promise<void>;
   cancelSignIn(): Promise<void>;
@@ -47,6 +48,12 @@ export interface EngineClient {
   readFile(project: ProjectId, path: string): Promise<string>;
 }
 
+/** The number of the last event the host sent (`chirality_engine_tauri::Mark`): past the last
+ * received, some were missed. */
+export interface Mark {
+  last: number;
+}
+
 /** How the interface reaches its host: a command with its arguments, and the host's events. */
 export interface Transport {
   invoke<T>(command: EngineCommand, args?: Record<string, unknown>): Promise<T>;
@@ -66,7 +73,7 @@ export interface Host {
 export function createEngineClient(t: Transport): EngineClient {
   return {
     snapshot: () => t.invoke("snapshot"),
-    subscribe: (onEvent) => t.listen<Numbered>(engineEvent, onEvent),
+    subscribe: (onEvent, onMark) => t.listen<Numbered | Mark>(engineEvent, (p) => ("event" in p ? onEvent(p) : onMark?.(p))),
     signIn: () => t.invoke("sign_in"),
     cancelSignIn: () => t.invoke("cancel_sign_in"),
     signOut: () => t.invoke("sign_out"),

@@ -1,11 +1,12 @@
-//! The engine's Tauri adapter: one command per [`Engine`] method, every engine
-//! event forwarded to the webview as one numbered [`EVENT`], and the engine
-//! shut down before the app exits. An application registers it on its builder:
+//! The engine's Tauri adapter: one command per [`Engine`] method, named
+//! `engine:<method>`; every engine event forwarded to the webview, numbered,
+//! as one [`EVENT`]; and the engine shut down before the app exits. An
+//! application registers it on its builder:
 //!
 //! ```ignore
 //! tauri::Builder::default()
 //!     .plugin(chirality_engine_tauri::plugin(|app| Ok(my_config(app)?)))
-//!     .invoke_handler(chirality_engine_tauri::commands![my_command])
+//!     .invoke_handler(chirality_engine_tauri::commands(tauri::generate_handler![my_command]))
 //! ```
 //!
 //! The application's own tools go in the [`EngineConfig`] it gives
@@ -20,16 +21,21 @@ use std::time::Duration;
 
 pub use chirality_engine;
 use chirality_engine::{Engine, EngineConfig, EngineError, Result};
+use serde::Serialize;
 use tauri::ipc::Invoke;
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime};
-use tokio::sync::OnceCell;
+use tokio::sync::broadcast::error::RecvError;
 
-/// The webview event every engine [`chirality_engine::Numbered`] arrives as.
-/// A gap in the numbers means some were lost: the interface reads again.
+/// The webview event every engine [`chirality_engine::Numbered`] arrives as,
+/// and after each burst of them a [`Mark`]. A gap in the numbers, or a mark
+/// past the last number received, means some were lost: the interface reads again.
 pub const EVENT: &str = "engine";
 
-/// The engine's command names; an application's own commands use other names.
+/// What the engine's command names begin with; an application's own commands do not.
+pub const PREFIX: &str = "engine:";
+
+/// The engine's commands, each named [`PREFIX`] and its name here.
 pub const COMMANDS: [&str; 19] = [
     "snapshot",
     "sign_in",
@@ -52,15 +58,24 @@ pub const COMMANDS: [&str; 19] = [
     "find_files",
 ];
 
+/// Sent on [`EVENT`] at most [`MARK_EVERY`] after events: the number of the
+/// last event sent to the webview, so it finds a missed last event too.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Mark {
+    pub last: u64,
+}
+
+const MARK_EVERY: Duration = Duration::from_secs(1);
+
 /// At most this long between Quit and the app's exit, if shutting the engine down hangs.
 const EXIT_TIMEOUT: Duration = Duration::from_secs(15);
 
 type Exit = Arc<dyn Fn(i32) + Send + Sync>;
 
-/// The engine, started once (when the app starts); every command waits for the same start.
+/// The engine, made when the app starts (Codex starting with it); every
+/// command waits for that start, and shutdown ends it, finished or not.
 struct Started {
-    config: EngineConfig,
-    engine: OnceCell<Result<Engine>>,
+    engine: Result<Engine>,
     /// Shutting down for an exit has begun; then, it has finished.
     exiting: AtomicBool,
     exited: AtomicBool,
@@ -68,10 +83,12 @@ struct Started {
 }
 
 async fn started(s: &Started) -> Result<Engine> {
-    s.engine.get_or_init(|| Engine::start(s.config.clone())).await.clone()
+    let engine = s.engine.clone()?;
+    engine.connect().await?;
+    Ok(engine)
 }
 
-/// The app's engine, for its own commands.
+/// The app's engine, once Codex has started, for its own commands.
 pub async fn engine<R: Runtime>(app: &AppHandle<R>) -> Result<Engine> {
     match app.try_state::<Started>() {
         Some(s) => started(&s).await,
@@ -79,11 +96,11 @@ pub async fn engine<R: Runtime>(app: &AppHandle<R>) -> Result<Engine> {
     }
 }
 
-/// Shuts the engine down: waits for its start if it is still starting, then
-/// for Codex to end and be reaped. The plugin does this before the app exits.
+/// Shuts the engine down, ending Codex (one still starting too), and returns
+/// once Codex is reaped. The plugin does this before the app exits.
 pub async fn shutdown<R: Runtime>(app: &AppHandle<R>) {
     if let Some(s) = app.try_state::<Started>()
-        && let Ok(engine) = started(&s).await
+        && let Ok(engine) = &s.engine
     {
         engine.shutdown().await;
     }
@@ -109,8 +126,13 @@ where
         .setup(move |app, _api| {
             let config = config(app)?;
             let exit = exit(app.clone());
-            app.manage(Started { config, engine: OnceCell::new(), exiting: AtomicBool::new(false), exited: AtomicBool::new(false), exit });
-            tauri::async_runtime::spawn(forward(app.clone()));
+            let engine = Engine::new(config);
+            if let Ok(engine) = &engine {
+                tauri::async_runtime::spawn(forward(app.clone(), engine.clone()));
+                let engine = engine.clone();
+                tauri::async_runtime::spawn(async move { engine.connect().await });
+            }
+            app.manage(Started { engine, exiting: AtomicBool::new(false), exited: AtomicBool::new(false), exit });
             Ok(())
         })
         .on_event(|app, event| match event {
@@ -153,61 +175,42 @@ fn exit_requested<R: Runtime>(app: &AppHandle<R>, code: Option<i32>) -> bool {
 }
 
 /// Forwards every engine event, numbered, in order, for as long as the app
-/// runs. One the webview misses (a lagging receiver, an emit that failed)
-/// leaves a gap in the numbers, which the interface reads again for.
-async fn forward<R: Runtime>(app: AppHandle<R>) {
-    let Ok(engine) = engine(&app).await else { return };
+/// runs; after each burst, a [`Mark`] with the last number sent. One the
+/// webview misses (a lagging receiver, an emit that failed) shows as a gap,
+/// or as a mark past what it received, and it reads again.
+async fn forward<R: Runtime>(app: AppHandle<R>, engine: Engine) {
     let mut events = engine.subscribe();
+    let (mut last, mut marked) = (0, 0);
+    let mut every = tokio::time::interval(MARK_EVERY);
+    every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        match events.recv().await {
-            Ok(event) => {
-                let _ = app.emit(EVENT, event);
+        tokio::select! {
+            biased;
+            received = events.recv() => match received {
+                Ok(event) => {
+                    last = event.seq;
+                    let _ = app.emit(EVENT, event);
+                }
+                Err(RecvError::Lagged(missed)) => last += missed,
+                Err(RecvError::Closed) => return,
+            },
+            _ = every.tick() => {
+                if last != marked && app.emit(EVENT, Mark { last }).is_ok() {
+                    marked = last;
+                }
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
 }
 
-/// An application command named like one of the engine's.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Shadowed(pub String);
-
-impl std::fmt::Display for Shadowed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "the application's command `{}` has the name of an engine command; give it another name", self.0)
-    }
-}
-
-impl std::error::Error for Shadowed {}
-
-/// The engine's commands, then the application's own, named `app_commands`;
-/// refused when one of those has an engine command's name. [`commands!`]
-/// names them from the handler.
-pub fn checked<R, F>(app_commands: &[&str], app: F) -> std::result::Result<impl Fn(Invoke<R>) -> bool + Send + Sync + 'static, Shadowed>
+/// The invoke handler: the engine's commands (named [`PREFIX`]…), and every
+/// other command to the application's own `handler` (`|_| false` for none).
+pub fn commands<R, F>(handler: F) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static
 where
     R: Runtime,
     F: Fn(Invoke<R>) -> bool + Send + Sync + 'static,
 {
-    // `tauri::generate_handler!` names a command by its last path segment.
-    let names = app_commands.iter().map(|path| path.rsplit("::").next().unwrap_or(path).trim());
-    if let Some(name) = names.into_iter().find(|name| COMMANDS.contains(name)) {
-        return Err(Shadowed(name.to_string()));
-    }
-    Ok(move |invoke: Invoke<R>| if COMMANDS.contains(&invoke.message.command()) { commands::handle(invoke) } else { app(invoke) })
-}
-
-/// The invoke handler: the engine's commands and the application's own
-/// (`commands![]` for none). Panics, when the app is built, on an application
-/// command named like an engine command.
-#[macro_export]
-macro_rules! commands {
-    ($($command:path),* $(,)?) => {
-        match $crate::checked(&[$(stringify!($command)),*], ::tauri::generate_handler![$($command),*]) {
-            Ok(handler) => handler,
-            Err(shadowed) => panic!("{shadowed}"),
-        }
-    };
+    move |invoke: Invoke<R>| if invoke.message.command().starts_with(PREFIX) { commands::handle(invoke) } else { handler(invoke) }
 }
 
 #[cfg(test)]
