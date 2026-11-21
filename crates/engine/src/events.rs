@@ -4,7 +4,10 @@
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use std::sync::Arc;
+
 use crate::api::*;
+use crate::assignment::marker;
 use crate::mapping;
 use crate::protocol as p;
 use crate::session::Inner;
@@ -15,7 +18,7 @@ fn decode<T: DeserializeOwned>(params: Value) -> Option<T> {
 }
 
 impl Inner {
-    pub(crate) async fn on_notification(&self, method: &str, params: Value) {
+    pub(crate) async fn on_notification(self: &Arc<Self>, method: &str, params: Value) {
         match method {
             "thread/started" => {
                 if let Some(note) = decode::<p::ThreadResponse>(params) {
@@ -99,7 +102,11 @@ impl Inner {
                     e.updated_at = now();
                 });
                 if known.is_some() {
-                    self.store.emit(Event::TurnEnded { thread, turn, state });
+                    self.store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: state.clone() });
+                    // An assigned thread's turn its assigner started reports back.
+                    if self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some()) {
+                        tokio::spawn(self.clone().report(thread, turn, state));
+                    }
                 }
             }
             "item/started" | "item/completed" => {
@@ -174,7 +181,7 @@ impl Inner {
     /// Codex waits on the answer to every request it sends; each is shown to
     /// the person, given to the application's tool handler, or answered at once
     /// as one this engine does not take.
-    pub(crate) fn on_request(&self, generation: u64, id: Value, method: &str, params: Value) {
+    pub(crate) fn on_request(self: &Arc<Self>, generation: u64, id: Value, method: &str, params: Value) {
         let Ok(session) = self.session() else { return };
         if session.generation != generation {
             return;
@@ -235,6 +242,7 @@ impl Inner {
                 failed: None,
                 unread: false,
                 subagent: Some(subagent),
+                assigned_by: None,
             },
         });
     }
@@ -246,6 +254,12 @@ impl Inner {
         }
         let project = self.store.projects().into_iter().find(|p| mapping::same_folder(&thread.cwd, &p.path))?;
         let id = ThreadId(thread.id.clone());
+        // An assignment is read from the first message's mark; a fork has that message too, and is none.
+        let forked = thread.forked_from_id.is_some() || existing_forked(&self.store, &id);
+        let assigned_by = match marker::from_preview(&thread.preview).0 {
+            Some(mark) if parent.is_none() && !forked && mark.report.is_none() && mark.from != id => Some(mark.from),
+            _ => None,
+        };
         let active_turn = match &thread.status {
             p::ThreadStatus::Active => thread.turns.iter().rev().find(|t| t.status == p::TurnStatus::InProgress).map(|t| TurnId(t.id.clone())),
             _ => None,
@@ -271,9 +285,14 @@ impl Inner {
                 path: thread.agent_path().or_else(|| existing.and_then(|e| e.subagent.as_ref().map(|s| s.path.clone()))).unwrap_or_default(),
                 nickname: thread.agent_nickname.clone().or_else(|| existing.and_then(|e| e.subagent.as_ref().and_then(|s| s.nickname.clone()))),
             }),
+            assigned_by: assigned_by.clone().or_else(|| existing.and_then(|e| e.assigned_by.clone())).filter(|_| !forked && parent.is_none()),
         });
         Some(id)
     }
+}
+
+fn existing_forked(store: &crate::store::Store, id: &ThreadId) -> bool {
+    store.thread(id).is_some_and(|e| e.forked_from.is_some())
 }
 
 fn rpc_id_text(id: &Value) -> String {

@@ -30,6 +30,8 @@ pub(crate) struct ThreadEntry {
     pub failed: Option<String>,
     pub unread: bool,
     pub subagent: Option<Subagent>,
+    /// The thread that assigned this one, read from its first message.
+    pub assigned_by: Option<ThreadId>,
 }
 
 /// A request Codex waits on, with what is needed to answer it.
@@ -71,6 +73,11 @@ struct State {
 pub(crate) struct Store {
     state: Mutex<State>,
     events: broadcast::Sender<Numbered>,
+}
+
+/// No turn runs or is being started; a turn a Stop could not settle counts as ended.
+pub(crate) fn is_idle(entry: &ThreadEntry) -> bool {
+    entry.starting.is_none() && entry.active_turn.as_ref().is_none_or(|t| entry.unsettled.as_ref() == Some(t))
 }
 
 pub(crate) fn now() -> i64 {
@@ -330,6 +337,7 @@ fn summary(state: &State, id: &ThreadId) -> ThreadSummary {
         unread: entry.unread,
         forked_from: entry.forked_from.clone(),
         subagent: entry.subagent.clone(),
+        assigned_by: entry.assigned_by.clone(),
         updated_at: entry.updated_at,
         settings: entry.starting.clone().or_else(|| entry.settings.clone()),
     }

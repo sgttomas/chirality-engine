@@ -6,6 +6,7 @@
 pub mod api;
 
 mod account;
+mod assignment;
 mod calls;
 mod events;
 mod mapping;

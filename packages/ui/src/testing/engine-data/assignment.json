@@ -1,0 +1,1284 @@
+{
+  "after": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "project",
+        "path": "/work/run/project"
+      }
+    ],
+    "seq": 50,
+    "threads": [
+      {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[lead] Assign the piles.",
+        "unread": false,
+        "updatedAt": 0
+      },
+      {
+        "assignedBy": "00000000-0000-0000-0000-000000000002",
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "medium",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Piles",
+        "unread": false,
+        "updatedAt": 0
+      }
+    ]
+  },
+  "before": {
+    "account": {
+      "state": "signedOut"
+    },
+    "codex": {
+      "state": "ready",
+      "version": "0.171.0"
+    },
+    "models": [
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-sol",
+        "isDefault": true,
+        "name": "GPT-6.2-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.2-astra",
+        "isDefault": false,
+        "name": "GPT-6.2-Astra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-terra",
+        "isDefault": false,
+        "name": "GPT-6.1 Terra"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6.1-sol",
+        "isDefault": false,
+        "name": "GPT-6.1-Sol"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-astra",
+        "isDefault": false,
+        "name": "GPT-6-Astra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-6-sol",
+        "isDefault": false,
+        "name": "GPT-6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-6-luna",
+        "isDefault": false,
+        "name": "GPT-6-Luna"
+      },
+      {
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-sol",
+        "isDefault": false,
+        "name": "GPT-5.6-Sol"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "id": "gpt-5.6-terra",
+        "isDefault": false,
+        "name": "GPT-5.6-Terra"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "gpt-5.6-luna",
+        "isDefault": false,
+        "name": "GPT-5.6-Luna"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "id": "gpt-5.5",
+        "isDefault": false,
+        "name": "GPT-5.5"
+      }
+    ],
+    "pending": [],
+    "projects": [],
+    "seq": 0,
+    "threads": []
+  },
+  "events": [
+    {
+      "projects": [
+        {
+          "id": "project-1",
+          "name": "project",
+          "path": "/work/run/project"
+        }
+      ],
+      "type": "projects"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": null,
+          "kind": "userMessage",
+          "text": "STUB[lead] Assign the piles.",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000004"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": null,
+          "kind": "userMessage",
+          "text": "STUB[lead] Assign the piles.",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000004"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "running",
+          "text": "STUB[worker] Check the pile lengths.",
+          "thread": null,
+          "tool": "assign"
+        },
+        "done": false,
+        "id": "call_assign"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": "00000000-0000-0000-0000-000000000002",
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "medium",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": "Piles",
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "completed",
+          "text": "STUB[worker] Check the pile lengths.",
+          "thread": "00000000-0000-0000-0000-000000000005",
+          "tool": "assign"
+        },
+        "done": true,
+        "id": "call_assign"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_lead_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": "msg_lead_done",
+      "kind": "agentMessage",
+      "text": "Assigned.",
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Assigned."
+        },
+        "done": true,
+        "id": "msg_lead_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "turnEnded"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": null,
+            "thread": "00000000-0000-0000-0000-000000000002",
+            "title": null
+          },
+          "kind": "userMessage",
+          "text": "STUB[worker] Check the pile lengths.",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000008"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": null,
+            "thread": "00000000-0000-0000-0000-000000000002",
+            "title": null
+          },
+          "kind": "userMessage",
+          "text": "STUB[worker] Check the pile lengths.",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000008"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_worker"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "item": "msg_worker",
+      "kind": "agentMessage",
+      "text": "The piles are within tolerance. STUB[heard]",
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "The piles are within tolerance. STUB[heard]"
+        },
+        "done": true,
+        "id": "msg_worker"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": "00000000-0000-0000-0000-000000000002",
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "medium",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Piles",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000006",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": "completed",
+            "thread": "00000000-0000-0000-0000-000000000005",
+            "title": "Piles"
+          },
+          "kind": "userMessage",
+          "text": "The piles are within tolerance. STUB[heard]",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000011"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": "completed",
+            "thread": "00000000-0000-0000-0000-000000000005",
+            "title": "Piles"
+          },
+          "kind": "userMessage",
+          "text": "The piles are within tolerance. STUB[heard]",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000011"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "running",
+          "text": null,
+          "thread": "00000000-0000-0000-0000-000000000005",
+          "tool": "close"
+        },
+        "done": false,
+        "id": "call_close"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "completed",
+          "text": null,
+          "thread": "00000000-0000-0000-0000-000000000005",
+          "tool": "close"
+        },
+        "done": true,
+        "id": "call_close"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "running",
+          "text": "STUB[more] One more look at pile 4.",
+          "thread": "00000000-0000-0000-0000-000000000005",
+          "tool": "message"
+        },
+        "done": false,
+        "id": "call_more"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": "00000000-0000-0000-0000-000000000002",
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "medium",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": "Piles",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "completed",
+          "text": "STUB[more] One more look at pile 4.",
+          "thread": "00000000-0000-0000-0000-000000000005",
+          "tool": "message"
+        },
+        "done": true,
+        "id": "call_more"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": null,
+            "thread": "00000000-0000-0000-0000-000000000002",
+            "title": null
+          },
+          "kind": "userMessage",
+          "text": "STUB[more] One more look at pile 4.",
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000013"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": null,
+            "thread": "00000000-0000-0000-0000-000000000002",
+            "title": null
+          },
+          "kind": "userMessage",
+          "text": "STUB[more] One more look at pile 4.",
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000013"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_heard_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "item": "msg_heard_done",
+      "kind": "agentMessage",
+      "text": "Closed.",
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Closed."
+        },
+        "done": true,
+        "id": "msg_heard_done"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_more"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "item"
+    },
+    {
+      "item": "msg_more",
+      "kind": "agentMessage",
+      "text": "Pile 4 is fine.",
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Pile 4 is fine."
+        },
+        "done": true,
+        "id": "msg_more"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "assignedBy": "00000000-0000-0000-0000-000000000002",
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "medium",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Piles",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[lead] Assign the piles.",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "projects": [],
+      "type": "projects"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "type": "threadRemoved"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "type": "threadRemoved"
+    },
+    {
+      "projects": [
+        {
+          "id": "project-1",
+          "name": "project",
+          "path": "/work/run/project"
+        }
+      ],
+      "type": "projects"
+    },
+    {
+      "thread": {
+        "assignedBy": "00000000-0000-0000-0000-000000000002",
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "medium",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Piles",
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[lead] Assign the piles.",
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    }
+  ],
+  "reads": [
+    {
+      "afterEvents": 44,
+      "view": {
+        "seq": 44,
+        "summary": {
+          "assignedBy": null,
+          "forkedFrom": null,
+          "id": "00000000-0000-0000-0000-000000000002",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "low",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "subagent": null,
+          "title": "STUB[lead] Assign the piles.",
+          "unread": true,
+          "updatedAt": 1795000000
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "from": null,
+                  "kind": "userMessage",
+                  "text": "STUB[lead] Assign the piles.",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000004"
+              },
+              {
+                "body": {
+                  "kind": "threadTool",
+                  "status": "completed",
+                  "text": "STUB[worker] Check the pile lengths.",
+                  "thread": "00000000-0000-0000-0000-000000000005",
+                  "tool": "assign"
+                },
+                "done": true,
+                "id": "call_assign"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "Assigned."
+                },
+                "done": true,
+                "id": "msg_lead_done"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000010",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "from": {
+                    "report": "completed",
+                    "thread": "00000000-0000-0000-0000-000000000005",
+                    "title": "Piles"
+                  },
+                  "kind": "userMessage",
+                  "text": "The piles are within tolerance. STUB[heard]",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000011"
+              },
+              {
+                "body": {
+                  "kind": "threadTool",
+                  "status": "completed",
+                  "text": null,
+                  "thread": "00000000-0000-0000-0000-000000000005",
+                  "tool": "close"
+                },
+                "done": true,
+                "id": "call_close"
+              },
+              {
+                "body": {
+                  "kind": "threadTool",
+                  "status": "completed",
+                  "text": "STUB[more] One more look at pile 4.",
+                  "thread": "00000000-0000-0000-0000-000000000005",
+                  "tool": "message"
+                },
+                "done": true,
+                "id": "call_more"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "Closed."
+                },
+                "done": true,
+                "id": "msg_heard_done"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "afterEvents": 44,
+      "view": {
+        "seq": 44,
+        "summary": {
+          "assignedBy": "00000000-0000-0000-0000-000000000002",
+          "forkedFrom": null,
+          "id": "00000000-0000-0000-0000-000000000005",
+          "project": "project-1",
+          "settings": {
+            "access": "ask",
+            "effort": "medium",
+            "model": "gpt-6.2-sol"
+          },
+          "status": {
+            "state": "idle"
+          },
+          "subagent": null,
+          "title": "Piles",
+          "unread": true,
+          "updatedAt": 1795000000
+        },
+        "turns": [
+          {
+            "id": "00000000-0000-0000-0000-000000000006",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "from": {
+                    "report": null,
+                    "thread": "00000000-0000-0000-0000-000000000002",
+                    "title": null
+                  },
+                  "kind": "userMessage",
+                  "text": "STUB[worker] Check the pile lengths.",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000008"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "The piles are within tolerance. STUB[heard]"
+                },
+                "done": true,
+                "id": "msg_worker"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000012",
+            "items": [
+              {
+                "body": {
+                  "attachments": [],
+                  "from": {
+                    "report": null,
+                    "thread": "00000000-0000-0000-0000-000000000002",
+                    "title": null
+                  },
+                  "kind": "userMessage",
+                  "text": "STUB[more] One more look at pile 4.",
+                  "workflow": null
+                },
+                "done": true,
+                "id": "00000000-0000-0000-0000-000000000013"
+              },
+              {
+                "body": {
+                  "kind": "agentMessage",
+                  "text": "Pile 4 is fine."
+                },
+                "done": true,
+                "id": "msg_more"
+              }
+            ],
+            "state": {
+              "state": "completed"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "workflows": []
+}

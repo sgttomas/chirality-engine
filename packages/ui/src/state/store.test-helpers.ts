@@ -12,6 +12,7 @@ export const summary: ThreadSummary = {
   unread: false,
   forkedFrom: null,
   subagent: null,
+  assignedBy: null,
   updatedAt: 1,
   settings: null,
 };

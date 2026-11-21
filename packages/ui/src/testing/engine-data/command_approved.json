@@ -170,6 +170,7 @@
     "seq": 17,
     "threads": [
       {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -366,6 +367,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -393,6 +395,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[approve] write a file",
           "workflow": null
@@ -408,6 +411,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[approve] write a file",
           "workflow": null
@@ -450,6 +454,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -474,6 +479,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -544,6 +550,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -572,6 +579,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -597,6 +605,7 @@
       "view": {
         "seq": 17,
         "summary": {
+          "assignedBy": null,
           "forkedFrom": null,
           "id": "00000000-0000-0000-0000-000000000002",
           "project": "project-1",
@@ -620,6 +629,7 @@
               {
                 "body": {
                   "attachments": [],
+                  "from": null,
                   "kind": "userMessage",
                   "text": "STUB[approve] write a file",
                   "workflow": null

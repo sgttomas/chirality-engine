@@ -134,6 +134,8 @@ pub(crate) struct Inner {
     /// The application's tool calls being answered.
     pub tool_calls: crate::calls::Calls,
     pub admission: crate::turns::Admission,
+    /// Messages between threads waiting to be delivered, and assignments closed.
+    pub assignments: crate::assignment::Assignments,
 }
 
 impl Inner {
@@ -155,6 +157,7 @@ impl Inner {
             login: Mutex::new(None),
             tool_calls: Default::default(),
             admission: Default::default(),
+            assignments: Default::default(),
         });
         inner.store.set_projects(projects);
         Ok(inner)
@@ -234,6 +237,10 @@ impl Inner {
         }
         self.attempts.send_modify(|n| *n += 1);
         Ok(Attempt(&self.attempts))
+    }
+
+    pub fn is_shut_down(&self) -> bool {
+        self.shutting_down.load(Ordering::SeqCst)
     }
 
     /// Sets Codex's status unless the engine has shut down, whose status is the last.

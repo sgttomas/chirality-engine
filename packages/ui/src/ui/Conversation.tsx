@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 import { isRunning, nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
+import { AssignedBy } from "./Assignments";
 import { Composer } from "./composer/Composer";
 import { ThreadTitle } from "./conversation/ThreadTitle";
 import { TurnView } from "./conversation/TurnView";
@@ -50,7 +51,7 @@ export function ConversationHeader({ actions }: { actions?: ReactNode }) {
 }
 
 /** The selected thread's title, renamed in place, and a way back to the thread it was forked from,
- * or to the thread whose agent started it. */
+ * to the thread whose agent started it, or to the thread that assigned it. */
 export function ThreadHeading() {
   const store = useStoreHandle();
   const summary = useStore((s) => s.model!.snapshot.threads.find((t) => t.id === s.thread));
@@ -64,6 +65,7 @@ export function ThreadHeading() {
           <Icon name={summary.subagent ? "subagent" : "fork"} /> {nameOf(parent)}
         </button>
       )}
+      <AssignedBy thread={summary} />
     </>
   );
 }

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use crate::api::*;
+use crate::assignment::marker::{self, Marker};
 use crate::protocol::{self as p, ThreadItem, UserInput};
 
 // ---------- what the person sends ----------
@@ -21,10 +22,12 @@ pub(crate) struct PickedWorkflow {
     pub body: String,
 }
 
-/// The turn input for a message: the person's text, then each attachment,
-/// then a picked workflow as its own text, the way Codex sends a picked skill.
-pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>) -> Vec<UserInput> {
-    let mut input = vec![UserInput::text(message.text.clone())];
+/// The turn input for a message: another thread's mark when it sent it, the
+/// text, then each attachment, then a picked workflow as its own text, the
+/// way Codex sends a picked skill.
+pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>, from: Option<&Marker>) -> Vec<UserInput> {
+    let mut input: Vec<UserInput> = from.map(|m| UserInput::text(marker::render(m))).into_iter().collect();
+    input.push(UserInput::text(message.text.clone()));
     for attachment in &message.attachments {
         match attachment {
             Attachment::Image { path } => input.push(UserInput::LocalImage { path: path.display().to_string() }),
@@ -38,8 +41,9 @@ pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>
 }
 
 /// A thread's title from Codex's preview, which joins the first message's
-/// parts: the person's own text comes first, so it is what is kept.
+/// parts: the text comes first (after another thread's mark), so it is what is kept.
 pub(crate) fn title_from_preview(preview: &str) -> Option<String> {
+    let preview = marker::from_preview(preview).1;
     let end = [FILE_PREFIX, WORKFLOW_OPEN].iter().filter_map(|marker| preview.find(marker)).min().unwrap_or(preview.len());
     Some(preview[..end].trim().to_string()).filter(|t| !t.is_empty())
 }
@@ -48,7 +52,11 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
     let mut texts = Vec::new();
     let mut attachments = Vec::new();
     let mut workflow = None;
-    for part in content {
+    let from = match content.first() {
+        Some(p::InputInfo::Text { text }) => marker::part(text),
+        _ => None,
+    };
+    for part in content.iter().skip(from.is_some() as usize) {
         match part {
             p::InputInfo::Text { text } if text.starts_with(WORKFLOW_OPEN) => {
                 workflow = text
@@ -64,7 +72,7 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
             p::InputInfo::Image | p::InputInfo::Other => {}
         }
     }
-    ItemBody::UserMessage { text: texts.join("\n"), attachments, workflow }
+    ItemBody::UserMessage { text: texts.join("\n"), attachments, workflow, from: from.as_ref().map(Marker::from) }
 }
 
 // ---------- items, turns, threads ----------
@@ -89,6 +97,11 @@ pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
                 result: error.as_ref().map(|e| e.message.clone()).or(text),
                 images,
             };
+            (id, body)
+        }
+        ThreadItem::DynamicToolCall { id, namespace, tool, arguments, status, content_items } if namespace.as_deref() == Some(crate::assignment::NAMESPACE) => {
+            let (result, _) = dynamic_result(content_items.as_deref().unwrap_or_default());
+            let body = crate::assignment::tools::item(tool, arguments, result.as_deref(), tool_status(*status, false, done))?;
             (id, body)
         }
         ThreadItem::DynamicToolCall { id, namespace, tool, arguments, status, content_items } => {
@@ -360,9 +373,16 @@ mod tests {
             workflow: Some(WorkflowId("/lib/w/WORKFLOW.md".into())),
         };
         let picked = PickedWorkflow { id: WorkflowId("/lib/w/WORKFLOW.md".into()), name: "w".into(), body: "# W\nDo it.\n".into() };
-        let input = message_input(&message, Some(&picked));
+        let input = message_input(&message, Some(&picked), None);
         let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
-        assert_eq!(user_message(&content), ItemBody::UserMessage { text: "Go".into(), attachments: message.attachments.clone(), workflow: message.workflow.clone() });
+        assert_eq!(user_message(&content), ItemBody::UserMessage { text: "Go".into(), attachments: message.attachments.clone(), workflow: message.workflow.clone(), from: None });
+        // From another thread: its mark first, which is not part of the text, nor of the title.
+        let mark = Marker { from: ThreadId("lead".into()), title: Some("Lead".into()), report: Some(TurnEnd::Completed) };
+        let input = message_input(&message, Some(&picked), Some(&mark));
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
+        let ItemBody::UserMessage { text, from, workflow, .. } = user_message(&content) else { panic!() };
+        assert_eq!((text.as_str(), from, workflow), ("Go", Some(mark.from()), message.workflow.clone()));
+        assert_eq!(title_from_preview(&format!("{}Check the piles{FILE_PREFIX}/p/a.md", marker::render(&mark))).as_deref(), Some("Check the piles"));
     }
 
     #[test]

@@ -170,6 +170,7 @@
     "seq": 11,
     "threads": [
       {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -366,6 +367,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -402,6 +404,7 @@
               "path": "/work/run/project/sketch.png"
             }
           ],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[flow] Estimate this",
           "workflow": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md"
@@ -426,6 +429,7 @@
               "path": "/work/run/project/sketch.png"
             }
           ],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[flow] Estimate this",
           "workflow": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md"
@@ -473,6 +477,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -501,6 +506,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -526,6 +532,7 @@
       "view": {
         "seq": 11,
         "summary": {
+          "assignedBy": null,
           "forkedFrom": null,
           "id": "00000000-0000-0000-0000-000000000002",
           "project": "project-1",
@@ -558,6 +565,7 @@
                       "path": "/work/run/project/sketch.png"
                     }
                   ],
+                  "from": null,
                   "kind": "userMessage",
                   "text": "STUB[flow] Estimate this",
                   "workflow": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md"

@@ -170,6 +170,7 @@
     "seq": 24,
     "threads": [
       {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -366,6 +367,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -393,6 +395,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[check] check the estimate",
           "workflow": null
@@ -408,6 +411,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[check] check the estimate",
           "workflow": null
@@ -491,6 +495,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -519,6 +524,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -539,6 +545,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -566,6 +573,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[none] check the estimate",
           "workflow": null
@@ -581,6 +589,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[none] check the estimate",
           "workflow": null
@@ -664,6 +673,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -697,6 +707,7 @@
       "view": {
         "seq": 13,
         "summary": {
+          "assignedBy": null,
           "forkedFrom": null,
           "id": "00000000-0000-0000-0000-000000000002",
           "project": "project-1",
@@ -720,6 +731,7 @@
               {
                 "body": {
                   "attachments": [],
+                  "from": null,
                   "kind": "userMessage",
                   "text": "STUB[check] check the estimate",
                   "workflow": null
@@ -761,6 +773,7 @@
       "view": {
         "seq": 24,
         "summary": {
+          "assignedBy": null,
           "forkedFrom": null,
           "id": "00000000-0000-0000-0000-000000000002",
           "project": "project-1",
@@ -784,6 +797,7 @@
               {
                 "body": {
                   "attachments": [],
+                  "from": null,
                   "kind": "userMessage",
                   "text": "STUB[check] check the estimate",
                   "workflow": null
@@ -823,6 +837,7 @@
               {
                 "body": {
                   "attachments": [],
+                  "from": null,
                   "kind": "userMessage",
                   "text": "STUB[none] check the estimate",
                   "workflow": null

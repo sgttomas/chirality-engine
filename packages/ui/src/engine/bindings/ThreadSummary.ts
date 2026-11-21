@@ -19,6 +19,11 @@ forkedFrom: ThreadId | null,
  */
 subagent: Subagent | null, 
 /**
+ * The thread whose agent assigned this one (its first message, the brief, came from there).
+ * The threads a thread assigned are those that name it here.
+ */
+assignedBy: ThreadId | null, 
+/**
  * Seconds since the Unix epoch.
  */
 updatedAt: number, settings: TurnSettings | null, };

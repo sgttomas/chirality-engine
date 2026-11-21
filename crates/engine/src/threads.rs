@@ -6,13 +6,14 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::api::*;
+use crate::assignment::marker::Marker;
 use crate::protocol as p;
 use crate::rpc::RpcError;
 use crate::session::{Inner, Session, engine_error};
 
 const PAGE: u32 = 100;
 
-async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
+pub(crate) async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
     let mut turns = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
@@ -133,6 +134,23 @@ impl Inner {
     }
 
     pub(crate) async fn start_thread(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings) -> Result<ThreadId> {
+        self.start_thread_from(project, message, settings, None).await
+    }
+
+    /// Starts a thread another thread assigned, with its brief marked as from that thread, and
+    /// gives it its title once its first turn has started.
+    pub(crate) async fn start_assigned(self: &Arc<Self>, project: &ProjectId, brief: Message, settings: TurnSettings, from: Marker, title: String) -> Result<ThreadId> {
+        let id = self.start_thread_from(project, brief, settings, Some((from, title.clone()))).await?;
+        // Codex keeps the title once the thread has its first turn; one it does not take leaves the brief's own when listed.
+        self.store.renamed();
+        if let Ok(session) = self.session() {
+            let _ = session.call_value("thread/name/set", json!({ "threadId": id.0, "name": title })).await;
+        }
+        Ok(id)
+    }
+
+    /// `assigned`: the assigning thread's mark and the title it gave, which the thread has from the start.
+    async fn start_thread_from(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings, assigned: Option<(Marker, String)>) -> Result<ThreadId> {
         let project = self.project(project)?;
         let session = self.session()?;
         // A first message that cannot be made makes no thread.
@@ -140,12 +158,18 @@ impl Inner {
             crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?;
         }
         let before = self.store.seq();
-        let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: self.config.tools.as_ref().map(crate::tools::specs) };
+        let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: Some(crate::tools::specs(self.config.tools.as_ref())) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
         let id = self.adopt_thread(&started.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
         session.mark_loaded(&id);
         session.mark_unkept(&id, before);
-        if let Err(e) = self.send(&id, message, settings).await {
+        if let Some((from, title)) = &assigned {
+            self.store.update_thread(&id, |e| {
+                e.assigned_by = Some(from.from.clone());
+                e.title = Some(title.clone());
+            });
+        }
+        if let Err(e) = self.send_from(&id, message, settings, assigned.map(|(from, _)| from)).await {
             // No turn started: the thread the engine just made is not listed.
             self.store.remove_thread(&id);
             session.forget_loaded(&id);
@@ -166,6 +190,8 @@ impl Inner {
         let parent = self.store.thread(thread);
         self.store.update_thread(&id, |e| {
             e.forked_from = Some(thread.clone());
+            // A fork is not an assignment, though it has the same first message.
+            e.assigned_by = None;
             if let Some(parent) = &parent {
                 e.settings = parent.settings.clone();
                 if let Some(title) = &parent.title {

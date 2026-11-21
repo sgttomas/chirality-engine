@@ -10,6 +10,7 @@
 //!   (`harness::codex`, `harness::library`).
 
 mod admission;
+mod assignments;
 mod apptools;
 pub(crate) mod catalog;
 mod export;
@@ -57,7 +58,7 @@ macro_rules! scenarios {
     };
 }
 
-scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled, unkept_thread, subagent, subagent_stop, subagent_message);
+scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled, unkept_thread, subagent, subagent_stop, subagent_message, assignment, assignment_waits, assignment_exchange, assignment_projects, assignment_person);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_main_path() {

@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::api::*;
+use crate::assignment::marker::Marker;
 use crate::mapping;
 use crate::protocol as p;
 use crate::session::Inner;
@@ -47,12 +48,36 @@ where
 impl Inner {
     /// Sends a message: starts a turn, or steers the one running.
     pub(crate) async fn send(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
+        self.send_from(thread, message, settings, None).await
+    }
+
+    /// Sends a message, marked as from another thread when `from` is set.
+    pub(crate) async fn send_from(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings, from: Option<Marker>) -> Result<()> {
         let (inner, thread) = (self.clone(), thread.clone());
         owned(async move {
             let _admitted = inner.admission.admit(&thread).await;
-            inner.send_admitted(&thread, message, settings).await
+            inner.send_admitted(&thread, message, settings, from.as_ref(), true).await
         })
         .await
+    }
+
+    /// Starts a turn with another thread's message if no turn runs (none
+    /// steered); `Ok(false)` if one does.
+    pub(crate) async fn start_if_idle(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings, from: Marker) -> Result<bool> {
+        let (inner, thread) = (self.clone(), thread.clone());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        owned(async move {
+            let _admitted = inner.admission.admit(&thread).await;
+            if !inner.store.thread(&thread).is_some_and(|e| crate::store::is_idle(&e)) {
+                let _ = tx.send(false);
+                return Ok(());
+            }
+            inner.send_admitted(&thread, message, settings, Some(&from), false).await?;
+            let _ = tx.send(true);
+            Ok(())
+        })
+        .await?;
+        Ok(rx.await.unwrap_or(false))
     }
 
     /// Stops the running turn, and holds the thread until Codex has ended it;
@@ -66,7 +91,7 @@ impl Inner {
         .await
     }
 
-    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
+    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings, from: Option<&Marker>, may_steer: bool) -> Result<()> {
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
         if entry.subagent.is_some() {
@@ -77,11 +102,11 @@ impl Inner {
             Some(id) => Some(crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?),
             None => None,
         };
-        let input = mapping::message_input(&message, workflow.as_ref());
+        let input = mapping::message_input(&message, workflow.as_ref(), from);
 
         // A turn a Stop could not settle may have ended unannounced: the send is
         // a start, which Codex takes as a steer if that turn still runs.
-        if let Some(turn) = entry.active_turn.filter(|t| entry.unsettled.as_ref() != Some(t)) {
+        if let Some(turn) = entry.active_turn.filter(|t| may_steer && entry.unsettled.as_ref() != Some(t)) {
             let params = p::TurnSteerParams { thread_id: thread.0.clone(), expected_turn_id: turn.0, input };
             session.call_value("turn/steer", params).await?;
             return Ok(());

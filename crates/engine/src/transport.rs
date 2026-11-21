@@ -38,16 +38,15 @@ impl Ended {
     }
 }
 
-/// Keeps Codex from giving a subagent the application's tools (Codex 0.171.0
-/// does so only with this feature, which is off unless a Codex home turns it on).
+/// Keeps Codex from giving a subagent a thread's tools, the engine's and the
+/// application's (Codex 0.171.0 gives a new subagent all of its parent's or
+/// none, and all only with this feature, which is off unless a Codex home turns it on).
 pub(crate) const NO_SUBAGENT_TOOLS: &str = "features.multi_agent_v2_dynamic_tools=false";
 
-/// The application's `-c` settings, and with its tools, [`NO_SUBAGENT_TOOLS`].
+/// The application's `-c` settings, then [`NO_SUBAGENT_TOOLS`]: every thread has the engine's tools.
 pub(crate) fn settings(config: &crate::api::EngineConfig) -> Vec<String> {
     let mut settings = config.codex_settings.clone();
-    if config.tools.is_some() {
-        settings.push(NO_SUBAGENT_TOOLS.into());
-    }
+    settings.push(NO_SUBAGENT_TOOLS.into());
     settings
 }
 
