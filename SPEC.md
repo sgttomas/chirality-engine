@@ -103,9 +103,9 @@ An application consumes both from this repository at a pinned revision (a git
 dependency in Cargo, and `#<revision>::path:packages/ui` in npm), fetched with
 the developer's own access; no registry.
 
-## Proposed: assignment between threads
+## Assignment between threads
 
-Not built. For the owner to question before it is.
+Designed with the owner (2026-11-21); not built yet.
 
 Codex's subagents are the agent's own helpers: they run inside its turn, and
 the person can watch and stop them, but Codex refuses a message from the
@@ -120,8 +120,11 @@ thread the engine starts, beside the application's tools:
 - `assign`: start a new thread, in this thread's project or another the
   person has added, with a title and a brief, optionally a workflow picked
   into the brief, and a model, reasoning level and access level. Each is the
-  assigner's own unless the call names another (higher or lower, as the person
-  directed). Returns the new thread's id.
+  assigner's own unless the call names another. Model and reasoning may be
+  higher or lower, as the person directed. Access may be lower; a higher one is
+  not given by the call: the thread starts at the assigner's level and its
+  agent asks the person through Codex's own permission request. Returns the
+  new thread's id.
 - `message`: send text to any thread, by id.
 - `threads`: the threads the agent can address: the person's projects' threads,
   each with its title, project, whether it is running, idle or waiting on the
@@ -142,9 +145,6 @@ thread the engine starts, beside the application's tools:
 - A message to an idle thread starts a turn in it; to a running one it waits
   until that turn ends (it does not steer). Messages to a thread are delivered
   in order.
-- A run of turns started by deliveries, with nothing from the person in
-  between, stops after a bound: further deliveries wait, and the threads
-  concerned wait on the person, who lets them go on or not.
 - Approvals and questions in an assigned thread go to the person on that
   thread, as on any thread. Its assigner is not told; it hears when the turn
   ends.
@@ -159,8 +159,7 @@ thread. The person can open, send to and stop either, at any time.
 **What the engine keeps.** Nothing Codex does not. The relation is read from
 the assigned thread's first message, which names its assigner (Codex's thread
 listing carries it as the preview). Reports and messages are messages in
-Codex's history. Deliveries waiting for a running turn, and the run of
-automatic turns, are held in memory: a delivery waiting when the app quits is
+Codex's history. Deliveries waiting for a running turn are held in memory: a delivery waiting when the app quits is
 not made, and the person finds the result in the assigned thread.
 
 **To establish at the pin first.** That the listing's preview carries the
@@ -172,17 +171,11 @@ a thread its tools at start, and a fork keeps them).
 **Decided by the owner (2026-11-21).** Turns the person starts in an assigned
 thread report nothing back. The assigning agent gives the assigned thread its
 own model and reasoning level unless directed otherwise, and may give higher
-or lower ones. Any thread may message any thread, in any project; in practice
-agents do so when directed, or with the threads they assigned or were assigned
-by.
-
-**Open for the owner.**
-
-1. The bound on turns started by deliveries (see What happens), and whether
-   one is wanted at all.
-2. Access level higher than the assigner's: given by the `assign` call as
-   asked, or started at the assigner's level with the higher one asked of the
-   person through Codex's own permission request in the assigned thread.
+or lower ones; higher access is asked of the person, as above. Any thread may
+message any thread, in any project; in practice agents do so when directed, or
+with the threads they assigned or were assigned by. No bound on turns started
+by deliveries: the person sees every running thread and can stop any; one is
+added only if exchanges that do not end are seen.
 
 ## Known limits
 
