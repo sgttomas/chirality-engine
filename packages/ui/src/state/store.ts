@@ -173,8 +173,9 @@ export class Store {
     const before = this.state;
     this.untold.delete(seq);
     this.set({ model: applyEvent(before.model!, event, seq) });
-    // Codex's history of the turn replaces what the view gathered while it ran.
-    if (event.type === "turnEnded" && event.thread === this.state.thread) void this.reload(event.thread);
+    // Codex's history of a completed turn replaces what the view gathered while it ran; a stopped
+    // or failed turn keeps it (Codex may not have kept a reply cut short).
+    if (event.type === "turnEnded" && event.state.state === "completed" && event.thread === this.state.thread) void this.reload(event.thread);
     if (event.type === "thread" && event.thread.id === this.state.thread && event.thread.unread) this.markRead(event.thread.id);
     if (event.type === "threadRemoved" && event.thread === this.state.thread) this.set({ thread: null });
     if (event.type === "projects" && !event.projects.some((p) => p.id === this.state.project)) this.set({ project: event.projects[0]?.id ?? null, thread: null });

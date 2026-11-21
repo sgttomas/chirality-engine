@@ -316,8 +316,9 @@ pub struct ThreadView {
     /// with its text whole, and text for an item it lacks begins that item.
     /// History lacks a reply still streaming, and can name the items of a turn
     /// that ended while it was read differently from its events: when a turn
-    /// of the thread in view ends, read it again. Text Codex has not kept (of
-    /// a reply a Stop cut short) is in no read.
+    /// of the thread in view completes, read it again. Text Codex has not kept
+    /// (of a reply a Stop cut short) is in no read: a stopped turn's view keeps
+    /// it until the thread is read again later.
     #[ts(type = "number")]
     pub seq: u64,
 }

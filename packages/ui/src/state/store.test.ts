@@ -548,6 +548,32 @@ describe("a view and the turn running in it", () => {
     expect(shown).toEqual(["userMessage", "agentMessage"]);
   });
 
+  it("keeps a stopped reply's streamed text in the view: a stopped turn is not read again", async () => {
+    let reads = 0;
+    const wire = new Wire(async (command) => {
+      if (command === "snapshot") return snapshot(0);
+      if (command === "read_thread") return reads++ === 0 ? { summary, seq: 0, turns: [{ id: "turn-1", items: [], state: { state: "running" } }] } : { summary, seq: 4, turns: [] };
+      return [];
+    });
+    const store = new Store(createEngineClient(wire), testHost);
+    await store.start();
+    await store.selectThread("t");
+    wire.emit(1, { type: "item", thread: "t", turn: "turn-1", item: message("a", "") });
+    wire.emit(2, { type: "itemDelta", thread: "t", turn: "turn-1", item: "a", kind: "agentMessage", text: "A partial" });
+    // An item the view only has from its text.
+    wire.emit(3, { type: "itemDelta", thread: "t", turn: "turn-1", item: "b", kind: "agentMessage", text: " reply" });
+    wire.emit(4, { type: "turnEnded", thread: "t", turn: "turn-1", state: { state: "interrupted" } });
+    await tick();
+    const turn = store.get().model?.views.t.turns[0];
+    store.dispose();
+    expect(reads).toBe(1);
+    expect(turn?.state.state).toBe("interrupted");
+    expect(turn?.items.map((i) => i.body)).toEqual([
+      { kind: "agentMessage", text: "A partial" },
+      { kind: "agentMessage", text: " reply" },
+    ]);
+  });
+
   it("streams text into a thread opened mid-reply, and settles on the turn's end", async () => {
     const { initial, view, frames } = overlap("streaming");
     let reads = 0;
