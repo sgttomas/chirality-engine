@@ -117,13 +117,15 @@ provides it, with tools of its own given to the agent as an application's are.
 **What the agent can do.** Engine tools in the namespace `chirality`, on every
 thread the engine starts, beside the application's tools:
 
-- `assign`: start a new thread in the same project with a title and a brief,
-  optionally a workflow picked into the brief, and a model and reasoning level
-  from those Codex lists. Returns the new thread's id. Its access level is the
-  assigner's, or a lower one the call names; never higher.
-- `message`: send text to a thread this one assigned or was assigned by.
-- `assignments`: those threads, each with its title and whether it is running,
-  idle or waiting on the person.
+- `assign`: start a new thread, in this thread's project or another the
+  person has added, with a title and a brief, optionally a workflow picked
+  into the brief, and a model, reasoning level and access level. Each is the
+  assigner's own unless the call names another (higher or lower, as the person
+  directed). Returns the new thread's id.
+- `message`: send text to any thread, by id.
+- `threads`: the threads the agent can address: the person's projects' threads,
+  each with its title, project, whether it is running, idle or waiting on the
+  person, and its relation to this one (assigned by it, assigned it, or none).
 - `close`: end an assignment this thread made; no more reports come from it.
 
 **What happens.**
@@ -167,15 +169,20 @@ answering a tool call, and answer the call without waiting for that turn; that
 a thread started before the engine had these tools cannot assign (Codex gives
 a thread its tools at start, and a fork keeps them).
 
+**Decided by the owner (2026-11-21).** Turns the person starts in an assigned
+thread report nothing back. The assigning agent gives the assigned thread its
+own model and reasoning level unless directed otherwise, and may give higher
+or lower ones. Any thread may message any thread, in any project; in practice
+agents do so when directed, or with the threads they assigned or were assigned
+by.
+
 **Open for the owner.**
 
-1. Whether turns the person starts in an assigned thread report back too
-   (proposed: no).
-2. The bound on automatic turns (proposed: twenty, across the threads
-   concerned), and whether an application may set it.
-3. Whether the assigning agent may choose the assigned thread's model
-   (proposed: yes, from Codex's list) and access (proposed: equal or lower).
-4. Whether an assignment may cross projects (proposed: no, the same folder).
+1. The bound on turns started by deliveries (see What happens), and whether
+   one is wanted at all.
+2. Access level higher than the assigner's: given by the `assign` call as
+   asked, or started at the assigner's level with the higher one asked of the
+   person through Codex's own permission request in the assigned thread.
 
 ## Known limits
 
