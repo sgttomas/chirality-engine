@@ -4,6 +4,7 @@
 //! [`Engine::subscribe`] and acts through the methods below. See `SPEC.md`.
 
 pub mod api;
+pub mod embedded;
 
 mod account;
 mod assignment;
