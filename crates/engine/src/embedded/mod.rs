@@ -3,6 +3,7 @@
 //! bounded memory. It shares none of the ordinary engine's structure.
 
 mod budget;
+mod calls;
 mod consumer;
 mod types;
 mod wire;
@@ -13,10 +14,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 
-use tokio::sync::futures::OwnedNotified;
 use tokio::sync::mpsc::{self, error::TryRecvError, error::TrySendError};
 use tokio::task::JoinHandle;
 
+pub use budget::Finished;
 pub use types::*;
 
 use budget::{Charge, FRAME_TEXT, Ledger, REPLY_SLOTS, Ring, class};
@@ -185,6 +186,18 @@ impl EmbeddedEngine {
         }
     }
 
+    /// Whether `call` is still pending: the host checks when it dequeues a
+    /// `Call`, before it starts work.
+    pub fn call_live(&self, call: &CallRef) -> bool {
+        self.shared.call_live(call)
+    }
+
+    /// Answers a pending call. `Invalid` for a retired call (nothing is
+    /// written), or over `result_bytes` or a frame (the call stays pending).
+    pub fn answer(&self, call: &CallRef, success: bool, text: &str) -> Result<(), EmbeddedError> {
+        self.shared.answer(call, success, text)
+    }
+
     /// The latest remote-control status Codex reported.
     pub fn remote_control(&self) -> Option<RemoteControl> {
         self.shared.lock_state().remote
@@ -221,42 +234,6 @@ impl EmbeddedEvents {
             Poll::Ready(None) => Err(TryRecvError::Disconnected),
             Poll::Pending => Err(TryRecvError::Empty),
         }
-    }
-}
-
-pin_project_lite::pin_project! {
-    /// Resolves once the engine has finished ([`EmbeddedEngine::finished`]).
-    pub struct Finished {
-        shared: Arc<Shared>,
-        #[pin]
-        notified: OwnedNotified,
-    }
-}
-
-impl Finished {
-    fn new(shared: Arc<Shared>) -> Finished {
-        let notified = shared.ledger.notify.clone().notified_owned();
-        Finished { shared, notified }
-    }
-}
-
-impl Clone for Finished {
-    fn clone(&self) -> Finished {
-        Finished::new(self.shared.clone())
-    }
-}
-
-impl Future for Finished {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let mut this = self.project();
-        // Registered before the check, so a finish between the two still wakes it.
-        this.notified.as_mut().enable();
-        if this.shared.ledger.is_finished() {
-            return Poll::Ready(());
-        }
-        this.notified.poll(cx)
     }
 }
 
@@ -374,6 +351,7 @@ impl Shared {
         }
         st.config = None;
         out.writer = None;
+        st.record = None;
         st.ring = None;
         if let Some(consumer) = st.consumer.take() {
             consumer.abort();
@@ -437,9 +415,11 @@ struct State {
     /// Tools, description and `work_dir`, until `open_thread` writes them.
     config: Option<Config>,
     namespace: String,
-    /// The namespace's tools, for admission (step 2).
-    #[allow(dead_code)]
+    /// The namespace's tools, for admission.
     tool_names: Vec<String>,
+    limits: EmbeddedLimits,
+    /// The turn's requests and the calls pending.
+    record: Option<calls::Record>,
     connect_called: bool,
     open_called: bool,
     initialized: bool,
@@ -495,6 +475,7 @@ impl Shared {
         let writer_charge = ledger.charge(class(FRAME_TEXT as u64))?;
         let writer = Writer::new();
         let ring = Ring::new(&ledger, budget::ring_slots(&limits) as usize)?;
+        let record = calls::Record::new(&ledger, limits.calls_per_turn)?;
         let state = State {
             closed: false,
             fault: None,
@@ -502,6 +483,8 @@ impl Shared {
             config: Some(config),
             namespace,
             tool_names,
+            limits,
+            record: Some(record),
             connect_called: false,
             open_called: false,
             initialized: false,
@@ -593,6 +576,10 @@ fn codex(reply: Reply) -> EmbeddedError {
 #[cfg(test)]
 mod bounds_tests;
 #[cfg(test)]
+mod calls_tests;
+#[cfg(test)]
 mod close_tests;
+#[cfg(test)]
+mod offer_tests;
 #[cfg(test)]
 mod tests;

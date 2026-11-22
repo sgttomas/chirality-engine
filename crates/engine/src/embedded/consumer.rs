@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use super::budget::{FRAME_HAND, Ledger, NESTING, class, event_bytes};
 use super::types::{EmbeddedEvent, Fault, ItemRef, Method, OpenedThread, RemoteControl, Reported, ThreadId, TurnId};
 use super::wire::{self, CodexError, Frame, IDENTITY, LONG_TEXT};
-use super::{INITIALIZE, Output, Reply, Shared, State, THREAD_START, TURN_START, Unsent};
+use super::{INITIALIZE, Output, Reply, Shared, State, THREAD_START, TURN_START, Unsent, calls};
 
 /// An identity the engine holds, inline: the held thread and the turns.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -168,16 +168,16 @@ impl Shared {
     }
 }
 
-struct Cx<'a> {
-    out: &'a mut Output,
-    st: &'a mut State,
-    ledger: &'a Arc<Ledger>,
+pub(super) struct Cx<'a> {
+    pub(super) out: &'a mut Output,
+    pub(super) st: &'a mut State,
+    pub(super) ledger: &'a Arc<Ledger>,
 }
 
 fn route(cx: &mut Cx, text: &str) -> Result<(), Fault> {
     match wire::frame(text).ok_or(Fault::InvalidFrame)? {
         Frame::Response { id, reply } => respond(cx, id, reply),
-        Frame::Request { id, method, params } => refuse(cx, id, method, params),
+        Frame::Request { id, method, params } => calls::request(cx, id, method, params),
         Frame::Notification { method, params } => notification(cx, method, params),
     }
 }
@@ -215,7 +215,7 @@ fn respond(cx: &mut Cx, id: i64, reply: Result<&RawValue, CodexError>) -> Result
     Ok(())
 }
 
-fn unsent(unsent: Unsent) -> Fault {
+pub(super) fn unsent(unsent: Unsent) -> Fault {
     match unsent {
         Unsent::Fault(fault) => fault,
         Unsent::TooLong => Fault::OverBudget,
@@ -327,38 +327,17 @@ fn started(cx: &mut Cx, result: &RawValue) -> Result<(TurnId, super::Charge), Fa
     }
     let open = cx.st.thread.as_ref().is_some_and(|t| t.open);
     cx.st.turns.started(Ident::new(id), open)?;
+    // A newly admitted turn starts a new record.
+    if cx.st.turns.running.is_some_and(|running| running.as_str() == id)
+        && let Some(record) = cx.st.record.as_mut()
+    {
+        record.clear();
+    }
     let charge = cx.ledger.charge(class(id.len() as u64))?;
     Ok((TurnId(id.to_owned()), charge))
 }
 
 // ---------- requests ----------
-
-/// Any request is refused until admission (step 2): `Refused`, then the
-/// refusal is written.
-fn refuse(cx: &mut Cx, id: &RawValue, method: &RawValue, params: Option<&RawValue>) -> Result<(), Fault> {
-    let mut name_buf = [0; IDENTITY];
-    let name = wire::identity(method, &mut name_buf).ok_or(Fault::InvalidFrame)?;
-    let json = params.map_or("{}", RawValue::get);
-    let [thread_id, thread, conversation] = params.and_then(|p| wire::pick(p.get(), ["threadId", "thread", "conversationId"])).unwrap_or_default();
-    let thread_dot_id = thread.and_then(|t| wire::pick(t.get(), ["id"])).and_then(|[id]| id);
-    // The first of them that is an identity.
-    let (mut buf, mut len) = ([0; IDENTITY], None);
-    for raw in [thread_id, thread_dot_id, conversation].into_iter().flatten() {
-        if let Some(id) = wire::identity(raw, &mut buf) {
-            len = Some(id.len());
-            break;
-        }
-    }
-    let thread = len.map(|len| std::str::from_utf8(&buf[..len]).unwrap_or_default());
-    publish(cx, &[name, thread.unwrap_or_default(), json], || EmbeddedEvent::Refused {
-        method: name.to_owned(),
-        thread: thread.map(str::to_owned),
-        json: json.to_owned(),
-    })?;
-    cx.out
-        .send(cx.ledger, |w| _ = w.raw("{\"id\":").raw(id.get()).raw(",\"error\":{\"code\":-32601,\"message\":\"not supported by this client\"}}"))
-        .map_err(unsent)
-}
 
 // ---------- notifications ----------
 
@@ -560,10 +539,27 @@ fn decode<'a>(
     if matches!(route, Route::Turn(_) | Route::TokenUsage | Route::Item(_) | Route::Delta(_) | Route::Error) && note.turn.is_none() {
         return Ok(None);
     }
-    // Effects, applied before the event is published.
-    match note.method {
-        Method::TurnCompleted => cx.st.turns.completed(Ident::new(note.turn.unwrap_or_default())),
-        Method::ThreadClosed => {
+    // Effects, applied before the event is published: the turn rule's, and
+    // retirement (by the call's item completing in the running turn, its
+    // turn's end, or the thread's).
+    let running = cx.st.turns.running.filter(|r| note.turn == Some(r.as_str()));
+    let record = cx.st.record.as_mut();
+    match (note.method, record) {
+        (Method::TurnCompleted, record) => {
+            cx.st.turns.completed(Ident::new(note.turn.unwrap_or_default()));
+            if let (None, Some(record)) = (cx.st.turns.running, record) {
+                record.retire_all();
+            }
+        }
+        (Method::ItemCompleted, Some(record)) => {
+            if let (Some(_), Some((id, Some("dynamicToolCall")))) = (running, note.item) {
+                record.retire_call(id);
+            }
+        }
+        (Method::ThreadClosed, record) => {
+            if let Some(record) = record {
+                record.retire_all();
+            }
             if let Some(held) = cx.st.thread.as_mut() {
                 held.open = false;
             }
@@ -577,7 +573,7 @@ fn decode<'a>(
 
 /// Publishes an event into the ring: its strings (`parts`) charged before
 /// `make` allocates them; a full ring faults.
-fn publish(cx: &mut Cx, parts: &[&str], make: impl FnOnce() -> EmbeddedEvent) -> Result<(), Fault> {
+pub(super) fn publish(cx: &mut Cx, parts: &[&str], make: impl FnOnce() -> EmbeddedEvent) -> Result<(), Fault> {
     let ring = cx.st.ring.as_mut().ok_or(Fault::OverBudget)?;
     if ring.is_full() {
         return Err(Fault::OverBudget);

@@ -3,7 +3,10 @@
 
 #![allow(dead_code)]
 
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
+use std::task::{Context, Waker};
 
 use chirality_engine::embedded::*;
 use serde_json::Value;
@@ -72,10 +75,6 @@ pub fn options(lines: &[Line]) -> ThreadOptions {
     }
 }
 
-pub fn texts(lines: &[Line]) -> Vec<String> {
-    outbound(lines, "turn/start").iter().map(|t| t["params"]["input"][0]["text"].as_str().unwrap().to_owned()).collect()
-}
-
 /// SWBPIPE's rule: whether an event ends the session.
 pub fn ends_session(event: &EmbeddedEvent) -> bool {
     match event {
@@ -90,6 +89,7 @@ pub fn ends_session(event: &EmbeddedEvent) -> bool {
             Method::TokenUsage | Method::RateLimits | Method::Retrying => false,
             Method::ThreadClosed | Method::Error | Method::Warning | Method::ConfigWarning => true,
         },
+        EmbeddedEvent::Call { .. } => false,
         EmbeddedEvent::Refused { .. } | EmbeddedEvent::Unheld { .. } | EmbeddedEvent::Unmapped { .. } | EmbeddedEvent::Closed { .. } => true,
     }
 }
@@ -156,59 +156,62 @@ impl Meter {
     }
 }
 
-/// Drives the recorded session through the engine as SWBPIPE's host would:
-/// connect, wait for `Disabled`, open the thread, send each recorded text
-/// once the turn before has completed, then close. Codex's side is fed from
-/// the recording; every frame the engine writes is checked against it.
-/// Returns the events, each checked against SWBPIPE's rule.
+/// A method the host has called and Codex has not yet answered.
+type Pending<'e> = Pin<Box<dyn Future<Output = ()> + 'e>>;
+
+/// Drives the recorded session through the engine as SWBPIPE's host would,
+/// each action when the recording shows the client's next frame: connect,
+/// open the thread, send each text, interrupt, and answer each call from its
+/// `Call` event. Codex's side is fed from the recording, one frame taken
+/// before the next; every frame the engine writes is checked against it, and
+/// every event against SWBPIPE's rule. At the end, every call is retired and
+/// answering it is `Invalid`; then the engine closes. Returns the events.
 pub async fn replay(lines: Vec<Line>, meter: &Meter) -> Vec<EmbeddedEvent> {
     let pause = meter.pause;
     let mut built = None;
     pause(&mut || {
         let (transport, host) = transport();
-        built = Some((config(&lines, transport), options(&lines), texts(&lines), host));
+        built = Some((config(&lines, transport), options(&lines), host));
     });
-    let (config, options, texts, mut host) = built.unwrap();
+    let (config, options, mut host) = built.unwrap();
     meter.adopt_config(&config);
     let (engine, mut events) = EmbeddedEngine::new(config).unwrap();
-    let mut seen = Vec::new();
-    let script = async {
-        engine.connect().await.unwrap();
-        let mut next = async || {
-            let event = events.recv().await.unwrap();
-            let ends = ends_session(&event);
-            pause(&mut || assert!(!ends, "{event:?} ends the session"));
-            let name = event_name(&event);
-            pause(&mut || seen.push(event.clone()));
-            name
-        };
-        while next().await != "remoteControl" {}
-        let opened = engine.open_thread(&options).await.unwrap();
-        assert_eq!(opened.ephemeral, Reported::Value(true));
-        assert_eq!(opened.environments, Reported::Value(0));
-        for text in &texts {
-            engine.send_text(text).await.unwrap();
-            while next().await != "turnCompleted" {}
-        }
-        engine.close();
-        let closed = events.recv().await;
-        assert_eq!(closed, Some(EmbeddedEvent::Closed { fault: None }));
-        assert_eq!(events.recv().await, None);
-        engine.finished().await;
-    };
-    let codex = async {
-        for line in lines {
-            match line {
-                Line::Inbound(line) => assert!(meter.feed(&host, line).await),
-                Line::Outbound(expected) => {
-                    let sent = host.from_engine.recv().await.unwrap();
-                    pause(&mut || assert_eq!(serde_json::from_str::<Value>(&sent).unwrap(), serde_json::from_str::<Value>(&expected).unwrap()));
+    let (mut seen, mut pending) = (Vec::new(), Vec::<Pending>::new());
+    for line in lines {
+        match line {
+            Line::Inbound(line) => assert!(meter.feed(&host, line).await),
+            Line::Outbound(expected) => {
+                let mut frame = Value::Null;
+                pause(&mut || frame = serde_json::from_str(&expected).unwrap());
+                if let Some(action) = act(&engine, &options, &frame, &seen, meter) {
+                    pending.push(action);
                 }
+                poll_all(&mut pending);
+                let sent = host.from_engine.try_recv().expect("the engine wrote the recorded frame");
+                pause(&mut || assert_eq!(serde_json::from_str::<Value>(&sent).unwrap(), frame));
+                assert_eq!(sent.len(), expected.len(), "the recorded frame, byte for byte in length");
             }
         }
-        assert_eq!(host.from_engine.recv().await, None, "close is the end of to_codex");
-    };
-    tokio::join!(script, codex);
+        poll_all(&mut pending);
+        while let Ok(event) = events.try_recv() {
+            let ends = ends_session(&event);
+            pause(&mut || assert!(!ends, "{event:?} ends the session"));
+            pause(&mut || seen.push(event.clone()));
+        }
+    }
+    assert!(pending.is_empty(), "every method was answered");
+    drop(pending);
+    for event in &seen {
+        if let EmbeddedEvent::Call { call, .. } = event {
+            assert!(!engine.call_live(call), "retired by the end");
+            assert_eq!(engine.answer(call, true, "late"), Err(EmbeddedError::Invalid { reason: "the call is not live" }));
+        }
+    }
+    engine.close();
+    assert_eq!(events.recv().await, Some(EmbeddedEvent::Closed { fault: None }));
+    assert_eq!(events.recv().await, None);
+    engine.finished().await;
+    assert_eq!(host.from_engine.recv().await, None, "nothing more was written, and close is the end of to_codex");
     // The host's output goes before the engine's holding is sampled; the
     // engine's handles stay.
     drop(host);
@@ -217,15 +220,56 @@ pub async fn replay(lines: Vec<Line>, meter: &Meter) -> Vec<EmbeddedEvent> {
     seen
 }
 
-/// A short, allocation-free name of an event's kind and method.
-fn event_name(event: &EmbeddedEvent) -> &'static str {
-    match event {
-        EmbeddedEvent::RemoteControl { .. } => "remoteControl",
-        EmbeddedEvent::Notification { method: Method::TurnCompleted, .. } => "turnCompleted",
-        EmbeddedEvent::Notification { .. } => "notification",
-        EmbeddedEvent::Refused { .. } => "refused",
-        EmbeddedEvent::Unheld { .. } => "unheld",
-        EmbeddedEvent::Unmapped { .. } => "unmapped",
-        EmbeddedEvent::Closed { .. } => "closed",
+/// The host's action for the client's next recorded frame: a method called,
+/// a call answered, or nothing (the engine writes `initialized` and
+/// refusals itself).
+fn act<'e>(engine: &'e EmbeddedEngine, options: &'e ThreadOptions, frame: &Value, seen: &[EmbeddedEvent], meter: &Meter) -> Option<Pending<'e>> {
+    let mut action: Option<Pending<'e>> = None;
+    let mut boxed = |future: Pending<'e>| action = Some(future);
+    match frame["method"].as_str() {
+        Some("initialize") => (meter.pause)(&mut || boxed(Box::pin(async { engine.connect().await.unwrap() }))),
+        Some("thread/start") => (meter.pause)(&mut || {
+            boxed(Box::pin(async {
+                let opened = engine.open_thread(options).await.unwrap();
+                assert_eq!((opened.ephemeral, opened.environments), (Reported::Value(true), Reported::Value(0)));
+            }))
+        }),
+        Some("turn/start") => {
+            let text = frame["params"]["input"][0]["text"].as_str().unwrap().to_owned();
+            (meter.pause)(&mut || {
+                let text = text.clone();
+                boxed(Box::pin(async move {
+                    engine.send_text(&text).await.unwrap();
+                }))
+            })
+        }
+        Some("turn/interrupt") => (meter.pause)(&mut || boxed(Box::pin(async { engine.interrupt().await.unwrap() }))),
+        Some(_) => {}
+        None if frame.get("result").is_some() => {
+            let call = seen.iter().find_map(|e| match e {
+                EmbeddedEvent::Call { call, .. } if rpc_id(&call.rpc_id) == frame["id"] => Some(call),
+                _ => None,
+            });
+            let call = call.expect("the call answered was a Call event");
+            assert!(engine.call_live(call), "the host checks the call is live");
+            let result = &frame["result"];
+            let text = result["contentItems"][0]["text"].as_str().unwrap();
+            engine.answer(call, result["success"].as_bool().unwrap(), text).unwrap();
+        }
+        None => {}
     }
+    action
+}
+
+fn rpc_id(id: &RpcId) -> Value {
+    match id {
+        RpcId::Integer(n) => Value::from(*n),
+        RpcId::Text(text) => Value::from(text.as_str()),
+    }
+}
+
+/// Polls each pending method once, dropping those Codex has answered.
+fn poll_all(pending: &mut Vec<Pending>) {
+    let mut cx = Context::from_waker(Waker::noop());
+    pending.retain_mut(|future| future.as_mut().poll(&mut cx).is_pending());
 }

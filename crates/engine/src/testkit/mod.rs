@@ -27,7 +27,7 @@ pub(crate) mod harness;
 mod record;
 mod scenarios;
 mod subagents;
-mod stub;
+pub(crate) mod stub;
 mod transcript;
 
 use harness::{Ctx, codex_present, library};

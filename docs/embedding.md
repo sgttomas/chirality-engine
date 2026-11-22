@@ -1,8 +1,8 @@
 # Embedding under containment
 
 Part of the engine's design (`SPEC.md`). Designed 2026-11-22 for SWBPIPE,
-revised after five rounds of review. Step 1 (the core) is built; calls
-(`calls.rs`) are not yet.
+revised after five rounds of review. Step 1 (the core) and step 2 (calls,
+`calls.rs`) are built.
 
 SWBPIPE runs one Codex per session, with one ephemeral thread, no built-in
 capability, and remote control off; any built-in activity ends the session.
@@ -395,6 +395,11 @@ Step 1's counting-allocator test drives adversarial frames down every path:
 - replies left uncollected across repeated calls;
 - a ring filled, drained and refilled with different payload sizes;
 - close on every path, before and after `connect`.
+
+Step 2 adds calls to it:
+- the recorded call, answered with 65,515 bytes, and the recorded interrupt;
+- calls pending and answered at their largest arguments and text;
+- a full record of refused requests with 256-byte identities, then one more.
 
 It counts the engine's allocations at classes, old plus new, and fails above
 `max_bytes`. Another test checks that an event is at most 128 bytes.
