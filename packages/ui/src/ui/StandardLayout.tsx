@@ -3,6 +3,7 @@ import { useEffect, type ReactNode } from "react";
 import { markLabel, markOf, nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Conversation } from "./Conversation";
+import { ItemView, type ItemViewer } from "./conversation/itemView";
 import { FirstUse } from "./FirstUse";
 import { Navigator } from "./Navigator";
 import { FeaturedWorkflows } from "./composer/WorkflowPicker";
@@ -22,11 +23,13 @@ export interface StandardLayoutProps {
   /** The workflow names the picker lists before anything is typed, besides the project's own;
    * a search finds every workflow. Unset, it lists them all. */
   featuredWorkflows?: readonly string[];
+  /** The application's view of items in the conversation; unset, an `ItemView` around the layout applies. */
+  itemView?: ItemViewer;
 }
 
 /** Projects and threads on the left, the conversation in the centre, the side panel on the
  * right; first use until the person is signed in with a project. */
-export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, panel, featuredWorkflows }: StandardLayoutProps) {
+export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, panel, featuredWorkflows, itemView }: StandardLayoutProps) {
   const snapshot = useStore((s) => s.model?.snapshot);
   const control = usePanelState(panel);
   useNotifications();
@@ -43,7 +46,13 @@ export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, 
       ) : (
         <div className={`app ${control.panel.open ? "app--panel" : ""}`}>
           <Navigator brand={brand} />
-          <Conversation />
+          {itemView ? (
+            <ItemView.Provider value={itemView}>
+              <Conversation />
+            </ItemView.Provider>
+          ) : (
+            <Conversation />
+          )}
           {control.panel.open && <RightPanel tabs={panelTabs} />}
         </div>
       )}
