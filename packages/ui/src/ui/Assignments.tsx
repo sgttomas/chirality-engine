@@ -1,9 +1,10 @@
 // Assignment between threads: a message another thread sent, shown as from that thread; the
 // agent's assign, message and close, each opening the other thread; and, on an assigned thread,
 // the thread that assigned it.
-import type { Item, ThreadId, ThreadSummary } from "../engine/types";
+import type { Item, ThreadId, ThreadSummary, Workflow } from "../engine/types";
 import { nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
+import { WorkflowChip } from "./conversation/Items";
 import { Icon } from "./Icon";
 
 /** The other thread, when the snapshot has it. */
@@ -13,8 +14,8 @@ function useThread(id: ThreadId | null | undefined): ThreadSummary | undefined {
 
 const ended = { completed: null, stopped: "Stopped", failed: "Failed" } as const;
 
-/** A message from another thread: its title, which opens it, then the text. */
-export function FromThread({ item }: { item: Item }) {
+/** A message from another thread: its title, which opens it, the workflow it picked, then the text. */
+export function FromThread({ item, workflows }: { item: Item; workflows: Workflow[] }) {
   const store = useStoreHandle();
   const from = item.body.kind === "userMessage" ? item.body.from : null;
   const sender = useThread(from?.thread);
@@ -27,6 +28,11 @@ export function FromThread({ item }: { item: Item }) {
         <Icon name="at" /> {name}
         {end && <span className="msg-from-end">{end}</span>}
       </button>
+      {item.body.workflow && (
+        <div className="chips">
+          <WorkflowChip workflow={item.body.workflow} workflows={workflows} />
+        </div>
+      )}
       {item.body.text && <div className="msg-from-text">{item.body.text}</div>}
     </div>
   );

@@ -35,7 +35,7 @@ export function TurnView(props: { thread: ThreadId; turn: Turn; workflows: Workf
         const { item } = block;
         switch (item.body.kind) {
           case "userMessage":
-            return item.body.from ? <FromThread key={item.id} item={item} /> : <UserMessage key={item.id} item={item} workflows={workflows} />;
+            return item.body.from ? <FromThread key={item.id} item={item} workflows={workflows} /> : <UserMessage key={item.id} item={item} workflows={workflows} />;
           case "agentMessage":
             return <AgentMessage key={item.id} text={item.body.text} />;
           case "plan":

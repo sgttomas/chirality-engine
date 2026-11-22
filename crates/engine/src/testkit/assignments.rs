@@ -108,10 +108,14 @@ async fn turns_end(ctx: &mut Ctx, threads: &[(&ThreadId, usize)]) {
 /// The lead assigns a worker; the worker's turn ends and its last reply comes back to the lead,
 /// whose agent closes the assignment and sends one more message, whose turn reports nothing.
 pub async fn assignment(ctx: &mut Ctx) {
+    let folder = ctx.run.project().join(".chirality/workflows/survey");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("WORKFLOW.md"), "---\nname: survey\ndescription: Survey the site.\n---\n# Survey\nMeasure, then record.\n").unwrap();
     let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
+    let survey = ctx.engine.workflows(&project.id).await.unwrap().into_iter().find(|w| w.name == "survey").expect("the project's workflow");
     let worker = Later::default();
-    let assign = json!({"title": "Piles", "brief": "STUB[worker] Check the pile lengths.", "effort": "medium", "access": "fullAccess"});
-    ctx.script("lead", steps("lead", move || vec![engine_call("call_assign", "assign", assign.clone())], "Assigned."));
+    let assign = json!({"title": "Piles", "brief": "STUB[worker] Check the pile lengths.", "effort": "medium", "access": "fullAccess", "workflow": "survey"});
+    ctx.script("lead", steps("lead", move || vec![engine_call("call_threads", "threads", json!({})), engine_call("call_assign", "assign", assign.clone())], "Assigned."));
     ctx.script("worker", after(Duration::from_millis(1500), says("worker", "The piles are within tolerance. STUB[heard]")));
     let w = worker.clone();
     let heard = move || {
@@ -152,6 +156,7 @@ pub async fn assignment(ctx: &mut Ctx) {
 
     let worker_view = ctx.read_thread(&assigned).await;
     assert_eq!(worker_view.turns.len(), 2);
+    assert!(matches!(&worker_view.turns[0].items[0].body, ItemBody::UserMessage { workflow: Some(w), .. } if *w == survey.id), "{:?}", worker_view.turns[0].items[0].body);
     let brief = from(&worker_view.turns[0]).expect("the brief is from the lead");
     assert_eq!((brief.thread, brief.report), (lead.clone(), None));
     assert_eq!(first_text(&worker_view.turns[0]), "STUB[worker] Check the pile lengths.");
@@ -314,6 +319,8 @@ pub async fn assignment_access(ctx: &mut Ctx) {
 
     ctx.kill_codex();
     ctx.wait("Codex to be back", |e| matches!(e, Event::Codex { status: CodexStatus::Ready { .. } }).then_some(())).await;
+    // The engine lists the project again once Codex is back; that ends before the project is removed.
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     ctx.engine.remove_project(&project.id).await.unwrap();
     ctx.engine.add_project(ctx.run.project()).await.unwrap();
     assert_eq!(summary(ctx, &fork).assigned_by, None, "a fork, though the listing does not say so");

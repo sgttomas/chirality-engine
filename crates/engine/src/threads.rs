@@ -102,23 +102,19 @@ impl Inner {
         self.load(session, thread).await.map(|_| ())
     }
 
-    /// Loads a thread as [`Inner::ensure_loaded`] does; when it resumes it,
-    /// the access Codex resumed it with. Codex 0.171.0 resumes a thread at no
-    /// more than the access of its last turn (one asked of in an untrusted
-    /// folder, read only), so it bounds an access the engine does not know.
+    /// Loads a thread as [`Inner::ensure_loaded`] does, and gives the access
+    /// Codex resumed or forked it with, if it did (see
+    /// [`p::LoadResponse::access`]), which bounds an access the engine does not know.
     pub(crate) async fn load(&self, session: &Session, thread: &ThreadId) -> Result<Option<Access>> {
-        if session.is_loaded(thread) {
-            return Ok(None);
+        if let Some(access) = session.loaded_access(thread) {
+            return Ok(access);
         }
         let entry = self.known_thread(thread)?;
-        let resumed: p::ResumeResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
+        let resumed: p::LoadResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
         self.tool_calls.reopen_thread(&thread.0);
-        session.mark_loaded(thread);
-        Ok(Some(match resumed.sandbox.as_ref().and_then(|s| s["type"].as_str()) {
-            Some("dangerFullAccess") => Access::FullAccess,
-            Some("workspaceWrite") => Access::Ask,
-            _ => Access::ReadOnly,
-        }))
+        let access = resumed.access();
+        session.mark_loaded(thread, Some(access));
+        Ok(Some(access))
     }
 
     pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
@@ -180,7 +176,7 @@ impl Inner {
         let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: Some(crate::tools::specs(self.config.tools.as_ref())) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
         let id = self.adopt_thread(&started.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
-        session.mark_loaded(&id);
+        session.mark_loaded(&id, None);
         session.mark_unkept(&id, before);
         if let Some((from, title)) = &assigned {
             self.store.update_thread(&id, |e| {
@@ -204,7 +200,7 @@ impl Inner {
         }
         self.ensure_loaded(&session, thread).await?;
         let params = json!({ "threadId": thread.0, "lastTurnId": through.0, "excludeTurns": true });
-        let forked: p::ThreadResponse = session.call("thread/fork", params).await?;
+        let forked: p::LoadResponse = session.call("thread/fork", params).await?;
         let id = self.adopt_thread(&forked.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex forked the thread into another folder".into() })?;
         let parent = self.store.thread(thread);
         self.store.update_thread(&id, |e| {
@@ -219,7 +215,7 @@ impl Inner {
                 }
             }
         });
-        session.mark_loaded(&id);
+        session.mark_loaded(&id, Some(forked.access()));
         Ok(id)
     }
 

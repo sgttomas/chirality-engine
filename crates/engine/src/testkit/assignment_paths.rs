@@ -39,13 +39,19 @@ fn id(s: &str) -> ThreadId {
 async fn engine_with(name: &str, threads: Vec<Value>) -> (Engine, tokio::sync::mpsc::UnboundedReceiver<Wire>, Wire, String) {
     let (engine, wires, mut wire, codex, folder) = start_engine(name, None).await;
     codex.hold("thread/list");
+    add_listing(&engine, &mut wire, &folder, threads).await;
+    (engine, wires, wire, folder.display().to_string())
+}
+
+/// Adds the project at `folder`, which Codex lists with `threads`.
+async fn add_listing(engine: &Engine, wire: &mut Wire, folder: &std::path::Path, threads: Vec<Value>) -> Project {
     let cwd = folder.display().to_string();
     let threads: Vec<Value> = threads.into_iter().map(|mut t| {
         t["cwd"] = json!(cwd);
         t
     }).collect();
     let mut adding = tokio::spawn({
-        let (engine, folder) = (engine.clone(), folder.clone());
+        let (engine, folder) = (engine.clone(), folder.to_path_buf());
         async move { engine.add_project(folder).await }
     });
     wire.answer("thread/list", json!({"data": threads, "nextCursor": null})).await;
@@ -63,8 +69,7 @@ async fn engine_with(name: &str, threads: Vec<Value>) -> (Engine, tokio::sync::m
             },
         }
     };
-    added.unwrap().expect("the project is added");
-    (engine, wires, wire, cwd)
+    added.unwrap().expect("the project is added")
 }
 
 /// Starts a turn the person sends, as the engine sends it: resumed first when not loaded.
@@ -88,6 +93,30 @@ async fn delivered(wire: &mut Wire, turn_id: &str) -> Value {
     assert_eq!(frame["method"], "turn/start", "{frame}");
     wire.send(json!({"id": frame["id"], "result": {"turn": turn(turn_id, "inProgress", json!([]))}}));
     frame
+}
+
+/// Answers what the engine asks before a delivered turn starts (a resume, at
+/// `sandbox`; a look at the thread's latest turn, of which it has none), then
+/// the `turn/start`, as `turn_id`.
+async fn delivered_after_loading(wire: &mut Wire, turn_id: &str, sandbox: &str) -> Value {
+    loop {
+        let frame = wire.next().await;
+        let answer = |result: Value| json!({"id": frame["id"], "result": result});
+        match frame["method"].as_str() {
+            Some("thread/resume") => wire.send(answer(json!({"thread": {"id": frame["params"]["threadId"], "status": {"type": "idle"}, "cwd": "/"}, "sandbox": {"type": sandbox}}))),
+            Some("thread/turns/list") => wire.send(answer(json!({"data": [], "nextCursor": null}))),
+            Some("turn/start") => {
+                wire.send(answer(json!({"turn": turn(turn_id, "inProgress", json!([]))})));
+                return frame;
+            }
+            _ => panic!("unexpected {frame}"),
+        }
+    }
+}
+
+fn post_from(engine: &Engine, to: &str, text: &str, access: Access) -> tokio::task::JoinHandle<Posted> {
+    let (engine, to, text) = (engine.clone(), id(to), text.to_string());
+    tokio::spawn(async move { engine.inner().post(to, Delivery::new(mark("a", None), text, access, settings(access))).await })
 }
 
 async fn quiet_for(wire: &mut Wire, times: usize) {
@@ -144,12 +173,8 @@ async fn a_delivery_to_a_thread_whose_access_is_not_known_is_bounded() {
     let (engine, _wires, mut wire, _) = engine_with("deliver-unknown", vec![thread("a", "", "lead"), thread("b", "", "worker")]).await;
     let summary = engine.snapshot().threads.into_iter().find(|t| t.id.0 == "b").unwrap();
     assert_eq!(summary.settings, None, "a listing without a model says nothing of settings");
-    let posting = tokio::spawn({
-        let inner = engine.clone();
-        async move { inner.inner().post(id("b"), Delivery::new(mark("a", None), "Go.".into(), Access::FullAccess, settings(Access::FullAccess))).await }
-    });
-    wire.answer("thread/resume", json!({"thread": {"id": "b", "status": {"type": "idle"}, "cwd": "/"}, "sandbox": {"type": "readOnly"}})).await;
-    let frame = delivered(&mut wire, "t1").await;
+    let posting = post_from(&engine, "b", "Go.", Access::FullAccess);
+    let frame = delivered_after_loading(&mut wire, "t1", "readOnly").await;
     assert_eq!(posting.await.unwrap(), Posted::Now);
     assert_eq!(frame["params"]["sandboxPolicy"]["type"], "readOnly", "{frame}");
     engine.shutdown().await;
@@ -246,5 +271,91 @@ async fn a_start_whose_answer_was_lost_is_not_sent_again_when_history_has_it() {
     }
     assert!(looked, "the history was read before trying again");
     assert_eq!(engine.inner().assignments.deliveries.waiting(&id("b")), 0);
+    engine.shutdown().await;
+}
+
+/// A thread forked after a restart, and the thread it was forked from, are
+/// loaded at the access Codex gives each: a delivery from an Ask thread does
+/// not raise a read-only one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fork_after_a_restart_keeps_the_access_codex_loaded_it_with() {
+    let (engine, _wires, mut wire, cwd) = engine_with("deliver-fork", vec![thread("a", "", "lead"), thread("b", "", "worker")]).await;
+    let forking = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.fork(&id("b"), &TurnId("t0".into())).await }
+    });
+    wire.answer("thread/resume", json!({"thread": {"id": "b", "status": {"type": "idle"}, "cwd": cwd}, "sandbox": {"type": "readOnly"}})).await;
+    wire.answer("thread/fork", json!({"thread": {"id": "c", "status": {"type": "idle"}, "cwd": cwd, "preview": "worker"}, "sandbox": {"type": "readOnly"}})).await;
+    assert_eq!(forking.await.unwrap().expect("the thread is forked"), id("c"));
+    for (thread, turn_id) in [("b", "t1"), ("c", "t2")] {
+        let posting = post_from(&engine, thread, "Go.", Access::Ask);
+        let frame = delivered_after_loading(&mut wire, turn_id, "workspaceWrite").await;
+        assert_eq!(posting.await.unwrap(), Posted::Now);
+        assert_eq!((frame["params"]["threadId"].as_str(), frame["params"]["sandboxPolicy"]["type"].as_str()), (Some(thread), Some("readOnly")), "{frame}");
+    }
+    engine.shutdown().await;
+}
+
+/// A project removed and added back is taken in afresh: its threads are
+/// resumed again, and a delivery from an Ask thread does not raise a read-only one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_project_added_back_loads_its_threads_afresh() {
+    let threads = || vec![thread("a", "", "lead"), thread("b", "", "worker")];
+    let (engine, _wires, mut wire, cwd) = engine_with("deliver-readd", threads()).await;
+    person_turn(&engine, &mut wire, "b", "t1", Access::ReadOnly, Some(json!({"type": "readOnly"}))).await;
+    wire.send(note("turn/completed", "b", "t1", "completed"));
+    until("the turn to end", || engine.snapshot().threads.iter().any(|t| t.id.0 == "b" && t.status == ThreadStatus::Idle)).await;
+    let project = engine.snapshot().projects[0].id.clone();
+    engine.remove_project(&project).await.unwrap();
+    add_listing(&engine, &mut wire, std::path::Path::new(&cwd), threads()).await;
+    let posting = post_from(&engine, "b", "Go.", Access::Ask);
+    let frame = delivered_after_loading(&mut wire, "t2", "readOnly").await;
+    assert_eq!(posting.await.unwrap(), Posted::Now);
+    assert_eq!(frame["params"]["sandboxPolicy"]["type"], "readOnly", "{frame}");
+    engine.shutdown().await;
+}
+
+/// Codex stops before a delivery's start is sent: it is sent once Codex is
+/// back, though an earlier turn opened with the same message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_never_sent_is_sent_when_codex_is_back_though_its_text_repeats() {
+    let (engine, mut wires, mut wire, cwd) = engine_with("deliver-unsent", vec![thread("a", "", "lead"), thread("b", "", "worker")]).await;
+    let posting = post_from(&engine, "b", "Go.", Access::Ask);
+    delivered_after_loading(&mut wire, "t1", "workspaceWrite").await;
+    assert_eq!(posting.await.unwrap(), Posted::Now);
+    wire.send(note("turn/started", "b", "t1", "inProgress"));
+    wire.send(note("turn/completed", "b", "t1", "completed"));
+    // Codex unloads the thread: the next delivery resumes it first, and Codex stops then.
+    wire.send(json!({"method": "thread/closed", "params": {"threadId": "b"}}));
+    quiet_for(&mut wire, 2).await;
+    let posting = post_from(&engine, "b", "Go.", Access::Ask);
+    let frame = wire.next().await;
+    assert_eq!(frame["method"], "thread/resume", "{frame}");
+    wire.kill();
+    assert_eq!(posting.await.unwrap(), Posted::Later);
+    let mut wire = tokio::time::timeout(Duration::from_secs(5), wires.recv()).await.unwrap().expect("Codex is started again");
+    let first = turn("t1", "completed", json!([{"type": "userMessage", "id": "u", "content": [{"type": "text", "text": marker::render(&mark("a", None))}, {"type": "text", "text": "Go."}]}]));
+    let end = tokio::time::Instant::now() + Duration::from_secs(4);
+    let started = loop {
+        assert!(tokio::time::Instant::now() < end, "the delivery was not sent");
+        let Ok(frame) = tokio::time::timeout(Duration::from_millis(600), wire.next()).await else { continue };
+        let answer = |result: Value| json!({"id": frame["id"], "result": result});
+        match frame["method"].as_str() {
+            Some("thread/list") => {
+                let listed = [thread("a", &cwd, "lead"), thread("b", &cwd, "worker")];
+                let threads = if frame["params"]["ancestorThreadId"].is_string() { vec![] } else { listed.to_vec() };
+                wire.send(answer(json!({"data": threads, "nextCursor": null})));
+            }
+            Some("thread/resume") => wire.send(answer(json!({"thread": {"id": "b", "status": {"type": "idle"}, "cwd": cwd}, "sandbox": {"type": "workspaceWrite"}}))),
+            Some("thread/turns/list") => wire.send(answer(json!({"data": [first.clone()], "nextCursor": null}))),
+            Some("turn/start") => {
+                wire.send(answer(json!({"turn": turn("t2", "inProgress", json!([]))})));
+                break frame;
+            }
+            _ => panic!("unexpected {frame}"),
+        }
+    };
+    assert_eq!(started["params"]["input"][1]["text"], "Go.", "{started}");
+    until("the delivery to be taken out", || engine.inner().assignments.deliveries.waiting(&id("b")) == 0).await;
     engine.shutdown().await;
 }

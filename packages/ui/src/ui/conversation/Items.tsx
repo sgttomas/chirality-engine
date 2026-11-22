@@ -8,6 +8,16 @@ import { workLine, workSummary } from "./group";
 import { Markdown } from "./Markdown";
 import "../styles/base.css";
 
+/** The workflow a message picked. */
+export function WorkflowChip({ workflow, workflows }: { workflow: string; workflows: Workflow[] }) {
+  const picked = workflows.find((w) => w.id === workflow);
+  return (
+    <span className="chip chip--workflow">
+      <Icon name="book" /> {picked?.name ?? workflow.split("/").at(-2) ?? workflow}
+    </span>
+  );
+}
+
 export function UserMessage({ item, workflows }: { item: Item; workflows: Workflow[] }) {
   const root = useProjectRoot();
   if (item.body.kind !== "userMessage") return null;
@@ -17,11 +27,7 @@ export function UserMessage({ item, workflows }: { item: Item; workflows: Workfl
     <div className="msg-user">
       {(picked || attachments.length > 0) && (
         <div className="chips">
-          {workflow && (
-            <span className="chip chip--workflow">
-              <Icon name="book" /> {picked?.name ?? workflow.split("/").at(-2) ?? workflow}
-            </span>
-          )}
+          {workflow && <WorkflowChip workflow={workflow} workflows={workflows} />}
           {attachments.map((a) => (
             <span key={a.path} className="chip" title={shortPath(a.path, root)}>
               <Icon name={a.kind === "image" ? "file" : "paperclip"} /> {a.path.split("/").pop()}
@@ -85,6 +91,7 @@ function WorkItem({ item }: { item: Item }) {
         </li>
       );
     case "webSearch":
+    case "threadTool":
       return <li className="work-reasoning">{workLine(item)}</li>;
     case "subagentTool":
       return (

@@ -6,8 +6,8 @@
 //!
 //! A delivery's settings are the receiving thread's, read under its
 //! admission just before its turn starts; where the engine does not know that
-//! thread's access, no more than Ask, the sender's, or what Codex resumes the
-//! thread with. What waits is held in memory only: a delivery waiting when the
+//! thread's access, no more than Ask, the sender's, or what Codex resumed or
+//! forked the thread with (read only if it did not say). What waits is held in memory only: a delivery waiting when the
 //! engine stops is not made.
 
 use std::collections::{HashMap, VecDeque};
@@ -22,6 +22,7 @@ use crate::api::*;
 use crate::protocol as p;
 use crate::session::{Inner, Session};
 use crate::store::{ThreadEntry, is_idle};
+use crate::turns::{NotStarted, Sent, Start};
 
 /// How long a waiting delivery sleeps between looks when no event comes.
 const RECHECK: Duration = Duration::from_millis(500);
@@ -39,25 +40,25 @@ pub(crate) struct Delivery {
     pub bound: Access,
     /// Model and effort for a receiving thread whose own are not known: the sender's.
     pub fallback: TurnSettings,
-    /// Codex may have taken its turn before it stopped answering.
-    uncertain: bool,
+    /// Its `turn/start` went to Codex, which stopped before it answered: it may have taken the turn.
+    uncertain: Option<Sent>,
 }
 
 impl Delivery {
     pub fn new(from: Marker, text: String, bound: Access, fallback: TurnSettings) -> Delivery {
-        Delivery { id: 0, from, text, bound, fallback, uncertain: false }
+        Delivery { id: 0, from, text, bound, fallback, uncertain: None }
     }
 }
 
 /// The settings a delivered turn runs with: the receiving thread's own, and
 /// where its access is not known, no more than Ask, the sender's, or what Codex
-/// resumed it with.
+/// resumed or forked it with; read only if Codex did not say.
 pub(crate) fn resolve(entry: &ThreadEntry, resumed: Option<Access>, bound: Access, fallback: &TurnSettings) -> TurnSettings {
     let own = entry.starting.clone().or(entry.settings.clone());
     let (model, effort) = own.as_ref().map_or_else(|| (fallback.model.clone(), fallback.effort.clone()), |s| (s.model.clone(), s.effort.clone()));
     let access = match own {
         Some(own) if entry.access_known => own.access,
-        _ => lower(lower(Access::Ask, bound), resumed.unwrap_or(Access::Ask)),
+        _ => lower(lower(Access::Ask, bound), resumed.unwrap_or(Access::ReadOnly)),
     };
     TurnSettings { model, effort, access }
 }
@@ -76,20 +77,21 @@ struct Queues {
 }
 
 impl Deliveries {
-    /// Queues a delivery; true when the thread had none waiting, so the
-    /// caller delivers it (nothing else is delivering to the thread).
-    fn push(&self, thread: &ThreadId, mut delivery: Delivery) -> bool {
+    /// Queues a delivery, giving its id; true when the thread had none
+    /// waiting, so the caller delivers it.
+    fn push(&self, thread: &ThreadId, mut delivery: Delivery) -> (bool, u64) {
         let mut queues = self.queues.lock().unwrap();
         queues.next_id += 1;
-        delivery.id = queues.next_id;
+        let id = queues.next_id;
+        delivery.id = id;
         match queues.by_thread.get_mut(thread) {
             Some(queue) => {
                 queue.push_back(delivery);
-                false
+                (false, id)
             }
             None => {
                 queues.by_thread.insert(thread.clone(), VecDeque::from([delivery]));
-                true
+                (true, id)
             }
         }
     }
@@ -111,9 +113,9 @@ impl Deliveries {
         }
     }
 
-    fn mark_uncertain(&self, thread: &ThreadId, id: u64) {
+    fn mark_uncertain(&self, thread: &ThreadId, id: u64, sent: Sent) {
         if let Some(queue) = self.queues.lock().unwrap().by_thread.get_mut(thread) {
-            queue.iter_mut().filter(|d| d.id == id).for_each(|d| d.uncertain = true);
+            queue.iter_mut().filter(|d| d.id == id).for_each(|d| d.uncertain = Some(sent.clone()));
         }
     }
 
@@ -212,13 +214,18 @@ impl Inner {
     /// before it and no turn runs there (so the turn's start comes before the
     /// caller goes on), else by the thread's deliverer once that turn ends.
     pub(crate) async fn post(self: &Arc<Self>, thread: ThreadId, delivery: Delivery) -> Posted {
-        if !self.assignments.deliveries.push(&thread, delivery) {
+        let (first, own) = self.assignments.deliveries.push(&thread, delivery);
+        if !first {
             return Posted::Later;
         }
-        let step = self.step(&thread).await;
+        let (step, took) = self.step(&thread).await;
         if !matches!(step, Step::Empty | Step::Gone) {
             // More may have come meanwhile; the deliverer takes them, or ends.
             tokio::spawn(self.clone().deliver(thread));
+        }
+        // What became of another delivery says nothing of this one.
+        if took != Some(own) {
+            return if matches!(step, Step::Gone) { Posted::Gone } else { Posted::Later };
         }
         match step {
             Step::Started => Posted::Now,
@@ -233,7 +240,7 @@ impl Inner {
     async fn deliver(self: Arc<Self>, thread: ThreadId) {
         let mut events = self.store.subscribe();
         loop {
-            match self.step(&thread).await {
+            match self.step(&thread).await.0 {
                 Step::Empty | Step::Gone => return,
                 Step::Started | Step::Dropped => {}
                 Step::Refused(message) => self.not_delivered(&thread, &message),
@@ -248,16 +255,22 @@ impl Inner {
         self.store.update_thread(thread, |e| e.failed = Some(format!("A message from another thread was not delivered: {message}")));
     }
 
-    /// Whether a delivery still has a place: its sender is still there, and a
+    /// Whether a delivery from `from` still has a place: its sender is still there, and a
     /// report goes to the thread that assigned its sender, whose assignment is open.
-    fn still_holds(&self, thread: &ThreadId, delivery: &Delivery) -> bool {
-        let Some(sender) = self.store.thread(&delivery.from.from) else { return false };
-        delivery.from.report.is_none() || (sender.assigned_by.as_ref() == Some(thread) && !self.assignments.is_closed(thread, &delivery.from.from))
+    pub(crate) fn still_holds(&self, thread: &ThreadId, from: &Marker) -> bool {
+        let Some(sender) = self.store.thread(&from.from) else { return false };
+        from.report.is_none() || (sender.assigned_by.as_ref() == Some(thread) && !self.assignments.is_closed(thread, &from.from))
     }
 
-    async fn step(self: &Arc<Self>, thread: &ThreadId) -> Step {
+    /// One step, and the id of the delivery it took, if it took one.
+    async fn step(self: &Arc<Self>, thread: &ThreadId) -> (Step, Option<u64>) {
         let deliveries = &self.assignments.deliveries;
-        let Some(next) = deliveries.next(thread) else { return Step::Empty };
+        let Some(next) = deliveries.next(thread) else { return (Step::Empty, None) };
+        (self.step_with(thread, &next).await, Some(next.id))
+    }
+
+    async fn step_with(self: &Arc<Self>, thread: &ThreadId, next: &Delivery) -> Step {
+        let deliveries = &self.assignments.deliveries;
         // Archived, or the engine has stopped: the assignment has ended.
         let gone = || {
             deliveries.clear(thread);
@@ -267,15 +280,15 @@ impl Inner {
             return gone();
         }
         let Some(entry) = self.store.thread(thread) else { return gone() };
-        if !self.still_holds(thread, &next) {
+        if !self.still_holds(thread, &next.from) {
             deliveries.remove(thread, next.id);
             return Step::Dropped;
         }
         if !is_idle(&entry) {
             return Step::Wait;
         }
-        if next.uncertain {
-            match self.delivered_already(thread, &next).await {
+        if let Some(sent) = &next.uncertain {
+            match self.delivered_already(thread, next, sent).await {
                 Some(true) => {
                     deliveries.remove(thread, next.id);
                     return Step::Started;
@@ -284,32 +297,39 @@ impl Inner {
                 None => return Step::Wait,
             }
         }
-        let message = Message { text: next.text.clone(), attachments: Vec::new(), workflow: None };
-        match self.start_if_idle(thread, message, next.from.clone(), next.bound, next.fallback.clone()).await {
-            Ok(true) => {
+        match self.start_if_idle(thread, next).await {
+            Ok(Start::Started) => {
                 deliveries.remove(thread, next.id);
                 Step::Started
             }
-            Ok(false) => Step::Wait,
-            // Codex may have taken the turn before it stopped answering: look before trying again.
-            Err(EngineError::CodexUnavailable { .. }) => {
-                deliveries.mark_uncertain(thread, next.id);
+            Ok(Start::Busy) => Step::Wait,
+            Ok(Start::Dropped) => {
+                deliveries.remove(thread, next.id);
+                Step::Dropped
+            }
+            Err(NotStarted { error: EngineError::CodexUnavailable { .. }, sent }) => {
+                // Sent, Codex may have taken the turn before it stopped answering: look before trying again.
+                if let Some(sent) = sent {
+                    deliveries.mark_uncertain(thread, next.id, sent);
+                }
                 Step::Wait
             }
-            Err(EngineError::NotFound { .. }) => gone(),
-            Err(e) => {
+            Err(NotStarted { error: EngineError::NotFound { .. }, .. }) => gone(),
+            Err(NotStarted { error, .. }) => {
                 deliveries.remove(thread, next.id);
-                Step::Refused(e.to_string())
+                Step::Refused(error.to_string())
             }
         }
     }
 
-    /// Whether the thread's latest turns already open with this delivery; `None` while Codex cannot say.
-    async fn delivered_already(&self, thread: &ThreadId, delivery: &Delivery) -> Option<bool> {
+    /// Whether a turn of the thread's after those it had when the delivery was
+    /// sent opens with it; `None` while Codex cannot say.
+    async fn delivered_already(&self, thread: &ThreadId, delivery: &Delivery, sent: &Sent) -> Option<bool> {
         let session = self.session().ok()?;
         let params = json!({ "threadId": thread.0, "limit": 2, "sortDirection": "desc", "itemsView": "summary" });
         let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
-        Some(page.data.iter().filter_map(opened_with).any(|(mark, text)| mark == delivery.from && text == delivery.text))
+        let newer = page.data.iter().take_while(|t| sent.after.as_ref().is_none_or(|after| t.id != after.0));
+        Some(newer.filter_map(opened_with).any(|(mark, text)| mark == delivery.from && text == delivery.text))
     }
 
     /// A turn of an assigned thread ended: its report is looked at after
@@ -344,7 +364,7 @@ impl Inner {
         if !opener.is_some_and(|m| m.from == assigner && m.report.is_none()) || self.closed(&session, &assigner, &thread).await {
             return;
         }
-        let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::Ask, |s| s.access) } else { Access::Ask };
+        let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::ReadOnly, |s| s.access) } else { Access::ReadOnly };
         let Some(fallback) = self.settings_of(&assigner).or(entry.settings.clone()) else { return };
         let from = Marker { from: thread, title: entry.title, report: Some(end) };
         if let Posted::Refused(message) = self.post(assigner.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
@@ -366,6 +386,13 @@ impl Inner {
         }
         closed
     }
+}
+
+/// The thread's latest turn, if it has one.
+pub(crate) async fn latest_turn(session: &Session, thread: &ThreadId) -> Result<Option<TurnId>> {
+    let params = json!({ "threadId": thread.0, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded" });
+    let page: p::TurnsListResponse = session.call("thread/turns/list", params).await?;
+    Ok(page.data.first().map(|t| TurnId(t.id.clone())))
 }
 
 /// The turn, by its id, from the newest back.
@@ -410,8 +437,8 @@ mod tests {
         let deliveries = Deliveries::default();
         let lead = ThreadId("lead".into());
         let one = |from: &str, report| Delivery::new(Marker { from: ThreadId(from.into()), title: None, report }, "x".into(), Access::Ask, TurnSettings { model: "m".into(), effort: None, access: Access::Ask });
-        assert!(deliveries.push(&lead, one("worker", Some(TurnEnd::Completed))));
-        assert!(!deliveries.push(&lead, one("other", None)));
+        assert!(deliveries.push(&lead, one("worker", Some(TurnEnd::Completed))).0);
+        assert!(!deliveries.push(&lead, one("other", None)).0);
         // The deliverer has the report in hand when the assignment is closed, then delivers it.
         let held = deliveries.next(&lead).unwrap();
         deliveries.drop_reports(&lead, &ThreadId("worker".into()));
@@ -447,9 +474,11 @@ mod tests {
         assert_eq!(resolve(&entry(Some(with(Access::FullAccess)), true), None, Access::ReadOnly, &sender), with(Access::FullAccess));
         assert_eq!(resolve(&entry(Some(with(Access::ReadOnly)), true), Some(Access::FullAccess), Access::FullAccess, &sender), with(Access::ReadOnly));
         // Listed only: its model and effort, and no more than Ask, the sender's, or what Codex resumed it with.
-        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), None, Access::FullAccess, &sender), with(Access::Ask));
-        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), None, Access::ReadOnly, &sender), with(Access::ReadOnly));
+        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), Some(Access::FullAccess), Access::FullAccess, &sender), with(Access::Ask));
+        assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), Some(Access::Ask), Access::ReadOnly, &sender), with(Access::ReadOnly));
         assert_eq!(resolve(&entry(Some(with(Access::Ask)), false), Some(Access::ReadOnly), Access::FullAccess, &sender), with(Access::ReadOnly));
+        // Codex did not say what it loaded the thread with: read only.
+        assert_eq!(resolve(&entry(Some(with(Access::FullAccess)), false), None, Access::FullAccess, &sender), with(Access::ReadOnly));
         // Nothing known of it: the sender's model and effort.
         assert_eq!(resolve(&entry(None, false), Some(Access::FullAccess), Access::FullAccess, &sender), TurnSettings { access: Access::Ask, ..sender });
     }

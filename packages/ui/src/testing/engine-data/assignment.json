@@ -167,7 +167,7 @@
         "path": "/work/run/project"
       }
     ],
-    "seq": 50,
+    "seq": 52,
     "threads": [
       {
         "assignedBy": null,
@@ -446,6 +446,38 @@
         "body": {
           "kind": "threadTool",
           "status": "running",
+          "text": null,
+          "thread": null,
+          "tool": "threads"
+        },
+        "done": false,
+        "id": "call_threads"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "completed",
+          "text": null,
+          "thread": null,
+          "tool": "threads"
+        },
+        "done": true,
+        "id": "call_threads"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000003",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "threadTool",
+          "status": "running",
           "text": "STUB[worker] Check the pile lengths.",
           "thread": null,
           "tool": "assign"
@@ -573,7 +605,7 @@
           },
           "kind": "userMessage",
           "text": "STUB[worker] Check the pile lengths.",
-          "workflow": null
+          "workflow": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md"
         },
         "done": false,
         "id": "00000000-0000-0000-0000-000000000008"
@@ -593,7 +625,7 @@
           },
           "kind": "userMessage",
           "text": "STUB[worker] Check the pile lengths.",
-          "workflow": null
+          "workflow": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md"
         },
         "done": true,
         "id": "00000000-0000-0000-0000-000000000008"
@@ -1075,9 +1107,9 @@
   ],
   "reads": [
     {
-      "afterEvents": 44,
+      "afterEvents": 46,
       "view": {
-        "seq": 44,
+        "seq": 46,
         "summary": {
           "assignedBy": null,
           "forkedFrom": null,
@@ -1110,6 +1142,17 @@
                 },
                 "done": true,
                 "id": "00000000-0000-0000-0000-000000000004"
+              },
+              {
+                "body": {
+                  "kind": "threadTool",
+                  "status": "completed",
+                  "text": null,
+                  "thread": null,
+                  "tool": "threads"
+                },
+                "done": true,
+                "id": "call_threads"
               },
               {
                 "body": {
@@ -1192,9 +1235,9 @@
       }
     },
     {
-      "afterEvents": 44,
+      "afterEvents": 46,
       "view": {
-        "seq": 44,
+        "seq": 46,
         "summary": {
           "assignedBy": "00000000-0000-0000-0000-000000000002",
           "forkedFrom": null,
@@ -1227,7 +1270,7 @@
                   },
                   "kind": "userMessage",
                   "text": "STUB[worker] Check the pile lengths.",
-                  "workflow": null
+                  "workflow": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md"
                 },
                 "done": true,
                 "id": "00000000-0000-0000-0000-000000000008"
@@ -1280,5 +1323,13 @@
       }
     }
   ],
-  "workflows": []
+  "workflows": [
+    {
+      "id": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md",
+      "name": "survey",
+      "path": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md",
+      "source": "project",
+      "summary": "Survey the site."
+    }
+  ]
 }

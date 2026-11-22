@@ -1,5 +1,6 @@
 // Assignment between threads in the interface, over what the real engine emitted when an agent
-// assigned a thread, heard its report, closed the assignment and sent one more message.
+// listed the threads, assigned one with a workflow, heard its report, closed the assignment and
+// sent one more message.
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -32,6 +33,7 @@ describe("assignment", () => {
     expect(within(main()).getByText("The piles are within tolerance. STUB[heard]")).toBeInTheDocument();
     expect(within(main()).getByRole("button", { name: "Closed Piles" })).toBeInTheDocument();
     expect(within(main()).getByRole("button", { name: "Messaged Piles" })).toBeInTheDocument();
+    expect(within(main()).getByText("Listed the threads").tagName).toBe("LI");
 
     // Both are ordinary threads, at the same level in the list.
     const rows = within(nav()).getAllByRole("button").filter((b) => b.classList.contains("nav-thread"));
@@ -44,6 +46,7 @@ describe("assignment", () => {
     expect(store.get().thread).toBe(worker.id);
     expect(screen.getByRole("heading", { name: "Piles" })).toBeInTheDocument();
     expect(within(main()).getByText("STUB[worker] Check the pile lengths.")).toBeInTheDocument();
+    expect(within(main()).getByText("survey").closest(".msg-from")).not.toBeNull();
     expect(within(main()).getAllByRole("button", { name: nameOf(lead) })).toHaveLength(3);
     expect(main().querySelector(".msg-user")).toBeNull();
 

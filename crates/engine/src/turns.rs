@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::api::*;
+use crate::assignment::delivery::Delivery;
 use crate::assignment::marker::Marker;
 use crate::mapping;
 use crate::protocol as p;
@@ -37,6 +38,30 @@ impl Admission {
     }
 }
 
+/// What became of a start with another thread's message.
+#[derive(Debug)]
+pub(crate) enum Start {
+    Started,
+    /// A turn runs there.
+    Busy,
+    /// Its sender is gone, or the assignment it reports on is closed.
+    Dropped,
+}
+
+/// A start with another thread's message that failed.
+#[derive(Debug)]
+pub(crate) struct NotStarted {
+    pub error: EngineError,
+    /// Set when `turn/start` went to Codex, which may have taken it.
+    pub sent: Option<Sent>,
+}
+
+/// A `turn/start` sent: the thread's latest turn before it, if it had one.
+#[derive(Clone, Debug)]
+pub(crate) struct Sent {
+    pub after: Option<TurnId>,
+}
+
 /// Runs `op` as the engine's own task; the caller only waits for it.
 async fn owned<F>(op: F) -> Result<()>
 where
@@ -56,34 +81,50 @@ impl Inner {
         let (inner, thread) = (self.clone(), thread.clone());
         owned(async move {
             let _admitted = inner.admission.admit(&thread).await;
-            inner.send_admitted(&thread, message, settings, from.as_ref(), true).await
+            inner.send_admitted(&thread, message, settings, from.as_ref(), true, &mut false).await
         })
         .await
     }
 
     /// Starts a turn with another thread's message if the engine has seen no
-    /// turn run there since the last ended (none steered); `Ok(false)` if one
-    /// does. Its settings are the thread's own as they are now, under its
-    /// admission (see [`crate::assignment::delivery::resolve`]).
-    pub(crate) async fn start_if_idle(self: &Arc<Self>, thread: &ThreadId, message: Message, from: Marker, bound: Access, fallback: TurnSettings) -> Result<bool> {
-        let (inner, thread) = (self.clone(), thread.clone());
+    /// turn run there since the last ended (none steered) and the message still
+    /// has a place. Its settings are the thread's own as they are now, under
+    /// its admission (see [`crate::assignment::delivery::resolve`]).
+    pub(crate) async fn start_if_idle(self: &Arc<Self>, thread: &ThreadId, delivery: &Delivery) -> std::result::Result<Start, NotStarted> {
+        let (inner, thread, delivery) = (self.clone(), thread.clone(), delivery.clone());
         let (tx, rx) = tokio::sync::oneshot::channel();
-        owned(async move {
+        let ran = owned(async move {
             let _admitted = inner.admission.admit(&thread).await;
-            let entry = inner.known_thread(&thread)?;
-            if !crate::store::is_idle(&entry) {
-                let _ = tx.send(false);
-                return Ok(());
-            }
-            let session = inner.session()?;
-            let resumed = inner.load(&session, &thread).await?;
-            let settings = crate::assignment::delivery::resolve(&entry, resumed, bound, &fallback);
-            inner.send_admitted(&thread, message, settings, Some(&from), false).await?;
-            let _ = tx.send(true);
+            let _ = tx.send(inner.start_admitted(&thread, &delivery).await);
             Ok(())
         })
-        .await?;
-        Ok(rx.await.unwrap_or(false))
+        .await;
+        rx.await.unwrap_or_else(|_| Err(NotStarted { error: ran.err().unwrap_or(EngineError::Invalid { message: "the engine's task ended".into() }), sent: None }))
+    }
+
+    async fn start_admitted(&self, thread: &ThreadId, delivery: &Delivery) -> std::result::Result<Start, NotStarted> {
+        let unsent = |error| NotStarted { error, sent: None };
+        let entry = self.known_thread(thread).map_err(unsent)?;
+        if !crate::store::is_idle(&entry) {
+            return Ok(Start::Busy);
+        }
+        // Its sender, or the assignment it reports on, may have gone while it waited for the thread.
+        if !self.still_holds(thread, &delivery.from) {
+            return Ok(Start::Dropped);
+        }
+        let session = self.session().map_err(unsent)?;
+        let resumed = self.load(&session, thread).await.map_err(unsent)?;
+        let after = match entry.last_ended.clone() {
+            Some(turn) => Some(turn),
+            None => crate::assignment::delivery::latest_turn(&session, thread).await.map_err(unsent)?,
+        };
+        let settings = crate::assignment::delivery::resolve(&entry, resumed, delivery.bound, &delivery.fallback);
+        let message = Message { text: delivery.text.clone(), attachments: Vec::new(), workflow: None };
+        let mut sent = false;
+        match self.send_admitted(thread, message, settings, Some(&delivery.from), false, &mut sent).await {
+            Ok(()) => Ok(Start::Started),
+            Err(error) => Err(NotStarted { error, sent: sent.then_some(Sent { after }) }),
+        }
     }
 
     /// Stops the running turn, and holds the thread until Codex has ended it;
@@ -97,7 +138,8 @@ impl Inner {
         .await
     }
 
-    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings, from: Option<&Marker>, may_steer: bool) -> Result<()> {
+    /// `sent` is set once `turn/start` goes to Codex.
+    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings, from: Option<&Marker>, may_steer: bool, sent: &mut bool) -> Result<()> {
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
         if entry.subagent.is_some() {
@@ -133,6 +175,7 @@ impl Inner {
         // every summary the turn causes has them; they are kept only once Codex
         // has taken the turn.
         self.store.update_thread(thread, |e| e.starting = Some(settings));
+        *sent = true;
         let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {

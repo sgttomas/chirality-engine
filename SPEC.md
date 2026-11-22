@@ -158,13 +158,16 @@ refused.
 - A delivered turn runs with the receiving thread's settings as they are when
   it starts (a report's, the assigner's). The engine knows a thread's access
   once it has started a turn there; until then (after a restart, a listing)
-  the turn has no more than Ask, the sender's, or the access Codex resumes the
-  thread with.
+  the turn has no more than Ask, the sender's, or the access Codex resumed or
+  forked the thread with, and is read only where Codex did not say. A sender
+  or reporter whose access the engine does not know counts as read only. The
+  person's own sends are unchanged.
 - A delivery is made only while its sender is there and, for a report, the
   assignment is open: archiving either thread drops what waits. A delivery
   Codex refuses after it waited is told on the receiving thread; one whose
-  start Codex may have taken as it stopped is looked for in that thread's
-  history before it is tried again.
+  `turn/start` was sent and not answered before Codex stopped is looked for
+  among that thread's turns after the latest it had then, before it is tried
+  again.
 - Approvals and questions in an assigned thread go to the person on that
   thread, as on any thread. Its assigner is not told; it hears when the turn
   ends.
@@ -207,10 +210,11 @@ gives one all of its parent's or none). Codex announces a turn's end before
 the next `turn/start` is taken as a new turn: a start sent once the end is
 heard begins a turn, never steers; and a turn's first message and last reply
 are in its history (`itemsView: summary`) once its end is heard.
-`thread/resume` answers with the sandbox it resumed the thread with: a read
-only or full access thread's own, and read only for one the engine ran at
-Ask in a folder Codex does not trust, so it bounds an access but does not
-give it.
+`thread/resume` and `thread/fork` answer with the sandbox Codex loaded the
+thread with: a read only or full access thread's own, and read only for one
+the engine ran at Ask in a folder Codex does not trust, so it bounds an access
+but does not give it. The engine keeps it for as long as Codex has the thread
+loaded.
 
 **Decided by the owner (2026-11-21).** Turns the person starts in an assigned
 thread report nothing back. The assigning agent gives the assigned thread its

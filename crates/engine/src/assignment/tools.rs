@@ -183,12 +183,12 @@ impl Inner {
         self.store.thread(thread).and_then(|e| e.starting.or(e.settings))
     }
 
-    /// The thread's own settings, with its access no more than Ask unless the engine knows it.
+    /// The thread's own settings, with its access read only unless the engine knows it.
     fn sender_settings(&self, thread: &ThreadId) -> Option<TurnSettings> {
         let entry = self.store.thread(thread)?;
         let known = entry.access_known || entry.starting.is_some();
         let settings = entry.starting.or(entry.settings)?;
-        Some(if known { settings } else { TurnSettings { access: lower(settings.access, Access::Ask), ..settings } })
+        Some(if known { settings } else { TurnSettings { access: Access::ReadOnly, ..settings } })
     }
 
     fn find_project(&self, named: &str) -> std::result::Result<Project, String> {
