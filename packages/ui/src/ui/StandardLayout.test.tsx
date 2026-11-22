@@ -107,17 +107,6 @@ describe("a conversation", () => {
     expect(rows[1].querySelector(".nav-fork")).not.toBeNull();
   });
 
-  it("references a file with @ and attaches it", async () => {
-    await mount(fakeEngine());
-    await type("Check @quant");
-    const menu = await screen.findByRole("listbox", { name: "Files" });
-    expect(within(menu).getByText("quantities.csv")).toBeInTheDocument();
-    fireEvent.keyDown(composer(), { key: "Enter" });
-    await settle();
-    expect(composer().value).toBe("Check @estimate/quantities.csv ");
-    expect(screen.getByLabelText("Remove estimate/quantities.csv")).toBeInTheDocument();
-  });
-
   it("picks a workflow into the message", async () => {
     const { store } = await mount(fakeEngine({ autoAnswer: () => ({ kind: "allow" }) }));
     await userEvent.click(screen.getByRole("button", { name: /Workflow/ }));

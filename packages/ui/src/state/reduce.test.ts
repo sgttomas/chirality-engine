@@ -33,11 +33,11 @@ describe("following the engine's events", () => {
     engine.seedProject(bridge);
     const follower = await follow(engine);
 
-    const thread = await engine.startThread(bridge.id, { text: "Draft the scope of work.", attachments: [], workflow: "wf-scope" }, settings);
+    const thread = await engine.startThread(bridge.id, { text: "Draft the scope of work.", attachments: [], workflow: "wf-scope", threads: [] }, settings);
     await follower.read(thread);
-    await engine.send(thread, { text: "Keep it short.", attachments: [], workflow: null }, settings);
+    await engine.send(thread, { text: "Keep it short.", attachments: [], workflow: null, threads: [] }, settings);
     await engine.settled(thread);
-    await engine.send(thread, { text: "Now rerun the estimate.", attachments: [], workflow: null }, settings);
+    await engine.send(thread, { text: "Now rerun the estimate.", attachments: [], workflow: null, threads: [] }, settings);
     await engine.settled(thread);
 
     const model = follower.model();
@@ -51,7 +51,7 @@ describe("following the engine's events", () => {
     const engine = new FakeEngine({ instant: true, autoAnswer: (r) => (r.kind === "question" ? null : { kind: "allow" }) });
     engine.seedProject(bridge);
     const follower = await follow(engine);
-    const thread = await engine.startThread(bridge.id, { text: "Rerun the estimate.", attachments: [], workflow: null }, settings);
+    const thread = await engine.startThread(bridge.id, { text: "Rerun the estimate.", attachments: [], workflow: null, threads: [] }, settings);
     await new Promise((r) => setTimeout(r, 0));
 
     const waiting = follower.model();

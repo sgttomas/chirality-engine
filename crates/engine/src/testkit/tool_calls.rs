@@ -395,7 +395,7 @@ async fn an_archived_thread_that_comes_back_is_resumed_before_its_next_turn() {
     let (engine, _wires, mut wire, _, folder) = start_with(&probe).await;
     known_thread(&engine, &mut wire, &folder, "t1").await;
     let settings = TurnSettings { model: "m".into(), effort: None, access: Access::Ask };
-    let message = || Message { text: "go".into(), attachments: vec![], workflow: None };
+    let message = || Message { text: "go".into(), attachments: vec![], workflow: None, threads: vec![] };
     let sending = tokio::spawn({
         let (engine, settings) = (engine.clone(), settings.clone());
         async move { engine.send(&ThreadId("t1".into()), message(), settings).await }

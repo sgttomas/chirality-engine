@@ -49,7 +49,7 @@ export function ThreadToolItem({ item }: { item: Item }) {
   const store = useStoreHandle();
   const body = item.body.kind === "threadTool" ? item.body : null;
   const other = useThread(body?.thread);
-  if (!body || body.tool === "threads") return null;
+  if (!body || body.tool === "threads" || body.tool === "read") return null;
   const name = other ? nameOf(other) : "a thread";
   const failed = body.status === "failed";
   const said = {

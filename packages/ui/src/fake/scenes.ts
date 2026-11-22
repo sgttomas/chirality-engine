@@ -20,7 +20,7 @@ export const sceneNames = ["firstUse", "empty", "running", "approval", "question
 export type SceneName = (typeof sceneNames)[number];
 
 const settings: TurnSettings = { model: "gpt-5.5", effort: "high", access: "ask" };
-const msg = (text: string, workflow: string | null = null): Message => ({ text, attachments: [], workflow });
+const msg = (text: string, workflow: string | null = null): Message => ({ text, attachments: [], workflow, threads: [] });
 
 const allowAll = (request: Request): Answer =>
   request.kind === "question" ? { kind: "answers", answers: [[request.questions[0].id, request.questions[0].options[1]]] } : { kind: "allow" };

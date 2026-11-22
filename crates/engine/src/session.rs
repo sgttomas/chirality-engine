@@ -222,6 +222,7 @@ impl Inner {
                 reaped.push(opening.reaped());
             }
             self.tool_calls.close();
+            self.assignments.codex_stopped();
             reaped
         };
         let _ = self.attempts.subscribe().wait_for(|n| *n == 0).await;
@@ -367,6 +368,7 @@ impl Inner {
     fn after_death(&self, generation: u64) {
         self.store.resolve(|p| p.generation == generation);
         self.tool_calls.close();
+        self.assignments.codex_stopped();
         let message = "Codex stopped during this turn".to_string();
         for id in self.store.thread_ids() {
             let ended = self.store.update_thread(&id, |entry| {

@@ -240,7 +240,7 @@ impl Inner {
         let session = self.session()?;
         self.known_thread(thread)?;
         session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
-        self.assignments.deliveries.forget(thread);
+        self.assignments.forget_thread(thread);
         self.store.remove_thread(thread);
         self.tool_calls.close_thread(&thread.0, false);
         session.forget_loaded(thread);

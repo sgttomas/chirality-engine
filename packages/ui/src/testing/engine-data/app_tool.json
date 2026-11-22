@@ -398,6 +398,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[check] check the estimate",
+          "threads": [],
           "workflow": null
         },
         "done": false,
@@ -414,6 +415,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[check] check the estimate",
+          "threads": [],
           "workflow": null
         },
         "done": true,
@@ -576,6 +578,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[none] check the estimate",
+          "threads": [],
           "workflow": null
         },
         "done": false,
@@ -592,6 +595,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[none] check the estimate",
+          "threads": [],
           "workflow": null
         },
         "done": true,
@@ -734,6 +738,7 @@
                   "from": null,
                   "kind": "userMessage",
                   "text": "STUB[check] check the estimate",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,
@@ -800,6 +805,7 @@
                   "from": null,
                   "kind": "userMessage",
                   "text": "STUB[check] check the estimate",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,
@@ -840,6 +846,7 @@
                   "from": null,
                   "kind": "userMessage",
                   "text": "STUB[none] check the estimate",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,

@@ -10,7 +10,7 @@ import { applyEvent, type Model } from "./reduce";
  * the subagent's finishing does, and in its history comes after it. The view is read again when
  * the turn completes; until then the same items, in the order they began, are as good. */
 const byId = (view: ThreadView): ThreadView => ({ ...view, turns: view.turns.map((t) => ({ ...t, items: [...t.items].sort((a, b) => a.id.localeCompare(b.id)) })) });
-const reordered = new Set(["subagent"]);
+const reordered = new Set(["subagent", "assignment_read"]);
 
 describe.each(engineDataNames)("following the engine's events: %s", (name) => {
   it("matches every view the engine read and its final snapshot", () => {

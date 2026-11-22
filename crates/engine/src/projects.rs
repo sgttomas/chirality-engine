@@ -86,7 +86,7 @@ impl Inner {
             if self.store.thread(&id).is_some_and(|e| &e.project == project) {
                 self.store.remove_thread(&id);
                 // Taken in again if the project is added back: read afresh, nothing waiting.
-                self.assignments.deliveries.forget(&id);
+                self.assignments.forget_thread(&id);
                 if let Some(session) = &session {
                     session.forget_loaded(&id);
                 }

@@ -71,6 +71,25 @@ describe("assignment", () => {
     expect(report.textContent).not.toContain("**");
   });
 
+  it("folds a read of another thread into the work, naming it, and a refused one too", async () => {
+    const engine = new ReplayTransport(engineData("assignment_read"), (s) => ({ ...s, account: { state: "signedIn", email: "person@example.com", plan: null } }));
+    const { store } = await mount(engine.client);
+    await act(async () => void engine.play());
+    await settle();
+    const threads = store.get().model!.snapshot.threads;
+    const lead = threads.find((t) => t.title === "STUB[reader] Read the peer and the worker.")!;
+    const worker = threads.find((t) => t.subagent)!;
+    await act(() => store.selectThread(lead.id));
+    await settle();
+    const work = within(main()).getByText("Read STUB[peer] Survey.");
+    expect(work.tagName).toBe("LI");
+    expect(work.closest("details")).not.toBeNull();
+    expect(within(main()).getByText(`Read ${nameOf(worker)}`).tagName).toBe("LI");
+    await act(() => store.selectThread(worker.id));
+    await settle();
+    expect(within(main()).getByText("Could not read STUB[peer] Survey.").tagName).toBe("LI");
+  });
+
   it("is a scene from the engine's own data", async () => {
     const scene = await buildScene("assignment");
     const { store } = await mount(scene.engine);

@@ -17,11 +17,11 @@ fn agent_call(id: &str, name: &str, args: Value) -> Value {
     json!({"type": "function_call", "namespace": "collaboration", "name": name, "call_id": id, "id": format!("fc_{id}"), "arguments": args.to_string()})
 }
 
-fn spawn(id: &str, task: &str, message: &str) -> Value {
+pub(super) fn spawn(id: &str, task: &str, message: &str) -> Value {
     agent_call(id, "spawn_agent", json!({"task_name": task, "message": message, "fork_turns": "none"}))
 }
 
-fn wait(id: &str) -> Value {
+pub(super) fn wait(id: &str) -> Value {
     agent_call(id, "wait_agent", json!({"timeout_ms": 60000}))
 }
 
@@ -42,7 +42,7 @@ fn bodies(view: &ThreadView) -> Vec<ItemBody> {
 }
 
 /// The subagent at `path`, once the engine has taken it in.
-async fn new_subagent(ctx: &mut Ctx, path: &str) -> ThreadSummary {
+pub(super) async fn new_subagent(ctx: &mut Ctx, path: &str) -> ThreadSummary {
     ctx.wait("a subagent", |e| match e {
         Event::Thread { thread } if thread.subagent.as_ref().is_some_and(|s| s.path == path) => Some(thread.clone()),
         _ => None,

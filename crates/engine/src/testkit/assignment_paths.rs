@@ -15,28 +15,28 @@ use crate::api::*;
 use crate::assignment::delivery::{Delivery, Posted};
 use crate::assignment::marker::{self, Marker};
 
-fn thread(id: &str, cwd: &str, preview: &str) -> Value {
+pub(super) fn thread(id: &str, cwd: &str, preview: &str) -> Value {
     json!({"id": id, "status": {"type": "idle"}, "cwd": cwd, "preview": preview})
 }
 
-fn turn(id: &str, status: &str, items: Value) -> Value {
+pub(super) fn turn(id: &str, status: &str, items: Value) -> Value {
     json!({"id": id, "status": status, "error": null, "items": items})
 }
 
-fn note(method: &str, thread: &str, turn_id: &str, status: &str) -> Value {
+pub(super) fn note(method: &str, thread: &str, turn_id: &str, status: &str) -> Value {
     json!({"method": method, "params": {"threadId": thread, "turn": turn(turn_id, status, json!([]))}})
 }
 
-fn mark(from: &str, report: Option<TurnEnd>) -> Marker {
+pub(super) fn mark(from: &str, report: Option<TurnEnd>) -> Marker {
     Marker { from: ThreadId(from.into()), title: None, report }
 }
 
-fn id(s: &str) -> ThreadId {
+pub(super) fn id(s: &str) -> ThreadId {
     ThreadId(s.into())
 }
 
 /// The engine with one project listing `threads`; a marked thread is read to confirm it.
-async fn engine_with(name: &str, threads: Vec<Value>) -> (Engine, tokio::sync::mpsc::UnboundedReceiver<Wire>, Wire, String) {
+pub(super) async fn engine_with(name: &str, threads: Vec<Value>) -> (Engine, tokio::sync::mpsc::UnboundedReceiver<Wire>, Wire, String) {
     let (engine, wires, mut wire, codex, folder) = start_engine(name, None).await;
     codex.hold("thread/list");
     add_listing(&engine, &mut wire, &folder, threads).await;
@@ -44,7 +44,7 @@ async fn engine_with(name: &str, threads: Vec<Value>) -> (Engine, tokio::sync::m
 }
 
 /// Adds the project at `folder`, which Codex lists with `threads`.
-async fn add_listing(engine: &Engine, wire: &mut Wire, folder: &std::path::Path, threads: Vec<Value>) -> Project {
+pub(super) async fn add_listing(engine: &Engine, wire: &mut Wire, folder: &std::path::Path, threads: Vec<Value>) -> Project {
     let cwd = folder.display().to_string();
     let threads: Vec<Value> = threads.into_iter().map(|mut t| {
         t["cwd"] = json!(cwd);
@@ -73,7 +73,7 @@ async fn add_listing(engine: &Engine, wire: &mut Wire, folder: &std::path::Path,
 }
 
 /// Starts a turn the person sends, as the engine sends it: resumed first when not loaded.
-async fn person_turn(engine: &Engine, wire: &mut Wire, thread: &str, turn_id: &str, access: Access, resumed: Option<Value>) {
+pub(super) async fn person_turn(engine: &Engine, wire: &mut Wire, thread: &str, turn_id: &str, access: Access, resumed: Option<Value>) {
     let sending = tokio::spawn({
         let engine = engine.clone();
         let thread = id(thread);
@@ -88,7 +88,7 @@ async fn person_turn(engine: &Engine, wire: &mut Wire, thread: &str, turn_id: &s
 }
 
 /// The next `turn/start` the engine sends, answered as `turn_id`.
-async fn delivered(wire: &mut Wire, turn_id: &str) -> Value {
+pub(super) async fn delivered(wire: &mut Wire, turn_id: &str) -> Value {
     let frame = wire.next().await;
     assert_eq!(frame["method"], "turn/start", "{frame}");
     wire.send(json!({"id": frame["id"], "result": {"turn": turn(turn_id, "inProgress", json!([]))}}));
@@ -98,7 +98,7 @@ async fn delivered(wire: &mut Wire, turn_id: &str) -> Value {
 /// Answers what the engine asks before a delivered turn starts (a resume, at
 /// `sandbox`; a look at the thread's latest turn, of which it has none), then
 /// the `turn/start`, as `turn_id`.
-async fn delivered_after_loading(wire: &mut Wire, turn_id: &str, sandbox: &str) -> Value {
+pub(super) async fn delivered_after_loading(wire: &mut Wire, turn_id: &str, sandbox: &str) -> Value {
     loop {
         let frame = wire.next().await;
         let answer = |result: Value| json!({"id": frame["id"], "result": result});
@@ -114,18 +114,18 @@ async fn delivered_after_loading(wire: &mut Wire, turn_id: &str, sandbox: &str) 
     }
 }
 
-fn post_from(engine: &Engine, to: &str, text: &str, access: Access) -> tokio::task::JoinHandle<Posted> {
+pub(super) fn post_from(engine: &Engine, to: &str, text: &str, access: Access) -> tokio::task::JoinHandle<Posted> {
     let (engine, to, text) = (engine.clone(), id(to), text.to_string());
     tokio::spawn(async move { engine.inner().post(to, Delivery::new(mark("a", None), text, access, settings(access))).await })
 }
 
-async fn quiet_for(wire: &mut Wire, times: usize) {
+pub(super) async fn quiet_for(wire: &mut Wire, times: usize) {
     for _ in 0..times {
         wire.quiet().await;
     }
 }
 
-async fn until(what: &str, done: impl Fn() -> bool) {
+pub(super) async fn until(what: &str, done: impl Fn() -> bool) {
     for _ in 0..250 {
         if done() {
             return;
@@ -325,6 +325,8 @@ async fn a_start_never_sent_is_sent_when_codex_is_back_though_its_text_repeats()
     assert_eq!(posting.await.unwrap(), Posted::Now);
     wire.send(note("turn/started", "b", "t1", "inProgress"));
     wire.send(note("turn/completed", "b", "t1", "completed"));
+    // The engine started that turn with a's message: it looks at it for its report (none here).
+    wire.answer("thread/turns/list", json!({"data": [], "nextCursor": null})).await;
     // Codex unloads the thread: the next delivery resumes it first, and Codex stops then.
     wire.send(json!({"method": "thread/closed", "params": {"threadId": "b"}}));
     quiet_for(&mut wire, 2).await;

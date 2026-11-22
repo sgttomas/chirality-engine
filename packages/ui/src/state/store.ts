@@ -248,7 +248,7 @@ export class Store {
   async sendDraft(key: string, project: ProjectId, thread: ThreadId | null, settings: TurnSettings) {
     const d = this.draft(key);
     if (d.sending || !d.text.trim()) return;
-    const taken = { text: d.text, attachments: d.attachments, workflow: d.workflow };
+    const taken = { text: d.text, attachments: d.attachments, threads: d.threads, workflow: d.workflow };
     this.editDraft(key, { sending: true });
     if (thread) {
       const ok = await this.attempt(() => this.engine.send(thread, messageOf(d), settings).then(() => true));

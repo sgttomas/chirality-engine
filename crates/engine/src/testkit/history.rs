@@ -1,11 +1,12 @@
 //! A recorded scenario: a new thread read before Codex has kept its first
-//! message, and after.
+//! message (by the person, and by another thread's agent), and after.
 
 use serde_json::json;
 
 use super::harness::{Ctx, settings, text};
 use super::stub::says;
 use crate::api::*;
+use crate::assignment::read::{ReadArgs, View};
 use crate::protocol as p;
 
 /// A thread started without its first message, as the engine starts one.
@@ -33,6 +34,10 @@ pub async fn unkept_thread(ctx: &mut Ctx) {
     let (thread, before) = codex_thread(ctx, &project).await;
     let early = ctx.read_thread(&thread).await;
     assert!(early.turns.is_empty() && early.seq == before, "{early:?}");
+    // Another thread's agent reads it: its header, and no history.
+    let args = ReadArgs { thread: thread.0.clone(), view: View::Messages, before: None, limit: None };
+    let read = ctx.engine.inner().read_for(&ThreadId("reader".into()), args).await.expect("a new thread is read");
+    assert_eq!((&read["thread"], &read["status"], &read["error"], &read["items"], &read["more"]), (&json!(thread.0), &json!("idle"), &json!(null), &json!([]), &json!(false)));
     reply(ctx, &thread, "one").await;
     assert_eq!(ctx.read_thread(&thread).await.turns.len(), 1);
 }

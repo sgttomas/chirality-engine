@@ -78,8 +78,6 @@ export class ReplayTransport implements Transport {
         return null;
       case "workflows":
         return structuredClone(this.data.workflows);
-      case "find_files":
-        return [];
       case "read_file":
         this.reads.push(args.path as string);
         return "hello\n";

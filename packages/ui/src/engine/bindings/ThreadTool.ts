@@ -3,4 +3,4 @@
 /**
  * The engine's tools for working with other threads (namespace `chirality`).
  */
-export type ThreadTool = "assign" | "message" | "threads" | "close";
+export type ThreadTool = "assign" | "message" | "threads" | "close" | "read";

@@ -10,6 +10,7 @@ use crate::api::*;
 
 pub use super::assignments::{assignment, assignment_access, assignment_exchange, assignment_person, assignment_projects, assignment_waits};
 pub use super::history::unkept_thread;
+pub use super::peers::{assignment_read, assignment_untooled, thread_refs};
 pub use super::subagents::{subagent, subagent_message, subagent_stop, subagent_tools};
 
 async fn project(ctx: &Ctx) -> Project {
@@ -63,7 +64,7 @@ pub async fn text_turn(ctx: &mut Ctx) {
     let (thread, _) = one_turn(ctx, &project, "hello", "Hello from the stub.", Access::Ask).await;
     let turns = turns(ctx, &thread).await;
     assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[hello] go".into(), attachments: vec![], workflow: None, from: None });
+    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[hello] go".into(), attachments: vec![], workflow: None, threads: vec![], from: None });
     assert_eq!(agent_text(&turns[0]), "Hello from the stub.");
     let summary = status(ctx, &thread);
     assert_eq!((summary.status, summary.unread, summary.project), (ThreadStatus::Idle, true, project.id.clone()));
@@ -72,8 +73,6 @@ pub async fn text_turn(ctx: &mut Ctx) {
     assert!(!status(ctx, &thread).unread);
     ctx.engine.rename(&thread, "Greeting".into()).await.unwrap();
     assert_eq!(status(ctx, &thread).title.as_deref(), Some("Greeting"));
-    let found = ctx.engine.find_files(&project.id, "notes".into()).await.unwrap();
-    assert!(found.contains(&ctx.run.project().join("notes.md")), "{found:?}");
     assert_eq!(ctx.engine.read_file(&project.id, "notes.md".into()).await.unwrap(), "notes\n");
     assert!(ctx.engine.read_file(&project.id, ctx.run.project().join("../home")).await.is_err());
 }
@@ -92,11 +91,11 @@ pub async fn workflow_turn(ctx: &mut Ctx) {
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89\0\0\0\rIDATx\x9cc\xf8\xff\xff?\0\x05\xfe\x02\xfe\xa7\x35\x81\x84\0\0\0\0IEND\xaeB`\x82";
     std::fs::write(ctx.run.project().join("sketch.png"), PNG).unwrap();
     let attachments = vec![Attachment::File { path: ctx.run.project().join("scope.md") }, Attachment::Image { path: ctx.run.project().join("sketch.png") }];
-    let message = Message { text: "STUB[flow] Estimate this".into(), attachments: attachments.clone(), workflow: Some(estimate.id.clone()) };
+    let message = Message { text: "STUB[flow] Estimate this".into(), attachments: attachments.clone(), workflow: Some(estimate.id.clone()), threads: vec![] };
     let thread = ctx.engine.start_thread(&project.id, message, settings(Access::Ask)).await.unwrap();
     assert_eq!(ctx.turn_ended(&thread).await.1, TurnState::Completed);
     let turns = turns(ctx, &thread).await;
-    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[flow] Estimate this".into(), attachments, workflow: Some(estimate.id), from: None });
+    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[flow] Estimate this".into(), attachments, workflow: Some(estimate.id), threads: vec![], from: None });
     assert_eq!(status(ctx, &thread).title.as_deref(), Some("STUB[flow] Estimate this"));
 }
 
@@ -327,7 +326,7 @@ pub async fn main_path(ctx: &mut Ctx) {
     let library = library().expect("a Library edition").display().to_string();
     let review = workflows.iter().find(|w| w.source == library && w.name == "review").expect("the library's review workflow").clone();
     ctx.script("main", calls("main", shell_call("call_main", "printf ok > main.txt", true), false));
-    let message = Message { text: "STUB[main] review this".into(), attachments: vec![], workflow: Some(review.id.clone()) };
+    let message = Message { text: "STUB[main] review this".into(), attachments: vec![], workflow: Some(review.id.clone()), threads: vec![] };
     let thread = ctx.engine.start_thread(&project.id, message, settings(Access::Ask)).await.unwrap();
     let pending = ctx.pending(&thread).await;
     ctx.engine.answer(&pending.id, Answer::Allow).await.unwrap();

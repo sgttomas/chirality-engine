@@ -119,7 +119,7 @@ impl Inner {
             None => crate::assignment::delivery::latest_turn(&session, thread).await.map_err(unsent)?,
         };
         let settings = crate::assignment::delivery::resolve(&entry, resumed, delivery.bound, &delivery.fallback);
-        let message = Message { text: delivery.text.clone(), attachments: Vec::new(), workflow: None };
+        let message = Message { text: delivery.text.clone(), attachments: Vec::new(), workflow: None, threads: Vec::new() };
         let mut sent = false;
         match self.send_admitted(thread, message, settings, Some(&delivery.from), false, &mut sent).await {
             Ok(()) => Ok(Start::Started),
@@ -150,7 +150,7 @@ impl Inner {
             Some(id) => Some(crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?),
             None => None,
         };
-        let input = mapping::message_input(&message, workflow.as_ref(), from);
+        let input = mapping::message_input(&message, workflow.as_ref(), from, &self.mentions(&message.threads));
 
         // A turn a Stop could not settle may have ended unannounced: the send is
         // a start, which Codex takes as a steer if that turn still runs.
@@ -176,14 +176,27 @@ impl Inner {
         // has taken the turn.
         self.store.update_thread(thread, |e| e.starting = Some(settings));
         *sent = true;
+        // A turn started with another thread's message (not a report) reports back to it.
+        let reports = from.filter(|m| m.report.is_none());
+        if let Some(sender) = reports {
+            self.assignments.starting(thread, &sender.from);
+        }
         let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {
+                if reports.is_some() {
+                    self.assignments.started(thread, None);
+                }
                 self.store.update_thread(thread, |entry| entry.starting = None);
                 return Err(e);
             }
         };
         let turn = TurnId(started.turn.id);
+        if reports.is_some() {
+            // Unless Codex has told of the turn's end already.
+            let ended = self.store.thread(thread).is_some_and(|e| e.last_ended.as_ref() == Some(&turn));
+            self.assignments.started(thread, (!ended).then_some(&turn));
+        }
         self.store.update_thread(thread, |e| {
             if let Some(settings) = e.starting.take() {
                 e.settings = Some(settings);
@@ -245,11 +258,18 @@ impl Inner {
         Ok(())
     }
 
-    pub(crate) async fn find_files(&self, project: &ProjectId, query: String) -> Result<Vec<std::path::PathBuf>> {
-        let project = self.project(project)?;
-        let session = self.session()?;
-        let params = p::FuzzyParams { query, roots: vec![project.path.display().to_string()], cancellation_token: None };
-        let found: p::FuzzyResponse = session.call("fuzzyFileSearch", params).await?;
-        Ok(found.files.into_iter().map(|f| std::path::Path::new(&f.root).join(f.path)).collect())
+    /// The threads a message mentions, each with its title now (the one it was mentioned with if the
+    /// engine has none) and its project's name, as the agent reads them.
+    fn mentions(&self, threads: &[ThreadRef]) -> Vec<crate::assignment::marker::Mention> {
+        let projects = self.store.projects();
+        threads
+            .iter()
+            .map(|r| {
+                let entry = self.store.thread(&r.thread);
+                let title = entry.as_ref().and_then(|e| e.title.clone()).or_else(|| r.title.clone());
+                let project = entry.and_then(|e| projects.iter().find(|p| p.id == e.project).map(|p| p.name.clone()));
+                crate::assignment::marker::Mention { thread: ThreadRef { thread: r.thread.clone(), title }, project }
+            })
+            .collect()
     }
 }

@@ -3,9 +3,13 @@
 //! The recorder taps every frame the production client sends and receives
 //! while it drives the real Codex. The replay connector stands in for the
 //! Codex process: it checks each frame the engine sends against the next
-//! `expect_outbound`, in strict order, and plays each `emit_inbound` back.
+//! `expect_outbound`, in order, and plays each `emit_inbound` back once every
+//! frame before it was sent. A read of history the engine sends may come a
+//! little out of its place, before or after another request (tasks running at
+//! once send in either order); nothing else may. A request's id is not
+//! compared, and Codex's answer goes back with the id it was sent with.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -124,10 +128,29 @@ impl Connector for RecordingConnector {
 
 // ---------- replaying ----------
 
+/// How far ahead of the next expected frame a request the engine sends may be found: tasks that
+/// run at once (a report's or a read's look at history, a delivery's turn) send in either order.
+const LOOKAHEAD: usize = 24;
+
+/// The requests that may come out of their place: the engine's reads of history, which change
+/// nothing. Nothing else passes another frame, so what the person causes keeps its order.
+const READS: [&str; 2] = ["thread/turns/list", "thread/read"];
+
 struct Cursor {
     entries: Vec<Entry>,
+    /// The first entry not yet played or matched.
     at: usize,
+    /// Expected frames after `at` already matched.
+    matched: HashSet<usize>,
     failure: Option<String>,
+}
+
+impl Cursor {
+    fn skip_matched(&mut self) {
+        while self.matched.remove(&self.at) {
+            self.at += 1;
+        }
+    }
 }
 
 pub struct Replay {
@@ -138,7 +161,7 @@ pub struct Replay {
 impl Replay {
     pub fn new(entries: Vec<Entry>, places: Places) -> Arc<Replay> {
         let entries = entries.into_iter().filter(|e| !matches!(e, Entry::TranscriptStart { .. })).collect();
-        Arc::new(Replay { cursor: Arc::new(Mutex::new(Cursor { entries, at: 0, failure: None })), places })
+        Arc::new(Replay { cursor: Arc::new(Mutex::new(Cursor { entries, at: 0, matched: HashSet::new(), failure: None })), places })
     }
 
     pub fn failure(&self) -> Option<String> {
@@ -153,13 +176,39 @@ impl Replay {
         }
         let left: Vec<&str> = cursor.entries[cursor.at..]
             .iter()
-            .filter_map(|e| match e {
+            .enumerate()
+            .filter(|(n, _)| !cursor.matched.contains(&(cursor.at + n)))
+            .filter_map(|(_, e)| match e {
                 Entry::ExpectOutbound { label, .. } => Some(label.as_str()),
                 _ => None,
             })
             .collect();
         assert!(left.is_empty(), "replay: the engine never sent {left:?}");
     }
+}
+
+/// A request the engine sends (not an answer to Codex, not a notification).
+fn is_request(frame: &Value) -> bool {
+    frame.get("method").is_some() && frame.get("id").is_some_and(|id| !id.is_null())
+}
+
+fn is_read(frame: &Value) -> bool {
+    is_request(frame) && frame["method"].as_str().is_some_and(|m| READS.contains(&m))
+}
+
+/// The frame without its id.
+fn without_id(frame: &Value) -> Value {
+    let mut frame = frame.clone();
+    if let Some(map) = frame.as_object_mut() {
+        map.remove("id");
+    }
+    frame
+}
+
+/// Whether `actual` is the expected frame: the engine's requests whatever their ids (which depend on
+/// the order it sent them in), anything else exactly.
+fn matches(expected: &Value, actual: &Value) -> bool {
+    if is_request(expected) && is_request(actual) { same(&without_id(expected), &without_id(actual)) } else { same(expected, actual) }
 }
 
 impl Connector for Replay {
@@ -186,12 +235,15 @@ async fn play(cursor: Arc<Mutex<Cursor>>, places: Places, mut out: mpsc::Unbound
         let mut c = cursor.lock().unwrap();
         c.failure.get_or_insert(message);
     };
+    // The id each recorded request of the engine's was sent with, for Codex's answer.
+    let mut ids: HashMap<String, Value> = HashMap::new();
     loop {
         let entry = {
-            let c = cursor.lock().unwrap();
+            let mut c = cursor.lock().unwrap();
             if c.failure.is_some() {
                 return;
             }
+            c.skip_matched();
             c.entries.get(c.at).cloned()
         };
         let advance = || cursor.lock().unwrap().at += 1;
@@ -203,8 +255,14 @@ async fn play(cursor: Arc<Mutex<Cursor>>, places: Places, mut out: mpsc::Unbound
                 }
                 return;
             }
-            Some(Entry::EmitInbound { frame, .. }) => {
+            Some(Entry::EmitInbound { mut frame, .. }) => {
                 advance();
+                if frame.get("method").is_none()
+                    && let Some(id) = frame.get("id").map(Value::to_string)
+                    && let Some(sent) = ids.remove(&id)
+                {
+                    frame["id"] = sent;
+                }
                 let frame = places.map_strings(frame, &|p, s| p.to_real(s));
                 let _ = inbound.send(frame.to_string());
             }
@@ -216,13 +274,36 @@ async fn play(cursor: Arc<Mutex<Cursor>>, places: Places, mut out: mpsc::Unbound
                 Ok(Some(line)) => {
                     let actual: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
                     let actual = places.map_strings(actual, &|p, s| p.to_placeholders(s));
-                    if !same(&expected, &actual) {
+                    let found = {
+                        let mut c = cursor.lock().unwrap();
+                        let at = c.at;
+                        let end = (at + LOOKAHEAD).min(c.entries.len());
+                        // Found later than its place only if it, or every frame it passes, is a read.
+                        let passes_reads = |n: usize| {
+                            (at..n).all(|k| c.matched.contains(&k) || !matches!(&c.entries[k], Entry::ExpectOutbound { frame, .. } if !is_read(frame)))
+                        };
+                        let found = (at..end).find(|n| {
+                            !c.matched.contains(n)
+                                && matches!(&c.entries[*n], Entry::ExpectOutbound { frame, .. } if matches(frame, &actual))
+                                && (*n == at || is_read(&actual) || passes_reads(*n))
+                        });
+                        if let Some(n) = found {
+                            c.matched.insert(n);
+                            if let Entry::ExpectOutbound { frame, .. } = &c.entries[n]
+                                && let (Some(recorded), Some(sent)) = (frame.get("id"), actual.get("id"))
+                                && is_request(frame)
+                            {
+                                ids.insert(recorded.to_string(), sent.clone());
+                            }
+                        }
+                        found
+                    };
+                    if found.is_none() {
                         fail(format!("frame {label} differs\nexpected: {expected}\n  actual: {actual}"));
                         // Codex is not to seem to die: hold the connection until the engine ends.
                         while out.recv().await.is_some() {}
                         return;
                     }
-                    advance();
                 }
                 Ok(None) => return,
                 Err(_) => {
@@ -232,5 +313,40 @@ async fn play(cursor: Arc<Mutex<Cursor>>, places: Places, mut out: mpsc::Unbound
             },
             Some(Entry::TranscriptStart { .. }) => advance(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn out(method: &str, id: u64) -> Entry {
+        Entry::ExpectOutbound { label: method.into(), frame: json!({"id": id, "method": method, "params": {"threadId": "t"}}) }
+    }
+
+    /// Plays `expected`, sending `sent` (methods, with ids in sending order); the failure, if any.
+    async fn play_out(expected: Vec<Entry>, sent: &[&str]) -> Option<String> {
+        let replay = Replay::new(expected, Places::new(vec![]));
+        let connection = replay.connect().await.unwrap();
+        for (id, method) in sent.iter().enumerate() {
+            let _ = connection.outgoing.send(json!({"id": id + 1, "method": method, "params": {"threadId": "t"}}).to_string());
+        }
+        for _ in 0..50 {
+            if replay.failure().is_some() || replay.cursor.lock().unwrap().at == sent.len() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        replay.failure()
+    }
+
+    #[tokio::test]
+    async fn only_a_read_of_history_comes_out_of_its_place() {
+        assert!(play_out(vec![out("thread/turns/list", 1), out("turn/start", 2)], &["turn/start", "thread/turns/list"]).await.is_none());
+        assert!(play_out(vec![out("turn/start", 1), out("thread/turns/list", 2)], &["thread/turns/list", "turn/start"]).await.is_none());
+        let reversed = play_out(vec![out("turn/interrupt", 1), out("turn/steer", 2)], &["turn/steer", "turn/interrupt"]).await;
+        assert!(reversed.is_some_and(|f| f.contains("turn/interrupt")));
     }
 }

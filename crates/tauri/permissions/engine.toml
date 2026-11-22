@@ -24,5 +24,4 @@ commands.allow = [
   "engine:mark_read",
   "engine:answer",
   "engine:read_file",
-  "engine:find_files",
 ]

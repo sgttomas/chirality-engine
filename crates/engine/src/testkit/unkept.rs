@@ -22,7 +22,7 @@ fn thread(cwd: &Path) -> Value {
 }
 
 fn message(workflow: Option<&str>) -> Message {
-    Message { text: "go".into(), attachments: vec![], workflow: workflow.map(|w| WorkflowId(w.into())) }
+    Message { text: "go".into(), attachments: vec![], workflow: workflow.map(|w| WorkflowId(w.into())), threads: vec![] }
 }
 
 fn settings() -> TurnSettings {

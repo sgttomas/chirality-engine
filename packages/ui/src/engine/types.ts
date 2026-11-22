@@ -29,6 +29,7 @@ export type { SubagentActivity } from "./bindings/SubagentActivity";
 export type { SubagentTool } from "./bindings/SubagentTool";
 export type { TextKind } from "./bindings/TextKind";
 export type { ThreadId } from "./bindings/ThreadId";
+export type { ThreadRef } from "./bindings/ThreadRef";
 export type { ThreadStatus } from "./bindings/ThreadStatus";
 export type { ThreadSummary } from "./bindings/ThreadSummary";
 export type { ThreadTool } from "./bindings/ThreadTool";

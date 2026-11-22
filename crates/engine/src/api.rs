@@ -189,6 +189,17 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     /// A workflow the agent is to follow, from [`Workflow::id`].
     pub workflow: Option<WorkflowId>,
+    /// Threads the message mentions, so the agent can reach them.
+    pub threads: Vec<ThreadRef>,
+}
+
+/// A thread a message mentions: its id, and its title when it was mentioned.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRef {
+    pub thread: ThreadId,
+    pub title: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -252,8 +263,8 @@ pub struct Item {
 #[ts(export)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ItemBody {
-    /// `from` is set when another thread's agent sent it, not the person.
-    UserMessage { text: String, attachments: Vec<Attachment>, workflow: Option<WorkflowId>, from: Option<MessageFrom> },
+    /// `from` is set when another thread's agent sent it, not the person; `threads` are the threads it mentions.
+    UserMessage { text: String, attachments: Vec<Attachment>, workflow: Option<WorkflowId>, threads: Vec<ThreadRef>, from: Option<MessageFrom> },
     /// Markdown.
     AgentMessage { text: String },
     Reasoning { summary: String },
@@ -340,6 +351,8 @@ pub enum ThreadTool {
     Threads,
     /// Ended an assignment it made.
     Close,
+    /// Read another thread, without waking it.
+    Read,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -292,5 +292,5 @@ pub fn settings(access: Access) -> TurnSettings {
 }
 
 pub fn text(text: &str) -> Message {
-    Message { text: text.into(), attachments: Vec::new(), workflow: None }
+    Message { text: text.into(), attachments: Vec::new(), workflow: None, threads: Vec::new() }
 }

@@ -67,7 +67,7 @@ impl Inner {
                 if method == "thread/closed" {
                     self.store.drop_requests(&thread);
                 } else {
-                    self.assignments.deliveries.forget(&thread);
+                    self.assignments.forget_thread(&thread);
                     self.store.remove_thread(&thread);
                 }
             }
@@ -89,6 +89,10 @@ impl Inner {
                 self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn.id);
                 let state = mapping::turn_state(&note.turn);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
+                // A turn the engine started with another thread's message reports back to it; an
+                // assigned thread's turn is looked at for its assigner however it began.
+                let opened = self.assignments.take_opened(&thread, &turn);
+                let recipient = opened.clone().or_else(|| self.store.thread(&thread).and_then(|e| e.assigned_by));
                 let known = self.store.update_thread(&thread, |e| {
                     if e.active_turn.as_ref() == Some(&turn) {
                         e.active_turn = None;
@@ -104,16 +108,26 @@ impl Inner {
                 });
                 if known.is_some() {
                     self.store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: state.clone() });
-                    // An assigned thread's turn its assigner started reports back.
-                    if self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some()) {
-                        self.report_in_order(thread, turn, state);
+                    if let Some(recipient) = recipient {
+                        self.report_in_order(thread, turn, state, recipient, opened.is_some());
                     }
                 }
             }
             "item/started" | "item/completed" => {
                 let Some(note) = decode::<p::ItemNote>(params) else { return };
                 match &note.item {
-                    p::ThreadItem::FileChange { id, changes } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
+                    p::ThreadItem::FileChange { id, changes, .. } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
+                    // A message from another thread (not a report) began the turn, which the engine may be
+                    // starting: Codex can tell of it before it answers the start.
+                    p::ThreadItem::UserMessage { content, .. } if method == "item/started" => {
+                        let mark = match content.first() {
+                            Some(p::InputInfo::Text { text }) => marker::part(text),
+                            _ => None,
+                        };
+                        if let Some(mark) = mark.filter(|m| m.report.is_none()) {
+                            self.assignments.marked_message(&ThreadId(note.thread_id.clone()), &TurnId(note.turn_id.clone()), &mark.from);
+                        }
+                    }
                     // A call that ends unanswered was cancelled by Codex.
                     p::ThreadItem::DynamicToolCall { id, .. } if method == "item/completed" => {
                         self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn_id && &place.item == id);
