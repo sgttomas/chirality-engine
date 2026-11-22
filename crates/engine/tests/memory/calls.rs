@@ -22,14 +22,14 @@ fn turn_completed(turn: &'static str) -> impl FnOnce() -> Value {
 async fn calls_answered(limits: EmbeddedLimits, s: &mut Session, turn: &'static str, round: usize) {
     let pending = limits.pending_calls as usize;
     let pad = limits.argument_bytes as usize - r#"{"pad":""}"#.len();
-    let mut calls = Vec::new();
+    let mut calls = host(|| Vec::with_capacity(pending));
     for n in 0..pending {
         feed(&s.host, || call_frame(&format!("{turn}-{round}-{n}"), &format!("call-{turn}-{round}-{n}"), turn, pad)).await;
         if n % 3 == 2 || n == pending - 1 {
             while let Ok(event) = s.events.try_recv() {
                 let EmbeddedEvent::Call { call, arguments, .. } = event else { panic!("a call") };
                 assert_eq!(arguments.len(), limits.argument_bytes as usize);
-                calls.push(call);
+                host(|| calls.push(call));
             }
         }
     }

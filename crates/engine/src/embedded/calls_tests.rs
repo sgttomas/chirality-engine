@@ -24,7 +24,7 @@ async fn called(engine: &EmbeddedEngine, events: &mut EmbeddedEvents, host: &mut
     host.send(call_frame(id, call_id, |_| {})).await;
     match events.recv().await {
         Some(EmbeddedEvent::Call { call, tool, arguments }) => {
-            assert_eq!((tool.as_str(), arguments.as_str()), ("swbpipe_solve", r#"{"x":1}"#));
+            assert_eq!((tool.as_str(), &*arguments), ("swbpipe_solve", r#"{"x":1}"#));
             call
         }
         other => panic!("{other:?}"),
@@ -37,9 +37,12 @@ fn nothing_written(host: &mut Host) {
 
 #[test]
 fn a_call_serializes_with_its_rpc_id_untagged() {
-    let call =
-        |rpc_id| EmbeddedEvent::Call { call: CallRef { rpc_id, call_id: "c".into(), turn: TurnId("t".into()) }, tool: "x".into(), arguments: "{}".into() };
-    let expected = json!({"kind": "call", "call": {"rpcId": 7, "callId": "c", "turn": "t"}, "tool": "x", "arguments": "{}"});
+    let call = |rpc_id| EmbeddedEvent::Call {
+        call: CallRef { rpc_id, call_id: "c".into(), turn: TurnId("t".into()), generation: 3 },
+        tool: "x".into(),
+        arguments: "{}".into(),
+    };
+    let expected = json!({"kind": "call", "call": {"rpcId": 7, "callId": "c", "turn": "t", "generation": 3}, "tool": "x", "arguments": "{}"});
     assert_eq!(serde_json::to_value(call(RpcId::Integer(7))).unwrap(), expected);
     assert_eq!(serde_json::to_value(call(RpcId::Text("r".into()))).unwrap()["call"]["rpcId"], "r");
 }
@@ -48,7 +51,7 @@ fn a_call_serializes_with_its_rpc_id_untagged() {
 async fn an_admitted_call_is_answered_once() {
     let (engine, mut events, mut host) = opened().await;
     let call = called(&engine, &mut events, &mut host, json!(0), "call_1").await;
-    assert_eq!(call, CallRef { rpc_id: RpcId::Integer(0), call_id: "call_1".into(), turn: TurnId(TURN.into()) });
+    assert_eq!(call, CallRef { rpc_id: RpcId::Integer(0), call_id: "call_1".into(), turn: TurnId(TURN.into()), generation: 0 });
     assert!(engine.call_live(&call));
     engine.answer(&call, false, "no \"such\" node\n").unwrap();
     let written = host.next().await;
@@ -75,13 +78,12 @@ async fn anything_else_is_refused() {
     let (engine, mut events, mut host) = opened_with(|c| c.limits.argument_bytes = 16).await;
     running(&engine, &mut host, TURN).await;
     type Case = (&'static str, fn(&mut Value));
-    let cases: [Case; 11] = [
+    let cases: [Case; 10] = [
         ("another namespace", |p| p["namespace"] = json!("other")),
         ("another tool", |p| p["tool"] = json!("swbpipe_other")),
         ("another thread", |p| p["threadId"] = json!("thread-2")),
         ("another turn", |p| p["turnId"] = json!("turn-0")),
         ("no arguments", |p| _ = p.as_object_mut().unwrap().remove("arguments")),
-        ("null arguments", |p| p["arguments"] = Value::Null),
         ("arguments over argument_bytes", |p| p["arguments"] = json!({"x": "0123456789"})),
         ("no callId", |p| _ = p.as_object_mut().unwrap().remove("callId")),
         ("a callId with a control character", |p| p["callId"] = json!("c\u{1}")),
@@ -96,6 +98,9 @@ async fn anything_else_is_refused() {
     let at_the_bound = call_frame(json!(99), "call_99", |p| p["arguments"] = json!({"x": "01234567"}));
     host.send(at_the_bound).await;
     assert!(matches!(events.recv().await, Some(EmbeddedEvent::Call { .. })), "16 bytes of arguments");
+    // Present, so admitted: `null` is its raw text.
+    host.send(call_frame(json!(98), "call_98", |p| p["arguments"] = Value::Null)).await;
+    assert!(matches!(events.recv().await, Some(EmbeddedEvent::Call { arguments, .. }) if &*arguments == "null"), "null arguments");
     host.send(json!({"id": 100, "method": "item/commandExecution/requestApproval", "params": {"threadId": THREAD, "turnId": TURN, "callId": "call_100"}}))
         .await;
     assert!(matches!(events.recv().await, Some(EmbeddedEvent::Refused { .. })), "another method");
@@ -190,11 +195,37 @@ async fn calls_are_retired_by_their_item_their_turn_the_thread_and_close() {
         nothing_written(&mut host);
     }
 
+    // Close retires every call: one the engine issued is `Invalid`, as any
+    // retired call is; only a call it never issued is `Closed`.
     let (engine, mut events, mut host) = opened().await;
     let call = called(&engine, &mut events, &mut host, json!(0), "call_0").await;
+    let never = CallRef { generation: 1, ..call.clone() };
+    assert_eq!(engine.answer(&never, true, "x"), Err(EmbeddedError::Invalid { reason: "the call is not live" }), "before close");
     engine.close();
     assert!(!engine.call_live(&call));
-    assert_eq!(engine.answer(&call, true, "late"), Err(EmbeddedError::Closed { fault: None }));
+    assert_eq!(engine.answer(&call, true, "late"), Err(EmbeddedError::Invalid { reason: "the call is not live" }));
+    assert_eq!(engine.answer(&never, true, "late"), Err(EmbeddedError::Closed { fault: None }));
+    assert!(host.from_engine.try_recv().is_err(), "nothing written");
+}
+
+/// Codex reuses an ended turn's id, the RPC id and the `callId`: the old
+/// call, retired with its turn, is not the new one.
+#[tokio::test]
+async fn a_retired_call_stays_retired_when_its_ids_come_again() {
+    let (engine, mut events, mut host) = opened().await;
+    let old = called(&engine, &mut events, &mut host, json!(0), "call_0").await;
+    host.send(note("turn/completed", json!({"threadId": THREAD, "turn": {"id": TURN, "status": "completed"}}))).await;
+    assert!(matches!(events.recv().await, Some(EmbeddedEvent::Notification { method: Method::TurnCompleted, .. })));
+    settle().await;
+    let new = called(&engine, &mut events, &mut host, json!(0), "call_0").await;
+    assert_eq!((&new.rpc_id, &new.call_id, &new.turn), (&old.rpc_id, &old.call_id, &old.turn));
+    assert_ne!(new.generation, old.generation);
+    assert!(!engine.call_live(&old));
+    assert_eq!(engine.answer(&old, true, "late"), Err(EmbeddedError::Invalid { reason: "the call is not live" }));
+    nothing_written(&mut host);
+    assert!(engine.call_live(&new));
+    engine.answer(&new, true, "ok").unwrap();
+    assert_eq!(host.next().await["result"]["contentItems"][0]["text"], "ok");
 }
 
 #[tokio::test]

@@ -66,7 +66,7 @@ fn call(events: &[EmbeddedEvent]) -> (&CallRef, &str, &str) {
     let calls: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
-            EmbeddedEvent::Call { call, tool, arguments } => Some((call, tool.as_str(), arguments.as_str())),
+            EmbeddedEvent::Call { call, tool, arguments } => Some((call, tool.as_str(), &**arguments)),
             _ => None,
         })
         .collect();

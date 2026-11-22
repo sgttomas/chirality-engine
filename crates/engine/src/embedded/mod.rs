@@ -151,6 +151,7 @@ impl EmbeddedEngine {
             if st.slots.iter().any(|s| !matches!(s, Slot::Free)) {
                 return Err(invalid("a request is in flight"));
             }
+            debug_assert!(st.record.as_ref().is_none_or(|r| r.pending().is_empty()), "no call pending without a turn");
             let sent = out.send(ledger, |w| {
                 w.raw("{\"id\":").integer(id).raw(",\"method\":\"turn/start\",\"params\":{\"threadId\":").string(thread.id.as_str());
                 w.raw(",\"input\":[{\"type\":\"text\",\"text\":").string(text).raw(",\"text_elements\":[]}]}}");
@@ -192,8 +193,9 @@ impl EmbeddedEngine {
         self.shared.call_live(call)
     }
 
-    /// Answers a pending call. `Invalid` for a retired call (nothing is
-    /// written), or over `result_bytes` or a frame (the call stays pending).
+    /// Answers a pending call. `Invalid` for a call retired, by close too
+    /// (nothing is written), or over `result_bytes` or a frame (the call
+    /// stays pending); after close, `Closed` for a call never issued.
     pub fn answer(&self, call: &CallRef, success: bool, text: &str) -> Result<(), EmbeddedError> {
         self.shared.answer(call, success, text)
     }
@@ -420,6 +422,8 @@ struct State {
     limits: EmbeddedLimits,
     /// The turn's requests and the calls pending.
     record: Option<calls::Record>,
+    /// Calls admitted in the session: the next call's generation.
+    calls_issued: u64,
     connect_called: bool,
     open_called: bool,
     initialized: bool,
@@ -485,6 +489,7 @@ impl Shared {
             tool_names,
             limits,
             record: Some(record),
+            calls_issued: 0,
             connect_called: false,
             open_called: false,
             initialized: false,

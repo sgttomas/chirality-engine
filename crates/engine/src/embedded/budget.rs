@@ -280,7 +280,7 @@ pub(crate) fn event_bytes(event: &EmbeddedEvent) -> u64 {
                 RpcId::Text(id) => size(id),
                 RpcId::Integer(_) => 0,
             };
-            rpc + size(&call.call_id) + size(&call.turn.0) + size(tool) + size(arguments)
+            rpc + size(&call.call_id) + size(&call.turn.0) + size(tool) + class(arguments.len() as u64)
         }
         EmbeddedEvent::Refused { method, thread, json } | EmbeddedEvent::Unmapped { method, thread, json } => size(method) + maybe(thread) + size(json),
         EmbeddedEvent::Unheld { method, thread, json } => size(method) + size(thread) + size(json),

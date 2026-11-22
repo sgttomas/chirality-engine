@@ -54,11 +54,12 @@ struct Entry {
 const _: () = assert!(std::mem::size_of::<Entry>() as u64 <= RECORD_ENTRY);
 
 /// Every request in the turn, preallocated at `calls_per_turn`, and the calls
-/// pending, by their place in it. Its strings are freed before their charge
-/// is released (fields drop in order).
+/// pending, by their place in it and their generation. Its strings are freed
+/// before their charge is released (fields drop in order).
 pub(super) struct Record {
     entries: Vec<Entry>,
-    pending: [u16; MAX_PENDING],
+    limit: usize,
+    pending: [(u16, u64); MAX_PENDING],
     pending_len: usize,
     strings: Charge,
     _buffer: Charge,
@@ -68,7 +69,8 @@ impl Record {
     pub(super) fn new(ledger: &Arc<Ledger>, limit: u32) -> Result<Record, Fault> {
         let buffer = ledger.charge(class(limit as u64 * RECORD_ENTRY))?;
         let strings = ledger.charge(0)?;
-        Ok(Record { entries: Vec::with_capacity(limit as usize), pending: [0; MAX_PENDING], pending_len: 0, strings, _buffer: buffer })
+        let limit = limit as usize;
+        Ok(Record { entries: Vec::with_capacity(limit), limit, pending: [(0, 0); MAX_PENDING], pending_len: 0, strings, _buffer: buffer })
     }
 
     /// Records a request; a repeated RPC id or `callId`, or a request past
@@ -78,7 +80,7 @@ impl Record {
         if self.entries.iter().any(repeated) {
             return Err(Fault::RepeatedId);
         }
-        if self.entries.len() >= self.entries.capacity() {
+        if self.entries.len() >= self.limit {
             return Err(Fault::TooManyRequests);
         }
         self.strings.grow(class(rpc.text().len() as u64) + call_id.map_or(0, |c| class(c.len() as u64)))?;
@@ -93,20 +95,21 @@ impl Record {
         self.strings.release_all();
     }
 
-    fn pending(&self) -> &[u16] {
+    pub(super) fn pending(&self) -> &[(u16, u64)] {
         &self.pending[..self.pending_len]
     }
 
-    fn pend(&mut self, index: usize) {
-        self.pending[self.pending_len] = index as u16;
+    fn pend(&mut self, index: usize, generation: u64) {
+        self.pending[self.pending_len] = (index as u16, generation);
         self.pending_len += 1;
     }
 
-    /// Where `call` is among the pending calls.
+    /// Where `call` is among the pending calls: its generation, which no
+    /// other call in the session has, and its ids.
     fn find(&self, call: &CallRef) -> Option<usize> {
-        self.pending().iter().position(|&at| {
+        self.pending().iter().position(|&(at, generation)| {
             let entry = &self.entries[at as usize];
-            entry.rpc == call.rpc_id && entry.call_id.as_deref() == Some(call.call_id.as_str())
+            generation == call.generation && entry.rpc == call.rpc_id && entry.call_id.as_deref() == Some(call.call_id.as_str())
         })
     }
 
@@ -117,7 +120,7 @@ impl Record {
 
     /// The call whose `callId` is `id`, by its item's completion.
     pub(super) fn retire_call(&mut self, id: &str) {
-        let at = self.pending().iter().position(|&at| self.entries[at as usize].call_id.as_deref() == Some(id));
+        let at = self.pending().iter().position(|&(at, _)| self.entries[at as usize].call_id.as_deref() == Some(id));
         if let Some(at) = at {
             self.retire_at(at);
         }
@@ -143,14 +146,13 @@ impl Shared {
     }
 
     /// Writes the answer and retires the call; over a bound, the call stays
-    /// pending and nothing is written.
+    /// pending and nothing is written. A call this engine issued and retired,
+    /// by close too, is `Invalid`; after close, any other is `Closed`.
     pub(super) fn answer(&self, call: &CallRef, success: bool, text: &str) -> Result<(), EmbeddedError> {
         let (mut out, mut st) = self.lock();
-        if st.closed {
-            return Err(closed(&st));
-        }
         let Some(at) = st.live(call) else {
-            return Err(invalid("the call is not live"));
+            let issued = call.generation < st.calls_issued;
+            return Err(if st.closed && !issued { closed(&st) } else { invalid("the call is not live") });
         };
         if text.len() > st.limits.result_bytes as usize {
             return Err(invalid("the text is over result_bytes"));
@@ -197,12 +199,16 @@ pub(super) fn request(cx: &mut Cx, id: &RawValue, method: &RawValue, params: Opt
         && let Some((tool, turn, arguments)) = admit(cx.st, method, &fields, &mut tool_buf, &mut turn_buf)
     {
         let parts = [rpc.text(), call_id, turn, tool, arguments];
+        // Generations never repeat in a session, so a call retired with its
+        // turn is never taken for a later one with the same ids.
+        let generation = cx.st.calls_issued;
+        cx.st.calls_issued += 1;
         publish(cx, &parts, || EmbeddedEvent::Call {
-            call: CallRef { rpc_id: rpc.owned(), call_id: call_id.to_owned(), turn: TurnId(turn.to_owned()) },
+            call: CallRef { rpc_id: rpc.owned(), call_id: call_id.to_owned(), turn: TurnId(turn.to_owned()), generation },
             tool: tool.to_owned(),
-            arguments: arguments.to_owned(),
+            arguments: arguments.into(),
         })?;
-        cx.st.record.as_mut().ok_or(Fault::OverBudget)?.pend(index);
+        cx.st.record.as_mut().ok_or(Fault::OverBudget)?.pend(index, generation);
         return Ok(());
     }
     // 4. Any other request.
@@ -211,7 +217,7 @@ pub(super) fn request(cx: &mut Cx, id: &RawValue, method: &RawValue, params: Opt
 
 /// The tool, turn and raw arguments of an `item/tool/call` that names the
 /// namespace and one of its tools, in the running turn on the held open
-/// thread, with arguments present and within bounds, while fewer than
+/// thread, with arguments present (`null` too) and within bounds, while fewer than
 /// `pending_calls` are pending.
 fn admit<'a>(
     st: &State,
@@ -236,7 +242,8 @@ fn admit<'a>(
     }
     let running = st.turns.running.as_ref()?;
     let turn = turn_id.and_then(|t| wire::identity(t, turn_buf)).filter(|t| *t == running.as_str())?;
-    let arguments = arguments.filter(|a| !wire::is_null(a)).map(RawValue::get)?;
+    // Present, `null` too: its raw text.
+    let arguments = arguments.map(RawValue::get)?;
     let pending = st.record.as_ref()?.pending().len();
     (arguments.len() <= st.limits.argument_bytes as usize && pending < st.limits.pending_calls as usize).then_some((tool, turn, arguments))
 }
