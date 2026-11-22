@@ -5,6 +5,7 @@ import { useStore, useStoreHandle } from "../state/store";
 import { Conversation } from "./Conversation";
 import { FirstUse } from "./FirstUse";
 import { Navigator } from "./Navigator";
+import { FeaturedWorkflows } from "./composer/WorkflowPicker";
 import { useNotifications } from "./notify";
 import { PanelContext, usePanelState, type PanelTab } from "./panel";
 import { RightPanel, standardTabs, type PanelTabSpec } from "./RightPanel";
@@ -18,11 +19,14 @@ export interface StandardLayoutProps {
   panelTabs?: PanelTabSpec[];
   /** A side panel tab to open at start. */
   panel?: PanelTab;
+  /** The workflow names the picker lists before anything is typed, besides the project's own;
+   * a search finds every workflow. Unset, it lists them all. */
+  featuredWorkflows?: readonly string[];
 }
 
 /** Projects and threads on the left, the conversation in the centre, the side panel on the
  * right; first use until the person is signed in with a project. */
-export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, panel }: StandardLayoutProps) {
+export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, panel, featuredWorkflows }: StandardLayoutProps) {
   const snapshot = useStore((s) => s.model?.snapshot);
   const control = usePanelState(panel);
   useNotifications();
@@ -33,6 +37,7 @@ export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, 
 
   return (
     <PanelContext.Provider value={control}>
+      <FeaturedWorkflows.Provider value={featuredWorkflows}>
       {firstUse ? (
         <FirstUse brand={brand} />
       ) : (
@@ -42,6 +47,7 @@ export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, 
           {control.panel.open && <RightPanel tabs={panelTabs} />}
         </div>
       )}
+      </FeaturedWorkflows.Provider>
       <ErrorNotice />
     </PanelContext.Provider>
   );

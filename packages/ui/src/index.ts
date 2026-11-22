@@ -40,7 +40,7 @@ export { ThreadTitle } from "./ui/conversation/ThreadTitle";
 export { Composer } from "./ui/composer/Composer";
 export { Approval } from "./ui/composer/Approval";
 export { Question } from "./ui/composer/Question";
-export { WorkflowPicker } from "./ui/composer/WorkflowPicker";
+export { FeaturedWorkflows, listedWorkflows, WorkflowPicker } from "./ui/composer/WorkflowPicker";
 export { Controls } from "./ui/composer/Controls";
 export { MentionMenu, mentionFrom, mentionGroups, typedMention, type Mention, type MentionGroup } from "./ui/composer/Mentions";
 export { ThreadChips } from "./ui/conversation/ThreadChips";
