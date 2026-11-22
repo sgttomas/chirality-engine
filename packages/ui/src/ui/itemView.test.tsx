@@ -1,6 +1,7 @@
 // An application's own view of items, over what the real engine emitted: a command it ran with
-// approval, and a turn whose work waited for a subagent and read two threads.
-import { act } from "@testing-library/react";
+// approval, a turn whose work waited for a subagent and read two threads, and a question.
+import { act, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,6 +77,27 @@ describe("an application's view of items", () => {
     }
     expect(plain.engine.done && unseen.engine.done).toBe(true);
     expect(turns(plain.container)).toHaveLength(1);
+  });
+
+  it("keeps work in one fold across an unseen item between", async () => {
+    // assignment_read: the reader's thread first shows at event 23; its first read is done by 44, its second by 46.
+    const follow = async (data: EngineData) => {
+      const engine = signedIn(data);
+      const mounted = await mount(engine.client, <StandardLayout />);
+      await play(engine, 23);
+      await act(() => mounted.store.selectThread("00000000-0000-0000-0000-000000000009"));
+      await settle();
+      return { engine, ...mounted };
+    };
+    const data = engineData("assignment_read");
+    const plain = await follow(data);
+    const unseen = await follow(withInvisible(data, 44, true));
+    await play(plain.engine, 46 - 23);
+    await play(unseen.engine, 47 - 23);
+    const reads = folds(unseen.container).at(-1)!;
+    expect([...reads.querySelectorAll("li")].map((li) => li.textContent)).toEqual([expect.stringMatching(/^Read /), expect.stringMatching(/^Read /)]);
+    expect(reads).toHaveClass("work--live");
+    expect(turns(unseen.container)).toEqual(turns(plain.container));
   });
 
   it("gives an item with a node a block of its own, the work on either side folded, and joins them again", async () => {
@@ -163,20 +185,49 @@ describe("an application's view of items", () => {
 
   it("asks the view once for each item each time a turn is drawn", async () => {
     const data = engineData("command_approved");
-    const view = vi.fn<ItemViewer>(() => null);
-    const { engine, store } = await open(data, <StandardLayout itemView={view} />, 2);
-    let drawn = 0;
-    for (let event = 3; event <= data.events.length; event++) {
+    const view = vi.fn<ItemViewer>((item) => (item.body.kind === "command" ? <p className="mine">Ran</p> : null));
+    const { store, container } = await open(data, <StandardLayout itemView={view} />, data.events.length);
+    const { model, thread } = store.get();
+    const ids = model!.views[thread!].turns[0].items.map((i) => i.id);
+    expect(ids).toHaveLength(3);
+    expect(container.querySelector(".mine")).toHaveTextContent("Ran");
+    const turn = container.querySelector<HTMLElement>("section.turn")!;
+    for (const press of ["Revert", "Keep"]) {
       view.mockClear();
-      await play(engine);
-      const { model, thread } = store.get();
-      const ids = model!.views[thread!].turns.flatMap((t) => t.items.map((i) => i.id));
-      const asked = view.mock.calls.map(([item]) => item.id);
-      if (!asked.length) continue;
-      expect(asked.length % ids.length).toBe(0);
-      expect(asked).toEqual(Array.from({ length: asked.length / ids.length }, () => ids).flat());
-      drawn++;
+      await userEvent.click(within(turn).getByRole("button", { name: press }));
+      expect(view.mock.calls.map(([item]) => item.id)).toEqual(ids);
     }
-    expect(drawn).toBeGreaterThan(5);
+    expect(within(turn).getByRole("button", { name: "Revert" })).toBeInTheDocument();
+  });
+
+  it("keeps the conversation as it is when the layout's view comes and goes", async () => {
+    const data = engineData("question");
+    const view: ItemViewer = (item) => (item.body.kind === "userMessage" ? <p className="mine">{item.body.text}</p> : null);
+    const { engine, store, container, rerender } = await open(data, <StandardLayout />, 6);
+    const ask = within(container).getByRole("dialog", { name: "Colour" });
+    const answer = within(ask).getByRole("textbox", { name: "Your answer" });
+    await userEvent.type(answer, "Green");
+    const composer = container.querySelector<HTMLTextAreaElement>("textarea.composer-input")!;
+    await userEvent.type(composer, "After this");
+    for (const itemView of [view, undefined, view]) {
+      rerender(
+        <EngineProvider store={store}>
+          <StandardLayout itemView={itemView} />
+        </EngineProvider>,
+      );
+      await settle();
+      expect(container.querySelector(".mine") !== null).toBe(itemView !== undefined);
+      expect(within(container).getByRole("textbox", { name: "Your answer" })).toBe(answer);
+      expect(answer).toHaveValue("Green");
+      expect(container.querySelector("textarea.composer-input")).toBe(composer);
+      expect(composer).toHaveValue("After this");
+    }
+    expect(engine.answers).toEqual([]);
+  });
+
+  it("takes no view that answers `false`", () => {
+    // @ts-expect-error `false` would hide every item it answers for
+    const view: ItemViewer = (item) => item.body.kind === "command" && <p>Ran</p>;
+    expect(view).toBeTypeOf("function");
   });
 });

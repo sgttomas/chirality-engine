@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import type { Item, ThreadId } from "../../engine/types";
+import type { ItemViewer } from "./itemView";
 
 export type Block =
   | { kind: "item"; item: Item }
@@ -18,7 +19,7 @@ const shown = ["userMessage", "agentMessage", "plan", "fileChange", "subagent", 
 
 /** The blocks to show; `nodes` holds the application's node for each item, by index. An item
  * with no node and no standard view is left out, so it neither splits a fold nor ends one. */
-export function blocksOf(items: Item[], nodes: readonly (ReactNode | null | undefined)[] = []): Block[] {
+export function blocksOf(items: Item[], nodes: readonly ReturnType<ItemViewer>[] = []): Block[] {
   const blocks: Block[] = [];
   items.forEach((item, i) => {
     const node = nodes[i];
