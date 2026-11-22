@@ -6,13 +6,14 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::api::*;
+use crate::assignment::marker::Marker;
 use crate::protocol as p;
 use crate::rpc::RpcError;
 use crate::session::{Inner, Session, engine_error};
 
 const PAGE: u32 = 100;
 
-async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
+pub(crate) async fn list_turns(session: &Session, thread: &ThreadId) -> std::result::Result<Vec<Turn>, RpcError> {
     let mut turns = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
@@ -57,7 +58,14 @@ impl Inner {
             let read_at = self.store.renames();
             let page: p::ThreadListResponse = session.call("thread/list", params(cursor)).await?;
             for thread in &page.data {
-                let Some(id) = self.adopt_thread(thread, Some(read_at)) else { continue };
+                let Some(id) = self.adopt_listed(thread, read_at) else { continue };
+                if self.needs_confirming(thread) {
+                    // Whether it is a fork, which the listing leaves out; a thread that cannot be read is not taken as assigned.
+                    let read_at = self.store.renames();
+                    if let Ok(read) = session.call::<p::ThreadResponse>("thread/read", json!({ "threadId": id.0 })).await {
+                        self.refresh_thread(&read.thread, read_at);
+                    }
+                }
                 let unknown_turn = matches!(thread.status, p::ThreadStatus::Active) && self.store.thread(&id).is_some_and(|e| e.active_turn.is_none());
                 if unknown_turn && let Some(turn) = running_turn(&session, &id).await {
                     self.take_running(&id, turn);
@@ -91,14 +99,22 @@ impl Inner {
 
     /// Loads a thread into this Codex process if it is not yet, so turns can run on it.
     pub(crate) async fn ensure_loaded(&self, session: &Session, thread: &ThreadId) -> Result<()> {
-        if session.is_loaded(thread) {
-            return Ok(());
+        self.load(session, thread).await.map(|_| ())
+    }
+
+    /// Loads a thread as [`Inner::ensure_loaded`] does, and gives the access
+    /// Codex resumed or forked it with, if it did (see
+    /// [`p::LoadResponse::access`]), which bounds an access the engine does not know.
+    pub(crate) async fn load(&self, session: &Session, thread: &ThreadId) -> Result<Option<Access>> {
+        if let Some(access) = session.loaded_access(thread) {
+            return Ok(access);
         }
         let entry = self.known_thread(thread)?;
-        let _: p::ThreadResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
+        let resumed: p::LoadResponse = session.call("thread/resume", json!({ "threadId": thread.0, "cwd": entry.cwd, "excludeTurns": true })).await?;
         self.tool_calls.reopen_thread(&thread.0);
-        session.mark_loaded(thread);
-        Ok(())
+        let access = resumed.access();
+        session.mark_loaded(thread, Some(access));
+        Ok(Some(access))
     }
 
     pub(crate) async fn read_thread(&self, thread: &ThreadId) -> Result<ThreadView> {
@@ -133,6 +149,23 @@ impl Inner {
     }
 
     pub(crate) async fn start_thread(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings) -> Result<ThreadId> {
+        self.start_thread_from(project, message, settings, None).await
+    }
+
+    /// Starts a thread another thread assigned, with its brief marked as from that thread, and
+    /// gives it its title once its first turn has started.
+    pub(crate) async fn start_assigned(self: &Arc<Self>, project: &ProjectId, brief: Message, settings: TurnSettings, from: Marker, title: String) -> Result<ThreadId> {
+        let id = self.start_thread_from(project, brief, settings, Some((from, title.clone()))).await?;
+        // Codex keeps the title once the thread has its first turn; one it does not take leaves the brief's own when listed.
+        self.store.renamed();
+        if let Ok(session) = self.session() {
+            let _ = session.call_value("thread/name/set", json!({ "threadId": id.0, "name": title })).await;
+        }
+        Ok(id)
+    }
+
+    /// `assigned`: the assigning thread's mark and the title it gave, which the thread has from the start.
+    async fn start_thread_from(self: &Arc<Self>, project: &ProjectId, message: Message, settings: TurnSettings, assigned: Option<(Marker, String)>) -> Result<ThreadId> {
         let project = self.project(project)?;
         let session = self.session()?;
         // A first message that cannot be made makes no thread.
@@ -140,12 +173,18 @@ impl Inner {
             crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?;
         }
         let before = self.store.seq();
-        let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: self.config.tools.as_ref().map(crate::tools::specs) };
+        let params = p::ThreadStartParams { cwd: project.path.display().to_string(), model: settings.model.clone(), dynamic_tools: Some(crate::tools::specs(self.config.tools.as_ref())) };
         let started: p::ThreadResponse = session.call("thread/start", params).await?;
         let id = self.adopt_thread(&started.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex started the thread in another folder".into() })?;
-        session.mark_loaded(&id);
+        session.mark_loaded(&id, None);
         session.mark_unkept(&id, before);
-        if let Err(e) = self.send(&id, message, settings).await {
+        if let Some((from, title)) = &assigned {
+            self.store.update_thread(&id, |e| {
+                e.assigned_by = Some(from.from.clone());
+                e.title = Some(title.clone());
+            });
+        }
+        if let Err(e) = self.send_from(&id, message, settings, assigned.map(|(from, _)| from)).await {
             // No turn started: the thread the engine just made is not listed.
             self.store.remove_thread(&id);
             session.forget_loaded(&id);
@@ -161,19 +200,22 @@ impl Inner {
         }
         self.ensure_loaded(&session, thread).await?;
         let params = json!({ "threadId": thread.0, "lastTurnId": through.0, "excludeTurns": true });
-        let forked: p::ThreadResponse = session.call("thread/fork", params).await?;
+        let forked: p::LoadResponse = session.call("thread/fork", params).await?;
         let id = self.adopt_thread(&forked.thread, None).ok_or_else(|| EngineError::Codex { message: "Codex forked the thread into another folder".into() })?;
         let parent = self.store.thread(thread);
         self.store.update_thread(&id, |e| {
             e.forked_from = Some(thread.clone());
+            // A fork is not an assignment, though it has the same first message.
+            e.assigned_by = None;
             if let Some(parent) = &parent {
                 e.settings = parent.settings.clone();
+                e.access_known = parent.access_known;
                 if let Some(title) = &parent.title {
                     e.title.get_or_insert_with(|| title.clone());
                 }
             }
         });
-        session.mark_loaded(&id);
+        session.mark_loaded(&id, Some(forked.access()));
         Ok(id)
     }
 
@@ -198,6 +240,7 @@ impl Inner {
         let session = self.session()?;
         self.known_thread(thread)?;
         session.call_value("thread/archive", json!({ "threadId": thread.0 })).await?;
+        self.assignments.deliveries.forget(thread);
         self.store.remove_thread(thread);
         self.tool_calls.close_thread(&thread.0, false);
         session.forget_loaded(thread);

@@ -17,20 +17,26 @@ use crate::session::{Inner, Session};
 
 pub(crate) const TOOL_CALL: &str = "item/tool/call";
 
-/// The application's tools as `thread/start` takes them.
-pub(crate) fn specs(tools: &AppTools) -> Vec<p::DynamicToolSpec> {
+/// The engine's tools, and the application's, as `thread/start` takes them.
+pub(crate) fn specs(tools: Option<&AppTools>) -> Vec<p::DynamicToolSpec> {
+    let mut specs = vec![crate::assignment::tools::spec()];
+    specs.extend(tools.map(app_spec));
+    specs
+}
+
+fn app_spec(tools: &AppTools) -> p::DynamicToolSpec {
     let functions = tools
         .tools
         .iter()
         .map(|t| p::NamespaceTool::Function(p::FunctionSpec { name: t.name.clone(), description: t.description.clone(), input_schema: t.input_schema.clone() }))
         .collect();
-    vec![p::DynamicToolSpec::Namespace { name: tools.namespace.name.clone(), description: tools.namespace.description.clone(), tools: functions }]
+    p::DynamicToolSpec::Namespace { name: tools.namespace.name.clone(), description: tools.namespace.description.clone(), tools: functions }
 }
 
 /// Namespaces Codex keeps: for the Responses API (0.171.0, `validate_dynamic_tools`),
 /// and for its own tools (`clock`, and the multi-agent ones), whose names
 /// would win over an application's.
-const RESERVED_NAMESPACES: [&str; 17] = [
+pub(crate) const RESERVED_NAMESPACES: [&str; 17] = [
     "clock",
     "collaboration",
     "multi_agent_v1",
@@ -58,8 +64,8 @@ pub(crate) fn validate(tools: &AppTools) -> Result<()> {
     let identifier = |name: &str, max: usize| !name.is_empty() && name.chars().count() <= max && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
     let reserved = |name: &str| name == "mcp" || name.starts_with("mcp__");
     let ns = &tools.namespace;
-    if !identifier(&ns.name, 64) || reserved(&ns.name) || RESERVED_NAMESPACES.contains(&ns.name.as_str()) {
-        return invalid(format!("tool namespace {:?} must be at most 64 letters, digits, _ or -, and not one Codex keeps", ns.name));
+    if !identifier(&ns.name, 64) || reserved(&ns.name) || RESERVED_NAMESPACES.contains(&ns.name.as_str()) || ns.name == crate::assignment::NAMESPACE {
+        return invalid(format!("tool namespace {:?} must be at most 64 letters, digits, _ or -, and not one Codex or the engine keeps", ns.name));
     }
     if ns.description.chars().count() > 1024 {
         return invalid("the tool namespace's description must be at most 1024 characters".into());
@@ -115,15 +121,24 @@ fn response(output: ToolOutput) -> Value {
 
 impl Inner {
     /// Takes each `item/tool/call` once per session, before anything is sent:
-    /// with no tools it is unsupported, as any request the engine does not
-    /// take; a tool the application does not have, or a call on a thread gone
-    /// from Codex, is answered as failed at once; anything else goes to the
-    /// application's handler.
-    pub(crate) fn on_tool_call(&self, session: Arc<Session>, id: Value, params: Value, tools: Option<&AppTools>) {
+    /// a call to the engine's own tools goes to the engine; with no
+    /// application tools, any other is unsupported, as any request the engine
+    /// does not take; a tool the application does not have, or a call on a
+    /// thread gone from Codex, is answered as failed at once; anything else
+    /// goes to the application's handler.
+    pub(crate) fn on_tool_call(self: &Arc<Self>, session: Arc<Session>, id: Value, params: Value, tools: Option<&AppTools>) {
         let to = ReplyTo { client: session.client.clone(), generation: session.generation, id: id.clone() };
         let call = serde_json::from_value::<p::DynamicToolCall>(params).ok();
         let thread = call.as_ref().map(|c| c.thread_id.clone());
         let ask = match (tools, call) {
+            (_, Some(call)) if call.namespace.as_deref() == Some(crate::assignment::NAMESPACE) => {
+                let place = Place { thread: call.thread_id.clone(), turn: call.turn_id.clone(), item: call.call_id.clone() };
+                // The thread that made the call, a subagent's own too (the engine refuses one).
+                let thread = ThreadId(call.thread_id);
+                let project = self.store.thread(&thread).map(|e| e.project);
+                let call = ToolCall { thread, project, turn: TurnId(call.turn_id), item: ItemId(call.call_id), namespace: call.namespace, tool: call.tool, arguments: call.arguments };
+                Ask::Call { place, call: Box::new(call), handler: self.engine_tools() }
+            }
             (None, _) => Ask::Unsupported,
             (Some(_), None) => Ask::Invalid,
             (Some(tools), Some(call)) if !offers(tools, call.namespace.as_deref(), &call.tool) => {
@@ -175,9 +190,11 @@ mod tests {
 
     #[test]
     fn tools_are_given_as_codex_takes_them() {
-        let spec = serde_json::to_value(specs(&tools("estimate", &["check"]))).unwrap();
+        let spec = serde_json::to_value(specs(Some(&tools("estimate", &["check"])))).unwrap();
         let function = json!({"type": "function", "name": "check", "description": "Does it.", "inputSchema": {"type": "object"}});
-        assert_eq!(spec, json!([{"type": "namespace", "name": "estimate", "description": "The estimate.", "tools": [function]}]));
+        assert_eq!(spec[0]["name"], "chirality", "the engine's own come first");
+        assert_eq!(spec[1], json!({"type": "namespace", "name": "estimate", "description": "The estimate.", "tools": [function]}));
+        assert_eq!(serde_json::to_value(specs(None)).unwrap().as_array().unwrap().len(), 1);
     }
 
     #[test]
@@ -186,7 +203,7 @@ mod tests {
         for bad in [tools("estimate", &["check", "check"]), tools("estimate", &["check estimate"]), tools("estimate", &["mcp__x"]), tools("estimate", &[])] {
             assert!(validate(&bad).is_err(), "{bad:?}");
         }
-        for namespace in ["a.b", "", "web", "functions", "clock", "mcp", "mcp__x", &"n".repeat(65)] {
+        for namespace in ["a.b", "", "web", "functions", "clock", "mcp", "mcp__x", "chirality", &"n".repeat(65)] {
             assert!(validate(&tools(namespace, &["check"])).is_err(), "{namespace}");
         }
         let mut long = tools("estimate", &["check"]);

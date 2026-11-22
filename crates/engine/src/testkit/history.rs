@@ -15,7 +15,7 @@ pub(super) async fn codex_thread(ctx: &Ctx, project: &Project) -> (ThreadId, u64
     let params = json!({ "cwd": project.path.display().to_string(), "model": "gpt-6.2-sol" });
     let started: p::ThreadResponse = session.call("thread/start", params).await.expect("Codex starts the thread");
     let thread = ctx.engine.inner().adopt_thread(&started.thread, None).expect("the thread is in the project");
-    session.mark_loaded(&thread);
+    session.mark_loaded(&thread, None);
     session.mark_unkept(&thread, before);
     (thread, before)
 }

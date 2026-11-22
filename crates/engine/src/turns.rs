@@ -9,6 +9,8 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::api::*;
+use crate::assignment::delivery::Delivery;
+use crate::assignment::marker::Marker;
 use crate::mapping;
 use crate::protocol as p;
 use crate::session::Inner;
@@ -36,6 +38,30 @@ impl Admission {
     }
 }
 
+/// What became of a start with another thread's message.
+#[derive(Debug)]
+pub(crate) enum Start {
+    Started,
+    /// A turn runs there.
+    Busy,
+    /// Its sender is gone, or the assignment it reports on is closed.
+    Dropped,
+}
+
+/// A start with another thread's message that failed.
+#[derive(Debug)]
+pub(crate) struct NotStarted {
+    pub error: EngineError,
+    /// Set when `turn/start` went to Codex, which may have taken it.
+    pub sent: Option<Sent>,
+}
+
+/// A `turn/start` sent: the thread's latest turn before it, if it had one.
+#[derive(Clone, Debug)]
+pub(crate) struct Sent {
+    pub after: Option<TurnId>,
+}
+
 /// Runs `op` as the engine's own task; the caller only waits for it.
 async fn owned<F>(op: F) -> Result<()>
 where
@@ -47,12 +73,58 @@ where
 impl Inner {
     /// Sends a message: starts a turn, or steers the one running.
     pub(crate) async fn send(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
+        self.send_from(thread, message, settings, None).await
+    }
+
+    /// Sends a message, marked as from another thread when `from` is set.
+    pub(crate) async fn send_from(self: &Arc<Self>, thread: &ThreadId, message: Message, settings: TurnSettings, from: Option<Marker>) -> Result<()> {
         let (inner, thread) = (self.clone(), thread.clone());
         owned(async move {
             let _admitted = inner.admission.admit(&thread).await;
-            inner.send_admitted(&thread, message, settings).await
+            inner.send_admitted(&thread, message, settings, from.as_ref(), true, &mut false).await
         })
         .await
+    }
+
+    /// Starts a turn with another thread's message if the engine has seen no
+    /// turn run there since the last ended (none steered) and the message still
+    /// has a place. Its settings are the thread's own as they are now, under
+    /// its admission (see [`crate::assignment::delivery::resolve`]).
+    pub(crate) async fn start_if_idle(self: &Arc<Self>, thread: &ThreadId, delivery: &Delivery) -> std::result::Result<Start, NotStarted> {
+        let (inner, thread, delivery) = (self.clone(), thread.clone(), delivery.clone());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let ran = owned(async move {
+            let _admitted = inner.admission.admit(&thread).await;
+            let _ = tx.send(inner.start_admitted(&thread, &delivery).await);
+            Ok(())
+        })
+        .await;
+        rx.await.unwrap_or_else(|_| Err(NotStarted { error: ran.err().unwrap_or(EngineError::Invalid { message: "the engine's task ended".into() }), sent: None }))
+    }
+
+    async fn start_admitted(&self, thread: &ThreadId, delivery: &Delivery) -> std::result::Result<Start, NotStarted> {
+        let unsent = |error| NotStarted { error, sent: None };
+        let entry = self.known_thread(thread).map_err(unsent)?;
+        if !crate::store::is_idle(&entry) {
+            return Ok(Start::Busy);
+        }
+        // Its sender, or the assignment it reports on, may have gone while it waited for the thread.
+        if !self.still_holds(thread, &delivery.from) {
+            return Ok(Start::Dropped);
+        }
+        let session = self.session().map_err(unsent)?;
+        let resumed = self.load(&session, thread).await.map_err(unsent)?;
+        let after = match entry.last_ended.clone() {
+            Some(turn) => Some(turn),
+            None => crate::assignment::delivery::latest_turn(&session, thread).await.map_err(unsent)?,
+        };
+        let settings = crate::assignment::delivery::resolve(&entry, resumed, delivery.bound, &delivery.fallback);
+        let message = Message { text: delivery.text.clone(), attachments: Vec::new(), workflow: None };
+        let mut sent = false;
+        match self.send_admitted(thread, message, settings, Some(&delivery.from), false, &mut sent).await {
+            Ok(()) => Ok(Start::Started),
+            Err(error) => Err(NotStarted { error, sent: sent.then_some(Sent { after }) }),
+        }
     }
 
     /// Stops the running turn, and holds the thread until Codex has ended it;
@@ -66,7 +138,8 @@ impl Inner {
         .await
     }
 
-    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings) -> Result<()> {
+    /// `sent` is set once `turn/start` goes to Codex.
+    async fn send_admitted(&self, thread: &ThreadId, message: Message, settings: TurnSettings, from: Option<&Marker>, may_steer: bool, sent: &mut bool) -> Result<()> {
         let session = self.session()?;
         let entry = self.known_thread(thread)?;
         if entry.subagent.is_some() {
@@ -77,11 +150,11 @@ impl Inner {
             Some(id) => Some(crate::workflows::pick(id, &self.config.workflow_roots, &project.path)?),
             None => None,
         };
-        let input = mapping::message_input(&message, workflow.as_ref());
+        let input = mapping::message_input(&message, workflow.as_ref(), from);
 
         // A turn a Stop could not settle may have ended unannounced: the send is
         // a start, which Codex takes as a steer if that turn still runs.
-        if let Some(turn) = entry.active_turn.filter(|t| entry.unsettled.as_ref() != Some(t)) {
+        if let Some(turn) = entry.active_turn.filter(|t| may_steer && entry.unsettled.as_ref() != Some(t)) {
             let params = p::TurnSteerParams { thread_id: thread.0.clone(), expected_turn_id: turn.0, input };
             session.call_value("turn/steer", params).await?;
             return Ok(());
@@ -102,6 +175,7 @@ impl Inner {
         // every summary the turn causes has them; they are kept only once Codex
         // has taken the turn.
         self.store.update_thread(thread, |e| e.starting = Some(settings));
+        *sent = true;
         let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {
@@ -113,6 +187,7 @@ impl Inner {
         self.store.update_thread(thread, |e| {
             if let Some(settings) = e.starting.take() {
                 e.settings = Some(settings);
+                e.access_known = true;
             }
             e.failed = None;
             if e.active_turn.is_none() && e.last_ended.as_ref() != Some(&turn) {

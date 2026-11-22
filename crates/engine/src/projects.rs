@@ -81,9 +81,15 @@ impl Inner {
         }
         save(&self.config.state_dir, &projects)?;
         self.store.set_projects(projects);
+        let session = self.session().ok();
         for id in self.store.thread_ids() {
             if self.store.thread(&id).is_some_and(|e| &e.project == project) {
                 self.store.remove_thread(&id);
+                // Taken in again if the project is added back: read afresh, nothing waiting.
+                self.assignments.deliveries.forget(&id);
+                if let Some(session) = &session {
+                    session.forget_loaded(&id);
+                }
             }
         }
         Ok(())

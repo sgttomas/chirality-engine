@@ -3,10 +3,11 @@ import type { Item } from "../../engine/types";
 
 export type Block =
   | { kind: "item"; item: Item }
-  /** Consecutive reasoning, commands, tool calls, searches and waits for subagents. */
+  /** Consecutive reasoning, commands, tool calls, searches, waits for subagents and listings of threads. */
   | { kind: "work"; items: Item[] };
 
-const isWork = (item: Item) => ["reasoning", "command", "toolCall", "webSearch", "subagentTool"].includes(item.body.kind);
+const isWork = (item: Item) =>
+  ["reasoning", "command", "toolCall", "webSearch", "subagentTool"].includes(item.body.kind) || (item.body.kind === "threadTool" && item.body.tool === "threads");
 
 export function blocksOf(items: Item[]): Block[] {
   const blocks: Block[] = [];
@@ -35,6 +36,8 @@ export function workLine(item: Item): string {
       if (b.tool === "wait") return b.status === "running" ? "Waiting for subagents" : "Waited for subagents";
       if (b.tool === "spawnAgent" && b.status === "failed") return "Could not start a subagent";
       return b.tool;
+    case "threadTool":
+      return "Listed the threads";
     default:
       return "";
   }
@@ -48,7 +51,7 @@ export function workSummary(items: Item[]): string {
   const commands = count("command");
   if (commands) parts.push(`ran ${commands} command${commands > 1 ? "s" : ""}`);
   const waits = items.filter((i) => i.body.kind === "subagentTool" && i.body.tool === "wait").length;
-  const tools = count("toolCall") + count("subagentTool") - waits;
+  const tools = count("toolCall") + count("subagentTool") + count("threadTool") - waits;
   if (tools) parts.push(`used ${tools} tool${tools > 1 ? "s" : ""}`);
   if (waits) parts.push("waited for subagents");
   const searches = count("webSearch");

@@ -8,6 +8,7 @@ use super::harness::{Ctx, library, settings, text};
 use super::stub::{calls, hangs, patch_call, question_call, says, shell_call, tool_call};
 use crate::api::*;
 
+pub use super::assignments::{assignment, assignment_access, assignment_exchange, assignment_person, assignment_projects, assignment_waits};
 pub use super::history::unkept_thread;
 pub use super::subagents::{subagent, subagent_message, subagent_stop};
 
@@ -62,7 +63,7 @@ pub async fn text_turn(ctx: &mut Ctx) {
     let (thread, _) = one_turn(ctx, &project, "hello", "Hello from the stub.", Access::Ask).await;
     let turns = turns(ctx, &thread).await;
     assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[hello] go".into(), attachments: vec![], workflow: None });
+    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[hello] go".into(), attachments: vec![], workflow: None, from: None });
     assert_eq!(agent_text(&turns[0]), "Hello from the stub.");
     let summary = status(ctx, &thread);
     assert_eq!((summary.status, summary.unread, summary.project), (ThreadStatus::Idle, true, project.id.clone()));
@@ -95,7 +96,7 @@ pub async fn workflow_turn(ctx: &mut Ctx) {
     let thread = ctx.engine.start_thread(&project.id, message, settings(Access::Ask)).await.unwrap();
     assert_eq!(ctx.turn_ended(&thread).await.1, TurnState::Completed);
     let turns = turns(ctx, &thread).await;
-    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[flow] Estimate this".into(), attachments, workflow: Some(estimate.id) });
+    assert_eq!(turns[0].items[0].body, ItemBody::UserMessage { text: "STUB[flow] Estimate this".into(), attachments, workflow: Some(estimate.id), from: None });
     assert_eq!(status(ctx, &thread).title.as_deref(), Some("STUB[flow] Estimate this"));
 }
 

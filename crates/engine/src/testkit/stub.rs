@@ -172,7 +172,13 @@ fn turn_view(body: &Value) -> (String, HashMap<String, String>) {
     let entries = body["input"].as_array().cloned().unwrap_or_default();
     let text_of = |entry: &Value| match &entry["content"] {
         Value::String(s) => s.clone(),
-        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str().or(p["encrypted_content"].as_str())).collect::<Vec<_>>().join("\n"),
+        // Another thread's mark names its sender's title, which can hold a key of its own: not the turn's.
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p["text"].as_str().or(p["encrypted_content"].as_str()))
+            .filter(|t| !t.starts_with("<thread-message "))
+            .collect::<Vec<_>>()
+            .join("\n"),
         _ => String::new(),
     };
     let user = |e: &Value| e["role"] == "user" && e.get("type").and_then(Value::as_str).unwrap_or("message") == "message";

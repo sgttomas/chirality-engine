@@ -1,19 +1,22 @@
 // Starting points for the fake engine: first use, a project with history, a
 // turn stopped at a given moment. `?scene=<name>` picks one in the browser.
+import type { EngineClient } from "../engine/client";
 import type { Answer, Message, ProjectId, Request, ThreadId, TurnSettings } from "../engine/types";
+import assignment from "../testing/engine-data/assignment.json";
+import { ReplayTransport, type EngineData } from "../testing/transport";
 import type { PanelTab } from "../ui/panel";
 import { FakeEngine } from "./engine";
 import { bridge, clinic } from "./fixtures";
 
 
 export interface Scene {
-  engine: FakeEngine;
+  engine: EngineClient;
   project?: ProjectId;
   thread?: ThreadId;
   panel?: PanelTab;
 }
 
-export const sceneNames = ["firstUse", "empty", "running", "approval", "question", "diff", "fork", "subagents", "home"] as const;
+export const sceneNames = ["firstUse", "empty", "running", "approval", "question", "diff", "fork", "subagents", "assignment", "home"] as const;
 export type SceneName = (typeof sceneNames)[number];
 
 const settings: TurnSettings = { model: "gpt-5.5", effort: "high", access: "ask" };
@@ -45,7 +48,21 @@ async function history(engine: FakeEngine) {
   return main;
 }
 
+/** Where the engine's recorded assignment ends: the lead assigned a thread, heard its report, closed
+ * the assignment and sent one more message. From the engine's own data, not the fake's. */
+function assignmentScene(): Scene {
+  const data = structuredClone(assignment) as unknown as EngineData;
+  const after = data.after;
+  const signedIn = { ...after, account: { state: "signedIn" as const, email: "person@example.com", plan: "Pro" } };
+  const transport = new ReplayTransport(data, () => structuredClone(signedIn));
+  // Every event is in the snapshot after them; each thread reads as the engine last read it.
+  transport.play();
+  const lead = after.threads.find((t) => !t.assignedBy && after.threads.some((o) => o.assignedBy === t.id))!;
+  return { engine: transport.client, thread: lead.id };
+}
+
 export async function buildScene(name: SceneName): Promise<Scene> {
+  if (name === "assignment") return assignmentScene();
   const engine = new FakeEngine({ instant: true, autoAnswer: allowAll });
   const live = () => {
     engine.options = {};

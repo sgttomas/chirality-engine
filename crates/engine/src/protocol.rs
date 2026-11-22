@@ -173,6 +173,26 @@ pub struct ThreadResponse {
     pub thread: Thread,
 }
 
+/// `thread/resume` and `thread/fork`: the thread, and the sandbox Codex loaded it with.
+#[derive(Deserialize)]
+pub struct LoadResponse {
+    pub thread: Thread,
+    pub sandbox: Option<Value>,
+}
+
+impl LoadResponse {
+    /// The access the sandbox amounts to. Codex 0.171.0 loads a thread at no
+    /// more than the access of its last turn (one asked of in an untrusted
+    /// folder, read only).
+    pub fn access(&self) -> crate::api::Access {
+        match self.sandbox.as_ref().and_then(|s| s["type"].as_str()) {
+            Some("dangerFullAccess") => crate::api::Access::FullAccess,
+            Some("workspaceWrite") => crate::api::Access::Ask,
+            _ => crate::api::Access::ReadOnly,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListResponse {

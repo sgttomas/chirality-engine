@@ -17,8 +17,11 @@ pub(crate) struct ThreadEntry {
     pub title: Option<String>,
     pub forked_from: Option<ThreadId>,
     pub updated_at: i64,
-    /// The settings of the last turn Codex took.
+    /// The settings of the last turn Codex took. A listing gives the model and
+    /// effort only: the access is known once the engine has started a turn.
     pub settings: Option<TurnSettings>,
+    /// Whether `settings.access` is one the engine started a turn with, not a stand-in.
+    pub access_known: bool,
     /// The settings of a turn being started, until Codex takes or refuses it.
     pub starting: Option<TurnSettings>,
     pub active_turn: Option<TurnId>,
@@ -30,6 +33,8 @@ pub(crate) struct ThreadEntry {
     pub failed: Option<String>,
     pub unread: bool,
     pub subagent: Option<Subagent>,
+    /// The thread that assigned this one, read from its first message.
+    pub assigned_by: Option<ThreadId>,
 }
 
 /// A request Codex waits on, with what is needed to answer it.
@@ -71,6 +76,12 @@ struct State {
 pub(crate) struct Store {
     state: Mutex<State>,
     events: broadcast::Sender<Numbered>,
+}
+
+/// No turn runs or is being started, as far as the engine has seen: a turn a
+/// Stop could not settle runs until Codex ends it.
+pub(crate) fn is_idle(entry: &ThreadEntry) -> bool {
+    entry.starting.is_none() && entry.active_turn.is_none()
 }
 
 pub(crate) fn now() -> i64 {
@@ -330,6 +341,7 @@ fn summary(state: &State, id: &ThreadId) -> ThreadSummary {
         unread: entry.unread,
         forked_from: entry.forked_from.clone(),
         subagent: entry.subagent.clone(),
+        assigned_by: entry.assigned_by.clone(),
         updated_at: entry.updated_at,
         settings: entry.starting.clone().or_else(|| entry.settings.clone()),
     }

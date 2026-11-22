@@ -1,7 +1,7 @@
 //! The engine's running core: one Codex session at a time, started,
 //! initialised, watched, restarted when it dies, and stopped.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -62,8 +62,9 @@ pub(crate) struct Session {
     pub client: Arc<RpcClient>,
     pub generation: u64,
     stopper: Arc<dyn Stopper>,
-    /// Threads this process has started, resumed or forked.
-    loaded: Mutex<HashSet<ThreadId>>,
+    /// Threads this process has started, resumed or forked, with the access
+    /// Codex reported when it resumed or forked one.
+    loaded: Mutex<HashMap<ThreadId, Option<Access>>>,
     /// Threads the engine started in this process and has not yet read, with
     /// the number of the last event before each started: Codex may not have
     /// kept their first message.
@@ -71,12 +72,13 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    pub fn is_loaded(&self, thread: &ThreadId) -> bool {
-        self.loaded.lock().unwrap().contains(thread)
+    /// `None` if the thread is not loaded, else the access Codex loaded it with, if it said.
+    pub fn loaded_access(&self, thread: &ThreadId) -> Option<Option<Access>> {
+        self.loaded.lock().unwrap().get(thread).copied()
     }
 
-    pub fn mark_loaded(&self, thread: &ThreadId) {
-        self.loaded.lock().unwrap().insert(thread.clone());
+    pub fn mark_loaded(&self, thread: &ThreadId, access: Option<Access>) {
+        self.loaded.lock().unwrap().insert(thread.clone(), access);
     }
 
     /// Codex has unloaded the thread; the next turn resumes it.
@@ -134,6 +136,8 @@ pub(crate) struct Inner {
     /// The application's tool calls being answered.
     pub tool_calls: crate::calls::Calls,
     pub admission: crate::turns::Admission,
+    /// Messages between threads waiting to be delivered, and assignments closed.
+    pub assignments: crate::assignment::Assignments,
 }
 
 impl Inner {
@@ -155,6 +159,7 @@ impl Inner {
             login: Mutex::new(None),
             tool_calls: Default::default(),
             admission: Default::default(),
+            assignments: Default::default(),
         });
         inner.store.set_projects(projects);
         Ok(inner)
@@ -234,6 +239,10 @@ impl Inner {
         }
         self.attempts.send_modify(|n| *n += 1);
         Ok(Attempt(&self.attempts))
+    }
+
+    pub fn is_shut_down(&self) -> bool {
+        self.shutting_down.load(Ordering::SeqCst)
     }
 
     /// Sets Codex's status unless the engine has shut down, whose status is the last.

@@ -6,6 +6,7 @@
 pub mod api;
 
 mod account;
+mod assignment;
 mod calls;
 mod events;
 mod mapping;
@@ -90,7 +91,7 @@ impl Engine {
     }
 
     #[cfg(test)]
-    pub(crate) fn inner(&self) -> &Inner {
+    pub(crate) fn inner(&self) -> &Arc<Inner> {
         &self.inner
     }
 

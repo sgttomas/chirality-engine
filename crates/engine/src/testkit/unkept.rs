@@ -42,7 +42,7 @@ async fn with_thread(name: &str, started: bool) -> (Engine, Wire, std::path::Pat
     let before = engine.snapshot().seq;
     if started {
         let session = engine.inner().session().unwrap();
-        session.mark_loaded(&T());
+        session.mark_loaded(&T(), None);
         session.mark_unkept(&T(), before);
     }
     (engine, wire, project, before)

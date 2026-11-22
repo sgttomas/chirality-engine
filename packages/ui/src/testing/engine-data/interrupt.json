@@ -170,6 +170,7 @@
     "seq": 8,
     "threads": [
       {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -366,6 +367,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -393,6 +395,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[wait] take your time",
           "workflow": null
@@ -408,6 +411,7 @@
       "item": {
         "body": {
           "attachments": [],
+          "from": null,
           "kind": "userMessage",
           "text": "STUB[wait] take your time",
           "workflow": null
@@ -421,6 +425,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -449,6 +454,7 @@
     },
     {
       "thread": {
+        "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
         "project": "project-1",
@@ -474,6 +480,7 @@
       "view": {
         "seq": 8,
         "summary": {
+          "assignedBy": null,
           "forkedFrom": null,
           "id": "00000000-0000-0000-0000-000000000002",
           "project": "project-1",
@@ -497,6 +504,7 @@
               {
                 "body": {
                   "attachments": [],
+                  "from": null,
                   "kind": "userMessage",
                   "text": "STUB[wait] take your time",
                   "workflow": null

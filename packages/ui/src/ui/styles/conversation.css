@@ -160,3 +160,25 @@
 :where(.chirality) .delegation:hover:not(:disabled) { border-color: var(--rule-strong); color: var(--ink); }
 :where(.chirality) .delegation-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :where(.chirality) .work-prompt > summary { cursor: pointer; color: var(--ink-faint); }
+
+/* A message from another thread: from that thread, not the person. */
+:where(.chirality) .msg-from {
+  justify-self: start;
+  max-width: min(600px, 82%);
+  display: grid; gap: 6px; justify-items: start;
+}
+:where(.chirality) .msg-from-head {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 0; padding: 0; background: transparent;
+  color: var(--ink-faint); font-size: 12px;
+}
+:where(.chirality) .msg-from-head:hover:not(:disabled) { color: var(--accent-ink); }
+:where(.chirality) .msg-from-end { color: var(--ink-faint); }
+:where(.chirality) .msg-from-text {
+  padding: 9px 14px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 14px 14px 14px 4px;
+  background: var(--sunken);
+  font-size: 13.5px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}

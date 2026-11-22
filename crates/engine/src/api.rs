@@ -8,10 +8,7 @@
 //! These types are ours, not Codex's: the engine maps the app-server protocol
 //! into them, so an application never depends on the protocol's shape.
 
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -38,133 +35,13 @@ pub struct EngineConfig {
     pub workflow_roots: Vec<PathBuf>,
     /// Extra `-c key=value` settings passed to `codex app-server`.
     pub codex_settings: Vec<String>,
-    /// The application's own tools, given to the agent in every thread the engine starts.
+    /// The application's own tools, given to the agent in every thread the engine starts,
+    /// beside the engine's own for working with other threads (namespace `chirality`).
     pub tools: Option<AppTools>,
 }
 
-// ---------- the application's tools ----------
-
-/// Tools the application gives the agent, answered by its [`ToolHandler`].
-///
-/// Codex fixes a thread's tools when the thread starts and keeps them with it:
-/// a resumed or forked thread has the tools it was started with, and a thread
-/// started without them never has them.
-///
-/// [`crate::Engine::start`] refuses names Codex refuses and its own
-/// namespaces. A catalog Codex refuses otherwise (an argument schema it
-/// cannot use) makes [`crate::Engine::start_thread`] fail with Codex's own
-/// message. Under some Codex settings Codex has further tools of its own in
-/// namespaces of their own, and it leaves out, without saying, an
-/// application's tool whose namespace and name are the same as one of those.
-///
-/// Subagents: the engine keeps Codex from giving a new subagent the
-/// application's tools. A subagent Codex starts from a forked copy of its
-/// parent's conversation can still carry them, since Codex restores a thread's
-/// tools from forked history. For a subagent's thread that has them, a call
-/// made just as its parent is archived can still reach the handler (Codex
-/// ends the subagents after answering the archive), and Codex replaying a
-/// subagent's earlier turn can let its calls through again.
-#[derive(Clone)]
-pub struct AppTools {
-    /// The one name the agent sees the tools under, with what they are for.
-    /// Always given, so no tool clashes with one of Codex's own.
-    pub namespace: ToolNamespace,
-    pub tools: Vec<AppTool>,
-    pub handler: Arc<dyn ToolHandler>,
-}
-
-impl std::fmt::Debug for AppTools {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppTools").field("namespace", &self.namespace).field("tools", &self.tools).finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ToolNamespace {
-    /// Letters, digits, `_` and `-`.
-    pub name: String,
-    pub description: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AppTool {
-    /// Letters, digits, `_` and `-`; unique among the tools.
-    pub name: String,
-    /// What the tool does, for the agent.
-    pub description: String,
-    /// JSON Schema of the arguments.
-    pub input_schema: serde_json::Value,
-}
-
-/// The agent's call to one of the application's tools.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ToolCall {
-    /// The thread it shows on (a subagent's call shows on its root thread).
-    pub thread: ThreadId,
-    /// The project of that thread, when it is one of the engine's.
-    pub project: Option<ProjectId>,
-    /// The turn that made the call (a subagent's own turn when a subagent made it).
-    pub turn: TurnId,
-    /// The call's item in the thread, [`Item::id`].
-    pub item: ItemId,
-    pub namespace: Option<String>,
-    pub tool: String,
-    /// As the agent wrote them; not checked against the schema.
-    pub arguments: serde_json::Value,
-}
-
-/// The answer to a [`ToolCall`], given to the agent.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ToolOutput {
-    /// False tells the agent the tool failed.
-    pub success: bool,
-    pub content: Vec<ToolContent>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ToolContent {
-    Text(String),
-    /// A `data:` URL; Codex refuses a remote image.
-    Image(String),
-}
-
-impl ToolOutput {
-    pub fn text(text: impl Into<String>) -> ToolOutput {
-        ToolOutput { success: true, content: vec![ToolContent::Text(text.into())] }
-    }
-
-    pub fn failure(text: impl Into<String>) -> ToolOutput {
-        ToolOutput { success: false, content: vec![ToolContent::Text(text.into())] }
-    }
-}
-
-pub type ToolFuture = Pin<Box<dyn Future<Output = ToolOutput> + Send>>;
-
-/// Answers the agent's calls to the application's tools; any `Fn(ToolCall)`
-/// returning a future of [`ToolOutput`] is one.
-///
-/// Each call is answered with what its future gives. Codex cancels a call
-/// when its turn is interrupted or ends, or Codex stops; the engine then drops
-/// the future. A future that panics answers its call as failed.
-///
-/// A handler may now and then run, at least in part, for a call whose answer
-/// never reaches the agent: Codex cancelled it, its thread was archived, or
-/// Codex ended, just as the handler started. So a handler must be safe to run
-/// without its answer being delivered, as anything across a process boundary
-/// must be.
-pub trait ToolHandler: Send + Sync {
-    fn call(&self, call: ToolCall) -> ToolFuture;
-}
-
-impl<F, Fut> ToolHandler for F
-where
-    F: Fn(ToolCall) -> Fut + Send + Sync,
-    Fut: Future<Output = ToolOutput> + Send + 'static,
-{
-    fn call(&self, call: ToolCall) -> ToolFuture {
-        Box::pin(self(call))
-    }
-}
+mod app_tools;
+pub use app_tools::*;
 
 /// Everything an interface shows, at one moment.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, TS)]
@@ -267,6 +144,9 @@ pub struct ThreadSummary {
     pub forked_from: Option<ThreadId>,
     /// Set when the thread is a subagent another thread's agent started.
     pub subagent: Option<Subagent>,
+    /// The thread whose agent assigned this one (its first message, the brief, came from there).
+    /// The threads a thread assigned are those that name it here.
+    pub assigned_by: Option<ThreadId>,
     /// Seconds since the Unix epoch.
     #[ts(type = "number")]
     pub updated_at: i64,
@@ -372,7 +252,8 @@ pub struct Item {
 #[ts(export)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ItemBody {
-    UserMessage { text: String, attachments: Vec<Attachment>, workflow: Option<WorkflowId> },
+    /// `from` is set when another thread's agent sent it, not the person.
+    UserMessage { text: String, attachments: Vec<Attachment>, workflow: Option<WorkflowId>, from: Option<MessageFrom> },
     /// Markdown.
     AgentMessage { text: String },
     Reasoning { summary: String },
@@ -389,6 +270,9 @@ pub enum ItemBody {
     /// finishes; `threads` empty), or a start that failed. Codex gives
     /// `prompt` only for some.
     SubagentTool { tool: SubagentTool, status: ToolCallStatus, threads: Vec<ThreadId>, prompt: Option<String> },
+    /// The agent's work with another thread (the engine's own tools): `thread` is the other
+    /// thread once known, `text` the brief or message sent.
+    ThreadTool { tool: ThreadTool, thread: Option<ThreadId>, text: Option<String>, status: ToolCallStatus },
     Error { message: String },
 }
 
@@ -418,6 +302,44 @@ pub enum SubagentTool {
     FollowupTask,
     InterruptAgent,
     ListAgents,
+}
+
+/// The thread another thread's message came from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageFrom {
+    pub thread: ThreadId,
+    /// Its title when it sent the message.
+    pub title: Option<String>,
+    /// Set when the message reports how a turn the receiving thread gave it ended; the text is
+    /// that turn's last reply.
+    pub report: Option<TurnEnd>,
+}
+
+/// How a reported turn ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnEnd {
+    Completed,
+    Stopped,
+    Failed,
+}
+
+/// The engine's tools for working with other threads (namespace `chirality`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadTool {
+    /// Started a thread with a brief.
+    Assign,
+    /// Sent a message to a thread.
+    Message,
+    /// Listed the threads it can address.
+    Threads,
+    /// Ended an assignment it made.
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -168,6 +168,7 @@ export class FakeEngine implements EngineClient {
       unread: false,
       forkedFrom: null,
       subagent: null,
+      assignedBy: null,
       updatedAt: now(),
       settings,
     };
@@ -191,6 +192,7 @@ export class FakeEngine implements EngineClient {
       unread: false,
       forkedFrom: null,
       subagent: { parent, path, nickname: nicknames[this.next % nicknames.length] },
+      assignedBy: null,
       updatedAt: now(),
     };
     this.snap.threads.unshift(summary);
@@ -436,7 +438,7 @@ export class FakeEngine implements EngineClient {
   }
 
   private userItem(message: Message): Item {
-    return { id: this.id("item"), body: { kind: "userMessage", ...structuredClone(message) }, done: true };
+    return { id: this.id("item"), body: { kind: "userMessage", ...structuredClone(message), from: null }, done: true };
   }
   private addItem(thread: ThreadId, turn: Turn, item: Item) {
     const at = turn.items.findIndex((i) => i.id === item.id);
