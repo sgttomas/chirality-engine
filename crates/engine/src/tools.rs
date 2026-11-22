@@ -146,8 +146,9 @@ impl Inner {
             }
             (Some(tools), Some(call)) => {
                 let place = Place { thread: call.thread_id.clone(), turn: call.turn_id.clone(), item: call.call_id.clone() };
-                let thread = self.store.owner(ThreadId(call.thread_id));
-                let project = self.store.thread(&thread).map(|e| e.project);
+                // The thread that made the call, a subagent's own too: it shows there.
+                let thread = ThreadId(call.thread_id);
+                let project = [thread.clone(), self.store.owner(thread.clone())].iter().find_map(|t| self.store.thread(t)).map(|e| e.project);
                 let call = ToolCall {
                     thread,
                     project,

@@ -201,7 +201,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Lorentz",
+          "nickname": "Mendel",
           "parent": "00000000-0000-0000-0000-000000000002",
           "path": "/root/worker"
         },
@@ -223,7 +223,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Pauli",
+          "nickname": "Dirac",
           "parent": "00000000-0000-0000-0000-000000000005",
           "path": "/root/worker/inner"
         },
@@ -1093,7 +1093,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Lorentz",
+          "nickname": "Mendel",
           "parent": "00000000-0000-0000-0000-000000000002",
           "path": "/root/worker"
         },
@@ -1165,7 +1165,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Pauli",
+          "nickname": "Dirac",
           "parent": "00000000-0000-0000-0000-000000000005",
           "path": "/root/worker/inner"
         },
@@ -1190,7 +1190,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Lorentz",
+          "nickname": "Mendel",
           "parent": "00000000-0000-0000-0000-000000000002",
           "path": "/root/worker"
         },
@@ -1304,7 +1304,7 @@
             "state": "idle"
           },
           "subagent": {
-            "nickname": "Lorentz",
+            "nickname": "Mendel",
             "parent": "00000000-0000-0000-0000-000000000002",
             "path": "/root/worker"
           },

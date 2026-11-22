@@ -37,7 +37,8 @@ export function workLine(item: Item): string {
       if (b.tool === "spawnAgent" && b.status === "failed") return "Could not start a subagent";
       return b.tool;
     case "threadTool":
-      return "Listed the threads";
+      if (b.tool === "threads") return b.status === "failed" ? "Could not list the threads" : "Listed the threads";
+      return b.status === "failed" ? `Could not ${b.tool}` : b.tool;
     default:
       return "";
   }

@@ -65,7 +65,7 @@ give it another home.
 - **Turns:** send a message with text, attachments (images, files) and file references; steer or interrupt a running turn; model, reasoning level and access level per turn. A thread takes one send or Stop at a time, each carried through by the engine even if its caller gives up: a send while a turn runs (or starts) steers it, Stop during a start stops that turn, and after a Stop the thread waits for Codex to answer and end the turn, so the next send starts a new one. If Codex does neither within a while, the Stop is reported as not taken and the thread is let go; the next send goes to Codex as a start, which Codex takes as a steer if the turn still runs.
 - **Events:** one typed stream of everything a thread does: agent text as it streams, reasoning summaries, plans, commands with output, file changes with diffs, tool calls, a subagent started, messaged, stopped or finished (naming it), waiting for subagents, turn start and end, errors. Each event is numbered; a gap means some were missed.
 - **The person's part:** approvals (commands, file changes, permissions) and questions, each answered through the API; nothing is answered on the person's behalf. A subagent's approval names the subagent, which the snapshot holds under its parent.
-- **Application tools:** the application gives the agent its own tools (in its own namespace: name, description, JSON Schema of the arguments) and its handler answers every call; Codex keeps a thread's tools with it through resume and fork.
+- **Application tools:** the application gives the agent its own tools (in its own namespace: name, description, JSON Schema of the arguments) and its handler answers every call; Codex keeps a thread's tools with it through resume and fork. A subagent has its parent's tools; its call names the subagent's own thread and turn, and shows there.
 - **Assignment between threads:** the engine's own tools (namespace `chirality`) on every thread it starts, with which one thread assigns work to another, ordinary thread and threads message each other; see below.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
@@ -137,8 +137,9 @@ thread the engine starts, beside the application's tools:
 - `close`: end an assignment this thread made; no more reports come from it.
 
 A call is answered once its work is done (a thread started, a turn started
-or a message queued), never after the turn it starts. A subagent's call is
-refused.
+or a message queued), never after the turn it starts. A subagent has these
+tools with its parent's, and its call is refused: Codex takes no message to a
+subagent, so it could hear no report.
 
 **What happens.**
 
@@ -171,8 +172,8 @@ refused.
 - Approvals and questions in an assigned thread go to the person on that
   thread, as on any thread. Its assigner is not told; it hears when the turn
   ends.
-- Archiving either thread ends the assignment. A subagent does not get these
-  tools (as with the application's), so it cannot assign.
+- Archiving either thread ends the assignment. A subagent cannot assign or
+  message (its call is refused, and it and its parent go on).
 
 **What the person sees.** Assigned threads are ordinary threads, at the same
 level in the list. Each shows which thread assigned it; the assigner's
@@ -204,9 +205,10 @@ call: the calling turn went on and ended first. A
 thread started without these tools cannot use them: Codex answers the model
 `unsupported call` and never asks the engine, and offers no way to add tools
 to a thread (its own `replace_dynamic_tools` is not in the app-server API); a
-fork keeps them. `features.multi_agent_v2_dynamic_tools=false` keeps all of a
-thread's tools, the engine's and the application's, from a new subagent (Codex
-gives one all of its parent's or none). Codex announces a turn's end before
+fork keeps them. `features.multi_agent_v2_dynamic_tools=true` gives a new subagent all
+of its parent's tools, the engine's and the application's (Codex gives one all
+or none, and none without the setting); a subagent's call comes to the engine
+on its own thread and turn. Codex announces a turn's end before
 the next `turn/start` is taken as a new turn: a start sent once the end is
 heard begins a turn, never steers; and a turn's first message and last reply
 are in its history (`itemsView: summary`) once its end is heard.
@@ -224,6 +226,9 @@ message any thread, in any project; in practice agents do so when directed, or
 with the threads they assigned or were assigned by. No bound on turns started
 by deliveries: the person sees every running thread and can stop any; one is
 added only if exchanges that do not end are seen.
+
+**Decided by the owner (2026-11-22).** Subagents get the application's tools,
+never the engine's: the engine refuses those to them.
 
 ## Known limits
 
