@@ -70,7 +70,7 @@ give it another home, or run Codex itself and give the engine its transport
 - **Assignment between threads:** the engine's own tools (namespace `chirality`) on every thread it starts, with which one thread assigns work to another, ordinary thread, threads message each other, and one reads another; see below.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
-- **Embedding:** an application that runs Codex itself gives the engine its transport: an embedded engine, with one thread, its own tools only, one rule for what Codex asks, and bounded memory; see below.
+- **Embedding:** for an application that runs Codex itself, a separate, small embedded engine over the application's transport: one thread, the application's tools only, calls answered through its event stream, and bounded memory; see below.
 - **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds. A read is Codex's history, numbered from before the read: every event after that number applies to it (an item it has as done stays done; text for an item it lacks begins that item), and when a turn of the thread in view completes, the thread is read again (keeping that turn's plan, which Codex leaves out of history). The engine keeps no copy of the conversation: text Codex did not keep (of a reply a Stop cut short) is in the live view, and not in the thread read again.
 
 The API is Rust types. Bindings for an application's interface are generated
@@ -104,6 +104,7 @@ together. An application pins one engine revision for all of them.
   - **Assignment:** an assigned thread is an ordinary thread at the top of the list; it shows the thread that assigned it. A message from another thread (a brief, a message, a report) shows as from that thread, by its title, which opens it; in the sender's conversation each `assign`, `message` and `close` names the other thread and opens it, and a `read` folds into the work as "Read <title>".
   - **Subagents:** listed under the thread that started them, folded unless one runs or waits on the person (one waiting, or open, is always shown), and their parent's mark counts theirs; each opens as a conversation, with a way back to its parent and Stop in place of the composer. In the parent, each start, message, stop and finish names the subagent and opens it, and an approval a subagent waits on is answered there too.
   - **Background:** several threads may run at once; a notice when one finishes or needs the person.
+  - **Item views:** an application may show an item its own way: `ItemView`, a context exported from the package root, or `StandardLayout`'s `itemView` prop (its provider only when given), maps an item to a node or `null`. `TurnView` calls it once per item per render; an item with a node is a block of its own (keyed `item:${id}`), the work on either side still folded (`work:${id}`), and the split follows the answer as it changes. Items with no node and no standard view are dropped before grouping, and Working follows the last visible block. Designed for EPC (2026-11-22); not yet built.
   - **First use:** sign in, add a project folder, start. Nothing else.
 
 An application consumes both from this repository at a pinned revision (a git
@@ -294,8 +295,8 @@ still how threads ask for judgment or action.
 
 ## Embedding under containment
 
-An application that runs Codex itself, as SWBPIPE does, embeds the engine as
-designed in [`docs/embedding.md`](docs/embedding.md).
+An application that runs Codex itself, as SWBPIPE does, uses the separate
+embedded engine designed in [`docs/embedding.md`](docs/embedding.md).
 
 ## Known limits
 
