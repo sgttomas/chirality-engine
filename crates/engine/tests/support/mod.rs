@@ -122,7 +122,8 @@ pub struct Meter {
     pub pause: fn(&mut dyn FnMut()),
     /// The engine owns this allocation, made as the host, from now on.
     pub adopt: fn(*const u8, usize),
-    /// The engine has finished, and only its handles hold it.
+    /// The engine has finished, its handles still hold it, and the host has
+    /// let go of the engine's output.
     pub finished: fn(),
 }
 
@@ -194,7 +195,6 @@ pub async fn replay(lines: Vec<Line>, meter: &Meter) -> Vec<EmbeddedEvent> {
         assert_eq!(closed, Some(EmbeddedEvent::Closed { fault: None }));
         assert_eq!(events.recv().await, None);
         engine.finished().await;
-        (meter.finished)();
     };
     let codex = async {
         for line in lines {
@@ -209,7 +209,11 @@ pub async fn replay(lines: Vec<Line>, meter: &Meter) -> Vec<EmbeddedEvent> {
         assert_eq!(host.from_engine.recv().await, None, "close is the end of to_codex");
     };
     tokio::join!(script, codex);
-    drop((engine, events, host));
+    // The host's output goes before the engine's holding is sampled; the
+    // engine's handles stay.
+    drop(host);
+    (meter.finished)();
+    drop((engine, events));
     seen
 }
 

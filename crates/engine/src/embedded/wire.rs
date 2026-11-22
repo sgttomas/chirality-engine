@@ -7,7 +7,6 @@ use serde::de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::value::RawValue;
 
 use super::budget::{DEPTH, FRAME_TEXT};
-use super::types::ThreadOptions;
 
 /// An identity's bound, and a reported fact's.
 pub(crate) const IDENTITY: usize = 256;
@@ -480,12 +479,19 @@ pub(crate) fn frame(text: &str) -> Option<Frame<'_>> {
 /// refuses a frame past it without allocating.
 pub(crate) struct Writer {
     buf: Vec<u8>,
+    len: usize,
     over: bool,
+    store: bool,
 }
 
 impl Writer {
     pub(crate) fn new() -> Writer {
-        Writer { buf: Vec::with_capacity(FRAME_TEXT), over: false }
+        Writer { buf: Vec::with_capacity(FRAME_TEXT), len: 0, over: false, store: true }
+    }
+
+    /// A writer that only measures what it would write, allocating nothing.
+    pub(crate) fn measure() -> Writer {
+        Writer { buf: Vec::new(), len: 0, over: false, store: false }
     }
 
     #[cfg(test)]
@@ -495,13 +501,16 @@ impl Writer {
 
     pub(crate) fn begin(&mut self) -> &mut Writer {
         self.buf.clear();
-        self.over = false;
+        (self.len, self.over) = (0, false);
         self
     }
 
     pub(crate) fn raw(&mut self, text: &str) -> &mut Writer {
-        if !self.over && self.buf.len() + text.len() <= FRAME_TEXT {
-            self.buf.extend_from_slice(text.as_bytes());
+        if !self.over && self.len + text.len() <= FRAME_TEXT {
+            if self.store {
+                self.buf.extend_from_slice(text.as_bytes());
+            }
+            self.len += text.len();
         } else {
             self.over = true;
         }
@@ -555,33 +564,15 @@ impl Writer {
         self.raw(std::str::from_utf8(&digits[at..]).unwrap_or_default())
     }
 
+    /// Whether what was written fits a frame.
+    pub(crate) fn fits(&self) -> bool {
+        !self.over
+    }
+
     /// The frame built, or `None` when it would not fit.
     pub(crate) fn text(&self) -> Option<&str> {
-        if self.over { None } else { std::str::from_utf8(&self.buf).ok() }
+        if self.over || !self.store { None } else { std::str::from_utf8(&self.buf).ok() }
     }
-}
-
-/// The tools and where they work, as `thread/start` carries them.
-pub(crate) struct Offer<'a> {
-    pub namespace: &'a str,
-    pub description: &'a str,
-    pub tools: &'a str,
-    pub work_dir: &'a str,
-}
-
-/// `thread/start`: the given model, provider and instructions, the work
-/// folder, ephemeral, the policy, no environments, and the one namespace.
-pub(crate) fn thread_start(w: &mut Writer, id: i64, offer: &Offer, options: &ThreadOptions) {
-    w.raw("{\"id\":").integer(id).raw(",\"method\":\"thread/start\",\"params\":{");
-    for (key, value) in [("model", &options.model), ("modelProvider", &options.provider), ("baseInstructions", &options.base_instructions)] {
-        if let Some(value) = value {
-            w.raw("\"").raw(key).raw("\":").string(value).raw(",");
-        }
-    }
-    w.raw("\"cwd\":").string(offer.work_dir).raw(",\"ephemeral\":true,\"sandbox\":\"").raw(options.policy.sandbox.wire());
-    w.raw("\",\"approvalPolicy\":\"").raw(options.policy.approval.wire()).raw("\",\"environments\":[]");
-    w.raw(",\"dynamicTools\":[{\"type\":\"namespace\",\"name\":").string(offer.namespace).raw(",\"description\":").string(offer.description);
-    w.raw(",\"tools\":").raw(offer.tools).raw("}]}}");
 }
 
 #[cfg(test)]

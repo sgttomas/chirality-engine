@@ -174,15 +174,22 @@ const THREAD: &str = "thread-1";
 /// A session whose tools are large, so configuration kept past `open_thread`
 /// or close would show at `finished`.
 fn session(limits: EmbeddedLimits) -> Session {
+    let tools = host(|| {
+        format!(r#"[{{"type":"function","name":"swbpipe_solve","description":"{}","inputSchema":{{"type":"object"}}}}]"#, "d".repeat(100_000))
+            .into_boxed_str()
+            .into_string()
+    });
+    session_with(limits, tools)
+}
+
+fn session_with(limits: EmbeddedLimits, tools: String) -> Session {
     let (transport, host_side) = host(support::transport);
     let config = host(|| EmbeddedConfig {
         transport,
         work_dir: "/scratch/work".into(),
         namespace: "swbpipe".into(),
         namespace_description: "SWBPIPE tools.".into(),
-        tools: format!(r#"[{{"type":"function","name":"swbpipe_solve","description":"{}","inputSchema":{{"type":"object"}}}}]"#, "d".repeat(100_000))
-            .into_boxed_str()
-            .into_string(),
+        tools,
         limits,
     });
     METER.adopt_config(&config);
@@ -264,17 +271,61 @@ impl Session {
         s
     }
 
-    /// Finished, holding only the fixed row; then every handle dropped.
+    /// Finished, holding only the fixed row with its handles alive and the
+    /// host's output let go; then every handle dropped.
     async fn finish(self) {
-        self.engine.finished().await;
+        let Session { engine, events, host } = self;
+        let Host { to_engine, from_engine } = host;
+        engine.finished().await;
+        drop(from_engine);
         at_finished();
-        drop(self);
+        drop((engine, events, to_engine));
     }
 }
 
 async fn poll_once<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
     let mut future = Some(future);
     poll_fn(|cx| Poll::Ready(future.take().unwrap().poll(cx))).await
+}
+
+/// Two tools, the first nesting 123 deep, the deepest `new` takes.
+fn deep_tools(second: &str) -> String {
+    format!(r#"[{{"name":"a","x":{}{}}},{{"name":"{second}"}}]"#, "[".repeat(121), "]".repeat(121)).into_boxed_str().into_string()
+}
+
+/// What validation charges for serde_json's nesting stacks (`budget::VALIDATION_NESTING`).
+const VALIDATION_CHARGE: u64 = 320;
+
+/// Validation's own peak, measured on refused configurations: one refused
+/// before it reads `tools`, against one refused after reading them all
+/// (deep, then a repeated name), and one refused on the deep tool itself.
+async fn validation_peak() {
+    if !measured() {
+        return;
+    }
+    let peak_of = |namespace: &str, tools: String| {
+        let (transport, _host) = host(support::transport);
+        let config = host(|| EmbeddedConfig {
+            transport,
+            work_dir: "/scratch/work".into(),
+            namespace: namespace.into(),
+            namespace_description: String::new(),
+            tools,
+            limits: LIMITS,
+        });
+        let start = LIVE.with(Cell::get);
+        PEAK.with(|p| p.set(start));
+        assert!(matches!(EmbeddedEngine::new(config), Err(EmbeddedError::Invalid { .. })));
+        assert_eq!(LIVE.with(Cell::get), start, "a refused configuration keeps nothing");
+        PEAK.with(Cell::get) - start
+    };
+    let ledger = peak_of("mcp", host(|| deep_tools("b")));
+    for (label, second) in [("a repeated name", "a"), ("an mcp name", "mcpLookup")] {
+        let nesting = peak_of("swbpipe", host(|| deep_tools(second))) - ledger;
+        host(|| eprintln!("validation, refused on {label}: nesting {nesting} of {VALIDATION_CHARGE}"));
+        assert!(nesting <= VALIDATION_CHARGE, "validation's nesting stacks: {nesting} over {VALIDATION_CHARGE}");
+        assert!(nesting > 192, "two stacks were alive at once");
+    }
 }
 
 fn nested(depth: usize) -> String {
@@ -304,6 +355,16 @@ async fn scenarios(limits: EmbeddedLimits) {
         support::replay(lines, &METER).await;
     })
     .await;
+
+    scenario("tools at depth 123", &limits, || async {
+        let tools = host(|| deep_tools("b"));
+        let s = session_with(limits, tools);
+        s.engine.close();
+        s.finish().await;
+    })
+    .await;
+
+    validation_peak().await;
 
     scenario("close before connect", &limits, || async {
         let s = session(limits);
@@ -438,7 +499,8 @@ async fn scenarios(limits: EmbeddedLimits) {
         let mut n = 0;
         // Refusals go out until the host's channel is full.
         while !matches!(s.events.try_recv(), Ok(EmbeddedEvent::Closed { .. })) {
-            feed(&s.host, || json!({"id": n, "method": "item/tool/call", "params": {}}).to_string()).await;
+            // Escaped string ids, so each refusal left in the host's queue is larger.
+            feed(&s.host, || format!(r#"{{"id":"r\u0031{n}","method":"item/tool/call","params":{{}}}}"#)).await;
             n += 1;
             assert!(n < 200);
         }
@@ -447,15 +509,18 @@ async fn scenarios(limits: EmbeddedLimits) {
     .await;
 
     scenario("close by dropping the engine mid-connect", &limits, || async {
-        let s = session(limits);
-        let finished = s.engine.finished();
+        let Session { engine, events, host } = session(limits);
+        let finished = engine.finished();
         {
-            let connect = pin!(s.engine.connect());
+            let connect = pin!(engine.connect());
             assert!(poll_once(connect).await.is_pending());
         }
-        drop(s);
+        drop(engine);
         finished.await;
+        drop(host);
+        // `events` still holds the engine.
         at_finished();
+        drop(events);
     })
     .await;
 }

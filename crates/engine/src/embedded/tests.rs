@@ -553,6 +553,7 @@ async fn a_thread_closed_before_the_turn_start_reply_admits_no_turn() {
     });
     assert_eq!(sent.unwrap().0, "t");
     assert!(matches!(events.recv().await, Some(EmbeddedEvent::Notification { method: Method::ThreadClosed, .. })));
+    assert!(engine.shared.lock_state().turns.running.is_none(), "the late reply started no turn");
     assert_eq!(engine.interrupt().await, Err(EmbeddedError::Invalid { reason: "no open thread" }));
     assert_eq!(engine.send_text("hi").await, Err(EmbeddedError::Invalid { reason: "no open thread" }));
 }

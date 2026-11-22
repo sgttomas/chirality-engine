@@ -54,7 +54,7 @@ impl EmbeddedEngine {
         // is charged; the names are checked on the stack.
         let ledger = Ledger::new(&config.limits);
         let names = {
-            let _nesting = ledger.charge(budget::NESTING).map_err(|_| invalid("limits exceed the budget"))?;
+            let _nesting = ledger.charge(budget::VALIDATION_NESTING).map_err(|_| invalid("limits exceed the budget"))?;
             config.validate().map_err(|reason| EmbeddedError::Invalid { reason })?
         };
         let shared = Arc::new(Shared::new(config, ledger, &names).map_err(|_| invalid("limits exceed the budget"))?);
@@ -116,13 +116,14 @@ impl EmbeddedEngine {
                 return Err(invalid("not connected"));
             }
             let config = st.config.as_ref().ok_or(invalid("no configuration"))?;
-            let offer = wire::Offer {
+            let offer = types::Offer {
                 namespace: &st.namespace,
                 description: &config.description,
                 tools: &config.tools,
                 work_dir: config.work_dir.to_str().unwrap_or_default(),
             };
-            let sent = out.send(ledger, |w| wire::thread_start(w, id, &offer, options));
+            debug_assert_eq!(id, types::OPEN_THREAD_ID, "the size new checked");
+            let sent = out.send(ledger, |w| types::thread_start(w, id, &offer, options));
             if sent.is_ok() {
                 st.open_called = true;
                 st.config = None;

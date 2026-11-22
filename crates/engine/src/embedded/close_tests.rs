@@ -90,11 +90,14 @@ async fn close_empties_a_reply_left_uncollected() {
     let mut stop = pin!(engine.interrupt());
     assert!(poll_once(stop.as_mut()).await.is_pending());
     let interrupt = host.next().await;
-    host.send(host.reply(&interrupt["id"], json!({}))).await;
+    // An error reply, whose message is charged while it waits.
+    host.send(json!({"id": interrupt["id"], "error": {"code": -32600, "message": "m".repeat(1000)}})).await;
     settle().await;
+    assert!(matches!(engine.shared.lock_state().slots[TURN_INTERRUPT], Slot::Ready { .. }));
     engine.close();
-    engine.finished().await;
-    assert_eq!(engine.shared.ledger.used(), FIXED, "the reply was released");
+    assert!(engine.shared.lock_state().slots.iter().all(|s| matches!(s, Slot::Free)), "close emptied the slot");
+    tokio::time::timeout(std::time::Duration::from_secs(5), engine.finished()).await.expect("finished");
+    assert_eq!(engine.shared.ledger.used(), FIXED);
     assert_eq!(stop.await, Err(EmbeddedError::Closed { fault: None }));
 }
 

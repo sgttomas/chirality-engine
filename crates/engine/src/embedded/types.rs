@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use super::wire;
+use super::wire::{self, Writer};
 
 /// What [`super::EmbeddedEngine::new`] takes; it refuses values outside the
 /// design's bounds and keeps nothing it refuses.
@@ -260,6 +260,10 @@ impl EmbeddedConfig {
         if self.tools.capacity() > 128 * 1024 || !one_line || !wire::prescan_within(&self.tools, wire::TOOLS_DEPTH) {
             return Err("tools is not JSON of at most 128 KiB on one line");
         }
+        let offer = Offer { namespace, description: &self.namespace_description, tools: &self.tools, work_dir };
+        if !thread_start_fits(&offer) {
+            return Err("thread/start would be over 131,071 bytes");
+        }
         let mut names = ToolNames { names: [[0; TOOL_NAME]; TOOLS], lens: [0; TOOLS], count: 0 };
         let mut bad = false;
         let count = wire::elements(wire::trim(&self.tools), &mut |tool| {
@@ -307,4 +311,41 @@ impl ApprovalPolicy {
             ApprovalPolicy::Never => "never",
         }
     }
+}
+
+// ---------- thread/start ----------
+
+/// The tools and where they work, as `thread/start` carries them.
+pub(crate) struct Offer<'a> {
+    pub namespace: &'a str,
+    pub description: &'a str,
+    pub tools: &'a str,
+    pub work_dir: &'a str,
+}
+
+/// The id `thread/start` goes with: the one after `initialize`'s.
+pub(crate) const OPEN_THREAD_ID: i64 = 2;
+
+/// Whether `thread/start` with this offer fits in a frame, with the longest
+/// policy and no model, provider or instructions (`open_thread` adds those).
+pub(crate) fn thread_start_fits(offer: &Offer) -> bool {
+    let policy = ThreadPolicy { sandbox: SandboxMode::DangerFullAccess, approval: ApprovalPolicy::OnRequest };
+    let mut w = Writer::measure();
+    thread_start(&mut w, OPEN_THREAD_ID, offer, &ThreadOptions { model: None, provider: None, base_instructions: None, policy });
+    w.fits()
+}
+
+/// `thread/start`: the given model, provider and instructions, the work
+/// folder, ephemeral, the policy, no environments, and the one namespace.
+pub(crate) fn thread_start(w: &mut Writer, id: i64, offer: &Offer, options: &ThreadOptions) {
+    w.raw("{\"id\":").integer(id).raw(",\"method\":\"thread/start\",\"params\":{");
+    for (key, value) in [("model", &options.model), ("modelProvider", &options.provider), ("baseInstructions", &options.base_instructions)] {
+        if let Some(value) = value {
+            w.raw("\"").raw(key).raw("\":").string(value).raw(",");
+        }
+    }
+    w.raw("\"cwd\":").string(offer.work_dir).raw(",\"ephemeral\":true,\"sandbox\":\"").raw(options.policy.sandbox.wire());
+    w.raw("\",\"approvalPolicy\":\"").raw(options.policy.approval.wire()).raw("\",\"environments\":[]");
+    w.raw(",\"dynamicTools\":[{\"type\":\"namespace\",\"name\":").string(offer.namespace).raw(",\"description\":").string(offer.description);
+    w.raw(",\"tools\":").raw(offer.tools).raw("}]}}");
 }

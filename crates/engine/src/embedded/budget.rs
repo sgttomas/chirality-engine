@@ -18,9 +18,13 @@ pub(crate) const FRAME_TEXT: usize = 131_071;
 pub(crate) const FRAME_HAND: u64 = 128 * KIB;
 /// Decoding: serde_json's nesting stack and the facts read.
 pub(crate) const DECODING: u64 = 4 * KIB;
-/// serde_json's nesting stack while one value is read: at most 127 bytes,
-/// growing 8, 16, ... 128, its old and new buffers live together as it grows.
-pub(crate) const NESTING: u64 = 256;
+/// serde_json's nesting stack while one value is read: at most 127 bytes, in
+/// a buffer growing 8, 16, ... 128, its old and new blocks live together as
+/// it grows: at most class(64) + class(128).
+pub(crate) const NESTING: u64 = class(64) + class(128);
+/// Validation reads each tool while the array's reader holds its stack, at
+/// most class(128), so two are alive at once.
+pub(crate) const VALIDATION_NESTING: u64 = class(128) + NESTING;
 /// The deepest a frame nests.
 pub(crate) const DEPTH: usize = 127;
 /// One event's place in the ring.
@@ -266,6 +270,13 @@ mod tests {
     #[test]
     fn classes_are_swbpipes() {
         assert_eq!([class(0), class(1), class(16), class(17), class(131_071), class(131_072), class(131_073)], [0, 16, 16, 32, 131_072, 131_072, 262_144]);
+    }
+
+    #[test]
+    fn nesting_stacks_at_their_peaks() {
+        // One stack growing from 64 to 128; validation's outer one held at 128
+        // besides (the counting test measures 320).
+        assert_eq!((NESTING, VALIDATION_NESTING), (192, 320));
     }
 
     #[test]
