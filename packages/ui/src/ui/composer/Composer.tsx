@@ -127,12 +127,14 @@ function ThreadComposer() {
     input.current?.focus();
   };
 
-  /** With the list open, the arrows choose, Enter or Tab picks, and Escape closes it. */
+  /** With the list open, the arrows choose, Enter or Tab picks, and Escape closes it; while an input
+   * method composes, every key is its own. */
   const mentionKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing) return false;
     const last = choices.length - 1;
     if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, last));
     else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0));
-    else if ((e.key === "Enter" && !e.nativeEvent.isComposing) || e.key === "Tab") pickMention(choices[Math.min(active, last)]);
+    else if (e.key === "Enter" || e.key === "Tab") pickMention(choices[Math.min(active, last)]);
     else if (e.key === "Escape") setMention(null);
     else return false;
     e.preventDefault();

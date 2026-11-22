@@ -299,15 +299,26 @@ impl Inner {
         }
         let status = self.store.summary(&target).map_or(ThreadStatus::Idle, |s| s.status);
         let project = self.project(&entry.project).ok().map(|p| p.name);
-        let header = super::read::Header { thread: target.clone(), title: entry.title, project, status, error: entry.failed };
         let session = self.session().map_err(|e| e.to_string())?;
+        // A thread the engine started that Codex has not kept yet, none of whose turns has ended: Codex
+        // gives no history for it, and it has none.
+        let unkept = session.unkept_since(&target).is_some() && entry.last_ended.is_none();
+        // The failure the engine saw, or else the latest turn's, if it failed.
+        let error = match entry.failed {
+            Some(failed) => Some(failed),
+            None => last_failure(&session, &target).await,
+        };
+        let header = super::read::Header { thread: target.clone(), title: entry.title, project, status, error };
         // Codex's turns, a few at a time, newest first, with their items whole.
         let fetch = |cursor: Option<String>| {
             let (session, thread) = (session.clone(), target.0.clone());
             async move {
                 let params = json!({ "threadId": thread, "cursor": cursor, "limit": super::read::PAGE_TURNS, "sortDirection": "desc", "itemsView": "full" });
-                let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
-                Some((page.data, page.next_cursor))
+                match session.call::<p::TurnsListResponse>("thread/turns/list", params).await {
+                    Ok(page) => Some((page.data, page.next_cursor)),
+                    Err(_) if unkept && cursor.is_none() => Some((Vec::new(), None)),
+                    Err(_) => None,
+                }
             }
         };
         super::read::answer(header, &args, fetch).await
@@ -322,6 +333,14 @@ impl Inner {
         self.assignments.close(caller, &target);
         Ok(json!({ "thread": target.0, "closed": true }))
     }
+}
+
+/// The thread's latest turn's failure, if it failed.
+async fn last_failure(session: &crate::session::Session, thread: &ThreadId) -> Option<String> {
+    let params = json!({ "threadId": thread.0, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded" });
+    let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
+    let turn = page.data.into_iter().next().filter(|t| t.status == p::TurnStatus::Failed)?;
+    Some(turn.error.map_or_else(|| "The turn failed.".to_string(), |e| e.message))
 }
 
 #[cfg(test)]

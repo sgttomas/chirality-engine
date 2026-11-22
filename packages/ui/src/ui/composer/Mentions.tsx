@@ -10,11 +10,14 @@ export interface Mention {
   query: string;
 }
 
-/** The mention just opened by typing `@` at the caret, at the start or after a space: only an `@`
- * typed fresh opens one, never one already in the text. */
+/** The mention just opened by typing `@` at the caret (over a selection too), at the start or after a
+ * space: only an `@` typed fresh opens one, never one already in the text. */
 export function typedMention(before: string, after: string, caret: number): Mention | null {
   const start = caret - 1;
-  if (after.length !== before.length + 1 || after[start] !== "@" || after.slice(0, start) !== before.slice(0, start)) return null;
+  const rest = after.slice(caret);
+  // What the `@` replaced: nothing, or the selection it was typed over (not an `@` left by a deletion).
+  const replaced = before.slice(start, before.length - rest.length);
+  if (after[start] !== "@" || after.slice(0, start) !== before.slice(0, start) || !before.endsWith(rest) || before.length - rest.length < start || replaced.startsWith("@")) return null;
   if (start > 0 && !/\s/.test(after[start - 1])) return null;
   return { start, end: caret, query: "" };
 }

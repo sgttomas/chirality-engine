@@ -29,6 +29,8 @@ use crate::turns::{NotStarted, Sent, Start};
 const RECHECK: Duration = Duration::from_millis(500);
 /// How far back a report looks for its turn, in pages of ten.
 const REPORT_PAGES: usize = 10;
+/// How long a report's looks at history may take before it is given up.
+pub(crate) const REPORT_LIMIT: Duration = if cfg!(test) { Duration::from_secs(2) } else { Duration::from_secs(30) };
 
 /// A message for a thread, as another thread sent it.
 #[derive(Clone, Debug)]
@@ -241,23 +243,19 @@ impl Inner {
     async fn deliver(self: Arc<Self>, thread: ThreadId) {
         let mut events = self.store.subscribe();
         loop {
-            // Listening before the step, so a look that ends during it is heard.
-            let looked = self.assignments.looked.notified();
-            tokio::pin!(looked);
-            looked.as_mut().enable();
             match self.step(&thread).await.0 {
                 Step::Empty | Step::Gone => return,
                 Step::Started | Step::Dropped => {}
                 Step::Refused(message) => self.not_delivered(&thread, &message),
                 Step::Wait => {
-                    tokio::select! {
-                        _ = events.recv() => {}
-                        _ = &mut looked => {}
-                        _ = tokio::time::sleep(RECHECK) => {}
-                    }
+                    let _ = tokio::time::timeout(RECHECK, events.recv()).await;
                 }
             }
         }
+    }
+
+    fn not_reported(&self, thread: &ThreadId, message: &str) {
+        self.store.update_thread(thread, |e| e.failed = Some(format!("This thread's reply was not reported back: {message}")));
     }
 
     fn not_delivered(&self, thread: &ThreadId, message: &str) {
@@ -293,8 +291,7 @@ impl Inner {
             deliveries.remove(thread, next.id);
             return Step::Dropped;
         }
-        // A turn running, or one that ended still being looked at for its report.
-        if !is_idle(&entry) || self.assignments.is_looking(thread) {
+        if !is_idle(&entry) {
             return Step::Wait;
         }
         if let Some(sent) = &next.uncertain {
@@ -342,18 +339,20 @@ impl Inner {
         Some(newer.filter_map(opened_with).any(|(mark, text)| mark == delivery.from && text == delivery.text))
     }
 
-    /// A turn that may report ended: its report is looked at after every
-    /// earlier one, from any thread, so reports are made in the order their
-    /// turns ended. `opened`: the engine started it with another thread's message.
-    pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, opened: bool) {
-        let (before, done) = self.assignments.reserve_report();
-        let looked = Looked(self.clone(), thread.clone(), turn.clone());
+    /// A turn that may report to `recipient` ended (the thread whose message the engine started it
+    /// with, when `opened`, or else its assigner): the report is looked at after the recipient's
+    /// earlier ones, so a thread's reports come in the order their turns ended, and no recipient
+    /// waits on another's.
+    pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, recipient: ThreadId, opened: bool) {
+        let (before, done) = self.assignments.reserve_report(&recipient);
+        // Taken now, so a thread gone while the report waits is seen.
+        let generations = (self.assignments.generation(&thread), self.assignments.generation(&recipient));
+        let inner = self.clone();
         tokio::spawn(async move {
             if let Some(before) = before {
                 let _ = before.await;
             }
-            looked.0.report(thread, turn, state, opened).await;
-            drop(looked);
+            inner.report(Ended { thread, turn, state, recipient, opened, generations }).await;
             let _ = done.send(());
         });
     }
@@ -361,59 +360,76 @@ impl Inner {
     /// If the engine started the turn with another thread's message, or the thread that
     /// assigned this one did, its last reply and how it ended go back to that thread, unless
     /// it assigned this one and has closed the assignment.
-    async fn report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, opened: bool) {
-        self.check_report(thread, turn, state, opened).await;
+    async fn report(self: &Arc<Self>, ended: Ended) {
+        let thread = ended.thread.clone();
+        match tokio::time::timeout(REPORT_LIMIT, self.check_report(ended)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => self.not_reported(&thread, &e.to_string()),
+            Err(_) => self.not_reported(&thread, "Codex did not answer in time"),
+        }
         #[cfg(test)]
         self.assignments.reports.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    async fn check_report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, opened: bool) {
-        let (Some(entry), Some(end)) = (self.store.thread(&thread), end_of(&state)) else { return };
+    async fn check_report(self: &Arc<Self>, ended: Ended) -> Result<()> {
+        let Ended { thread, turn, state, recipient, opened, generations } = ended;
+        let (Some(entry), Some(end)) = (self.store.thread(&thread), end_of(&state)) else { return Ok(()) };
         if entry.subagent.is_some() {
-            return;
+            return Ok(());
         }
-        let Ok(session) = self.session() else { return };
+        let session = self.session()?;
         // The turn as Codex keeps it: its first message and its last reply.
-        let Some(kept) = find_turn(&session, &thread, &turn).await else { return };
+        let Some(kept) = find_turn(&session, &thread, &turn).await? else { return Ok(()) };
         // A report's turn reports nothing, so exchanges of reports cannot go on.
-        let Some(sender) = opened_with(&kept).map(|(mark, _)| mark).filter(|m| m.report.is_none() && m.from != thread).map(|m| m.from) else { return };
+        let Some(sender) = opened_with(&kept).map(|(mark, _)| mark).filter(|m| m.report.is_none() && m.from != thread).map(|m| m.from) else { return Ok(()) };
+        if sender != recipient {
+            return Ok(());
+        }
         // A mark the person wrote is not a message the engine delivered; only the assigner's is
         // taken at its word (after a restart the engine has not seen how the turn began).
         let assigner = entry.assigned_by.as_ref() == Some(&sender);
-        if !opened && !assigner || assigner && self.closed(&session, &sender, &thread).await {
-            return;
+        if !opened && !assigner || assigner && self.closed(&session, &sender, &thread).await? {
+            return Ok(());
+        }
+        // Either thread gone from the engine since the turn ended (archived, its project removed).
+        if generations != (self.assignments.generation(&thread), self.assignments.generation(&sender)) {
+            return Ok(());
         }
         let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::ReadOnly, |s| s.access) } else { Access::ReadOnly };
-        let Some(fallback) = self.settings_of(&sender).or(entry.settings.clone()) else { return };
+        let Some(fallback) = self.settings_of(&sender).or(entry.settings.clone()) else { return Ok(()) };
         let from = Marker { from: thread, title: entry.title, report: Some(end) };
         if let Posted::Refused(message) = self.post(sender.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
             self.not_delivered(&sender, &message);
         }
+        Ok(())
     }
 
     /// Whether the assigner has closed the assignment: this run, or by its own call in its history.
-    async fn closed(&self, session: &Session, assigner: &ThreadId, assigned: &ThreadId) -> bool {
+    async fn closed(&self, session: &Session, assigner: &ThreadId, assigned: &ThreadId) -> Result<bool> {
         if self.assignments.is_closed(assigner, assigned) {
-            return true;
+            return Ok(true);
         }
-        let Ok(turns) = crate::threads::list_turns(session, assigner).await else { return false };
+        let turns = crate::threads::list_turns(session, assigner).await.map_err(crate::session::engine_error)?;
         let closed = turns.iter().flat_map(|t| &t.items).any(|i| {
             matches!(&i.body, ItemBody::ThreadTool { tool: ThreadTool::Close, thread: Some(t), status: ToolCallStatus::Completed, .. } if t == assigned)
         });
         if closed {
             self.assignments.close(assigner, assigned);
         }
-        closed
+        Ok(closed)
     }
 }
 
-/// A look at a thread's ended turn, over when this is dropped, whatever became of it.
-struct Looked(Arc<Inner>, ThreadId, TurnId);
-
-impl Drop for Looked {
-    fn drop(&mut self) {
-        self.0.assignments.end_look(&self.1, &self.2);
-    }
+/// A turn that ended and may report, and to whom.
+struct Ended {
+    thread: ThreadId,
+    turn: TurnId,
+    state: TurnState,
+    recipient: ThreadId,
+    /// The engine started it with the recipient's message.
+    opened: bool,
+    /// The thread's and the recipient's generations when the turn ended.
+    generations: (u64, u64),
 }
 
 /// The thread's latest turn, if it has one.
@@ -424,18 +440,20 @@ pub(crate) async fn latest_turn(session: &Session, thread: &ThreadId) -> Result<
 }
 
 /// The turn, by its id, from the newest back.
-async fn find_turn(session: &Session, thread: &ThreadId, turn: &TurnId) -> Option<p::Turn> {
+async fn find_turn(session: &Session, thread: &ThreadId, turn: &TurnId) -> Result<Option<p::Turn>> {
     let mut cursor: Option<String> = None;
     for _ in 0..REPORT_PAGES {
         let params = json!({ "threadId": thread.0, "cursor": cursor, "limit": 10, "sortDirection": "desc", "itemsView": "summary" });
-        let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
+        let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await?;
         if let Some(found) = page.data.iter().find(|t| t.id == turn.0) {
-            return Some(found.clone());
+            return Ok(Some(found.clone()));
         }
         cursor = page.next_cursor.filter(|_| !page.data.is_empty());
-        cursor.as_ref()?;
+        if cursor.is_none() {
+            return Ok(None);
+        }
     }
-    None
+    Ok(None)
 }
 
 #[cfg(test)]

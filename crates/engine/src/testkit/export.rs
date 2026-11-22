@@ -131,6 +131,13 @@ async fn capture(name: &str) -> Value {
     }
     let mut value: Value = serde_json::from_str(&text).unwrap();
     fix_times(&mut value, since);
+    // In the engine's order again, now that the times are fixed: which second a thread's last change
+    // fell in is not the scenario's.
+    for snapshot in ["before", "after"] {
+        if let Some(Value::Array(threads)) = value.get_mut(snapshot).and_then(|s| s.get_mut("threads")) {
+            threads.sort_by(|a, b| b["updatedAt"].as_i64().cmp(&a["updatedAt"].as_i64()).then_with(|| a["id"].as_str().cmp(&b["id"].as_str())));
+        }
+    }
     number(&mut value);
     value
 }

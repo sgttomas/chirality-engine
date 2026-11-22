@@ -6,7 +6,8 @@
 //! then its items newest first. Every text in it is cut to a size, and the
 //! whole to about 16 KB: the first item of a page is cut further until it fits,
 //! so every page shows something or ends. `before` (a cursor an answer gives)
-//! goes on from where that answer stopped.
+//! goes on from where that answer stopped: from a turn and an item in it, found
+//! however many turns have come since.
 
 use std::future::Future;
 
@@ -119,28 +120,50 @@ fn tool_status(status: ToolCallStatus) -> &'static str {
     }
 }
 
-/// A turn's items as the reader gets them, each with its place in the turn, newest first.
-fn entries(turn: &p::Turn, view: View, at: Limits) -> Vec<(usize, Value)> {
-    let activity = view == View::Activity;
-    let completed = turn.status == p::TurnStatus::Completed;
-    let messages = || turn.items.iter().enumerate().filter_map(|(i, item)| matches!(item, p::ThreadItem::AgentMessage { .. }).then_some((i, item)));
-    // A completed turn's final reply: its last message that is not commentary.
-    let last = |i: &(usize, &p::ThreadItem)| !matches!(i.1, p::ThreadItem::AgentMessage { phase: Some(phase), .. } if phase == "commentary");
-    let reply = if completed { messages().filter(last).last().map(|(i, _)| i) } else { None };
-    let latest = messages().last().map(|(i, _)| i);
-    let mut out = Vec::new();
-    for (i, item) in turn.items.iter().enumerate() {
-        let value = match item {
+/// A turn's items as the reader gets them, each built when asked for, by its place in the turn (a
+/// failed turn's failure after its last item).
+struct TurnItems<'a> {
+    turn: &'a p::Turn,
+    view: View,
+    /// A completed turn's final reply: its last message that is not commentary.
+    reply: Option<usize>,
+    /// Its latest message.
+    latest: Option<usize>,
+}
+
+impl<'a> TurnItems<'a> {
+    fn new(turn: &'a p::Turn, view: View) -> Self {
+        let messages = || turn.items.iter().enumerate().filter(|(_, item)| matches!(item, p::ThreadItem::AgentMessage { .. }));
+        let not_commentary = |i: &(usize, &p::ThreadItem)| !matches!(i.1, p::ThreadItem::AgentMessage { phase: Some(phase), .. } if phase == "commentary");
+        let reply = if turn.status == p::TurnStatus::Completed { messages().rfind(not_commentary).map(|(i, _)| i) } else { None };
+        TurnItems { turn, view, reply, latest: messages().next_back().map(|(i, _)| i) }
+    }
+
+    /// The places, newest first.
+    fn places(&self) -> impl Iterator<Item = usize> + use<> {
+        (0..=self.turn.items.len()).rev()
+    }
+
+    fn entry(&self, i: usize, at: Limits) -> Option<Value> {
+        let activity = self.view == View::Activity;
+        let Some(item) = self.turn.items.get(i) else {
+            return match (&self.turn.status, &self.turn.error) {
+                (p::TurnStatus::Failed, Some(error)) => Some(json!({ "kind": "turnFailed", "text": cut(&error.message, at.output) })),
+                _ => None,
+            };
+        };
+        Some(match item {
             p::ThreadItem::AgentMessage { text, phase, .. } => {
-                if Some(i) == reply {
+                let phase = phase.as_deref().map(|p| cut(p, at.name));
+                if Some(i) == self.reply {
                     json!({ "kind": "reply", "text": cut(text, at.text) })
-                } else if reply.is_none() && Some(i) == latest {
+                } else if self.reply.is_none() && Some(i) == self.latest {
                     // The latest word of a turn with no final reply: how that turn stands says what it is.
-                    json!({ "kind": "update", "turn": turn_word(&turn.status), "phase": phase, "text": cut(text, at.text) })
+                    json!({ "kind": "update", "turn": turn_word(&self.turn.status), "phase": phase, "text": cut(text, at.text) })
                 } else if activity {
                     json!({ "kind": "message", "phase": phase, "text": cut(text, at.text) })
                 } else {
-                    continue;
+                    return None;
                 }
             }
             p::ThreadItem::CommandExecution { command, aggregated_output, exit_code, status, .. } if activity => json!({
@@ -154,21 +177,9 @@ fn entries(turn: &p::Turn, view: View, at: Limits) -> Vec<(usize, Value)> {
                 let files: Vec<String> = changes.iter().take(at.paths).map(|c| cut(&c.path, at.name)).collect();
                 json!({ "kind": "fileChange", "status": status, "files": files, "moreFiles": changes.len() - files.len() })
             }
-            _ => match crate::mapping::item(item, true).map(|i| i.body) {
-                Some(body) => match other(&body, activity, at) {
-                    Some(value) => value,
-                    None => continue,
-                },
-                None => continue,
-            },
-        };
-        out.push((i, value));
+            _ => other(&crate::mapping::item(item, true)?.body, activity, at)?,
+        })
     }
-    if let (p::TurnStatus::Failed, Some(error)) = (&turn.status, &turn.error) {
-        out.push((turn.items.len(), json!({ "kind": "turnFailed", "text": cut(&error.message, at.output) })));
-    }
-    out.reverse();
-    out
 }
 
 /// Any other item, from its body: messages in always, the work in the activity view.
@@ -176,20 +187,32 @@ fn other(body: &ItemBody, activity: bool, at: Limits) -> Option<Value> {
     Some(match body {
         ItemBody::UserMessage { text, from: Some(from), .. } => {
             let kind = if from.report.is_some() { "report" } else { "message" };
-            json!({ "kind": kind, "from": { "thread": from.thread.0, "title": from.title.as_deref().map(|t| cut(t, at.name)) }, "text": cut(text, at.text) })
+            json!({ "kind": kind, "from": { "thread": cut(&from.thread.0, at.name), "title": from.title.as_deref().map(|t| cut(t, at.name)) }, "text": cut(text, at.text) })
         }
         ItemBody::UserMessage { text, .. } => json!({ "kind": "person", "text": cut(text, at.text) }),
         _ if !activity => return None,
-        ItemBody::ToolCall { server, tool, status, result, .. } => {
+        ItemBody::ToolCall { server, tool, arguments, status, result, .. } => {
             let name = server.as_ref().map_or_else(|| tool.clone(), |s| format!("{s}.{tool}"));
-            json!({ "kind": "tool", "name": cut(&name, at.name), "status": tool_status(*status), "result": result.as_deref().map(|r| cut(r, at.output)) })
+            json!({
+                "kind": "tool",
+                "name": cut(&name, at.name),
+                "arguments": cut(arguments, at.output),
+                "status": tool_status(*status),
+                "result": result.as_deref().map(|r| cut(r, at.output)),
+            })
         }
-        ItemBody::ThreadTool { tool, thread, status, .. } => {
+        ItemBody::ThreadTool { tool, thread, text, status } => {
             let name = format!("{}.{}", super::NAMESPACE, serde_json::to_value(tool).ok()?.as_str()?);
-            json!({ "kind": "tool", "name": name, "thread": thread.as_ref().map(|t| &t.0), "status": tool_status(*status) })
+            json!({
+                "kind": "tool",
+                "name": name,
+                "thread": thread.as_ref().map(|t| cut(&t.0, at.name)),
+                "text": text.as_deref().map(|t| cut(t, at.text)),
+                "status": tool_status(*status),
+            })
         }
         ItemBody::SubagentTool { tool, status, .. } => json!({ "kind": "tool", "name": serde_json::to_value(tool).ok()?, "status": tool_status(*status) }),
-        ItemBody::Subagent { thread, path, activity } => json!({ "kind": "subagent", "thread": thread.0, "path": cut(path, at.name), "activity": serde_json::to_value(activity).ok()? }),
+        ItemBody::Subagent { thread, path, activity } => json!({ "kind": "subagent", "thread": cut(&thread.0, at.name), "path": cut(path, at.name), "activity": serde_json::to_value(activity).ok()? }),
         ItemBody::WebSearch { query } => json!({ "kind": "webSearch", "query": cut(query, at.output) }),
         ItemBody::Error { message } => json!({ "kind": "error", "text": cut(message, at.output) }),
         _ => return None,
@@ -198,6 +221,16 @@ fn other(body: &ItemBody, activity: bool, at: Limits) -> Option<Value> {
 
 fn size(value: &Value) -> usize {
     value.to_string().len() + 1
+}
+
+/// The first item of an answer, cut further until it fits in `room` (or, if it cannot, said to be too large).
+fn fit(items: &TurnItems, at: usize, mut value: Value, room: usize) -> Value {
+    let mut limits = FULL;
+    while size(&value) > room && limits != LEAST {
+        limits = limits.halved();
+        value = items.entry(at, limits).unwrap_or(value);
+    }
+    if size(&value) > room { json!({ "kind": value["kind"].clone(), "text": "[too large to show]" }) } else { value }
 }
 
 /// The answer to a read: `header`, then items from the pages `fetch` gives (Codex's turns newest
@@ -211,8 +244,8 @@ where
         Some(text) => serde_json::from_str(text).map_err(|_| "`before` is not one a read gave.".to_string())?,
         None => Cursor::default(),
     };
-    let mut answer = json!({
-        "thread": header.thread.0,
+    let answer = json!({
+        "thread": cut(&header.thread.0, FULL.name),
         "title": header.title.as_deref().map(|t| cut(t, FULL.name)),
         "project": header.project.as_deref().map(|t| cut(t, FULL.name)),
         "status": status_word(&header.status),
@@ -224,56 +257,60 @@ where
     // Room for the cursor, which names Codex's own.
     let mut used = size(&answer) + 512;
     let mut shown: Vec<Value> = Vec::new();
-    let (mut page, mut from_turn) = (start.page.clone(), start.turn.clone());
+    let finish = |mut answer: Value, shown: Vec<Value>, cursor: Option<Cursor>| {
+        if let Some(cursor) = cursor {
+            answer["more"] = json!(true);
+            answer["before"] = json!(serde_json::to_string(&cursor).unwrap_or_default());
+        }
+        answer["items"] = Value::Array(shown);
+        answer
+    };
+    // Going on from a cursor: the turns newer than its own were shown already (however many came
+    // since, on however many pages), and of its own, the items from its place on.
+    let mut page = start.page;
+    let mut anchor = start.turn.map(|turn| (turn, start.item));
+    // The last turn read whole, and the page it is on.
+    let mut last: Option<(Option<String>, String)> = None;
     for _ in 0..MOST_PAGES {
         let (turns, next) = fetch(page.clone()).await.ok_or("Codex could not give the thread's turns.")?;
         for turn in &turns {
-            // Going on from a cursor: the turns before its own were shown already.
-            let before = match &from_turn {
-                Some(t) if *t != turn.id => continue,
-                Some(_) => {
-                    from_turn = None;
-                    Some(start.item)
+            let before = match &anchor {
+                Some((t, item)) if *t == turn.id => {
+                    let item = *item;
+                    anchor = None;
+                    Some(item)
                 }
+                Some(_) => continue,
                 None => None,
             };
-            for (at, value) in entries(turn, args.view, FULL) {
-                if before.is_some_and(|b| at >= b) {
-                    continue;
-                }
-                let mut value = value;
-                if shown.is_empty() {
-                    // The first item is cut down until it fits.
-                    let mut limits = FULL;
-                    while used + size(&value) > ANSWER_LIMIT && limits != LEAST {
-                        limits = limits.halved();
-                        value = entries(turn, args.view, limits).into_iter().find(|(i, _)| *i == at).map(|(_, v)| v).unwrap_or(value);
-                    }
-                } else if shown.len() == limit || used + size(&value) > ANSWER_LIMIT {
+            let items = TurnItems::new(turn, args.view);
+            for at in items.places().filter(|at| before.is_none_or(|b| *at < b)) {
+                let Some(value) = items.entry(at, FULL) else { continue };
+                if shown.len() == limit || !shown.is_empty() && used + size(&value) > ANSWER_LIMIT {
                     let cursor = Cursor { page: page.clone(), turn: Some(turn.id.clone()), item: at + 1 };
-                    answer["more"] = json!(true);
-                    answer["before"] = json!(serde_json::to_string(&cursor).unwrap_or_default());
-                    answer["items"] = Value::Array(shown);
-                    return Ok(answer);
+                    return Ok(finish(answer, shown, Some(cursor)));
                 }
+                // The first item is cut until it fits, so every answer shows something or ends.
+                let value = if shown.is_empty() { fit(&items, at, value, ANSWER_LIMIT.saturating_sub(used)) } else { value };
                 used += size(&value);
                 shown.push(value);
             }
+            last = Some((page.clone(), turn.id.clone()));
         }
-        // A cursor whose turn is no longer on its page goes on from the next.
-        from_turn = None;
         match next {
             Some(next) if !turns.is_empty() => page = Some(next),
-            _ => {
-                answer["items"] = Value::Array(shown);
-                return Ok(answer);
-            }
+            _ if anchor.is_some() => return Err("The turn `before` names is no longer in the thread.".into()),
+            _ => return Ok(finish(answer, shown, None)),
         }
     }
-    answer["more"] = json!(true);
-    answer["before"] = json!(serde_json::to_string(&Cursor { page, turn: None, item: 0 }).unwrap_or_default());
-    answer["items"] = Value::Array(shown);
-    Ok(answer)
+    // As many pages as one read looks through: the next goes on after the last turn read, or, its
+    // turn not found yet, looks on from the next page.
+    let cursor = match (anchor, last) {
+        (Some((turn, item)), _) => Cursor { page, turn: Some(turn), item },
+        (None, Some((page, turn))) => Cursor { page, turn: Some(turn), item: 0 },
+        (None, None) => Cursor { page, turn: None, item: 0 },
+    };
+    Ok(finish(answer, shown, Some(cursor)))
 }
 
 #[cfg(test)]

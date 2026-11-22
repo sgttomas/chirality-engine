@@ -219,7 +219,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Noether",
+          "nickname": "Jason",
           "parent": "00000000-0000-0000-0000-000000000009",
           "path": "/root/worker"
         },
@@ -1173,7 +1173,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Noether",
+          "nickname": "Jason",
           "parent": "00000000-0000-0000-0000-000000000009",
           "path": "/root/worker"
         },
@@ -1331,7 +1331,7 @@
             "state": "idle"
           },
           "subagent": {
-            "nickname": "Noether",
+            "nickname": "Jason",
             "parent": "00000000-0000-0000-0000-000000000009",
             "path": "/root/worker"
           },

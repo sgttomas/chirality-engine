@@ -41,13 +41,6 @@ impl Inner {
                     // Idle means no turn runs, even if a note was missed; the
                     // turn's own end (which follows) still says how it ended.
                     p::ThreadStatus::Idle => {
-                        // Codex says so before it announces the turn's end: a look at the turn for its
-                        // report begins now, before anything waiting can start a turn there.
-                        if let Some(entry) = self.store.thread(&thread)
-                            && let Some(turn) = &entry.active_turn
-                        {
-                            self.assignments.look_due(&thread, turn, entry.assigned_by.is_some());
-                        }
                         self.store.update_thread(&thread, |e| {
                             if let Some(turn) = e.active_turn.take() {
                                 e.last_ended = Some(turn);
@@ -97,11 +90,9 @@ impl Inner {
                 let state = mapping::turn_state(&note.turn);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
                 // A turn the engine started with another thread's message reports back to it; an
-                // assigned thread's turn is looked at however it began. Decided before the thread is
-                // idle (if Codex has not said so already), so what waits for it starts after the look.
+                // assigned thread's turn is looked at for its assigner however it began.
                 let opened = self.assignments.take_opened(&thread, &turn);
-                let assigned = self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some());
-                let report = self.assignments.look_due(&thread, &turn, opened || assigned);
+                let recipient = opened.clone().or_else(|| self.store.thread(&thread).and_then(|e| e.assigned_by));
                 let known = self.store.update_thread(&thread, |e| {
                     if e.active_turn.as_ref() == Some(&turn) {
                         e.active_turn = None;
@@ -117,11 +108,9 @@ impl Inner {
                 });
                 if known.is_some() {
                     self.store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: state.clone() });
-                    if report {
-                        self.report_in_order(thread, turn, state, opened);
+                    if let Some(recipient) = recipient {
+                        self.report_in_order(thread, turn, state, recipient, opened.is_some());
                     }
-                } else if report {
-                    self.assignments.end_look(&thread, &turn);
                 }
             }
             "item/started" | "item/completed" => {
@@ -135,8 +124,8 @@ impl Inner {
                             Some(p::InputInfo::Text { text }) => marker::part(text),
                             _ => None,
                         };
-                        if mark.is_some_and(|m| m.report.is_none()) {
-                            self.assignments.marked_message(&ThreadId(note.thread_id.clone()), &TurnId(note.turn_id.clone()));
+                        if let Some(mark) = mark.filter(|m| m.report.is_none()) {
+                            self.assignments.marked_message(&ThreadId(note.thread_id.clone()), &TurnId(note.turn_id.clone()), &mark.from);
                         }
                     }
                     // A call that ends unanswered was cancelled by Codex.

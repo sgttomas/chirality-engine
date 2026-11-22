@@ -122,3 +122,46 @@ async fn a_full_answer_reads_no_further() {
     let bad = answer(header("Piles"), &args(View::Messages, Some("7".into()), None), |_| async { None }).await;
     assert!(bad.is_err());
 }
+
+/// Reads over `turns` (newest first), which Codex gives five at a time from an offset.
+async fn read_flat(args: &ReadArgs, turns: &[p::Turn]) -> std::result::Result<Value, String> {
+    let fetch = |cursor: Option<String>| {
+        let at: usize = cursor.map_or(0, |c| c.parse().unwrap());
+        let page = turns.iter().skip(at).take(5).cloned().collect::<Vec<_>>();
+        let next = (at + 5 < turns.len()).then(|| (at + 5).to_string());
+        async move { Some((page, next)) }
+    };
+    answer(header("Piles"), args, fetch).await
+}
+
+fn texts(answer: &Value) -> Vec<String> {
+    answer["items"].as_array().unwrap().iter().map(|i| i["text"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn going_on_after_new_turns_came_starts_where_the_last_answer_stopped() {
+    let numbered = |range: std::ops::Range<usize>| range.rev().map(|n| turn(&n.to_string(), "completed", json!([user(&format!("Ask {n}.")), said("r", &format!("Reply {n}."), None)]))).collect::<Vec<_>>();
+    let older = numbered(0..12);
+    let first = read_flat(&args(View::Messages, None, Some(7)), &older).await.unwrap();
+    assert_eq!(texts(&first).last().map(String::as_str), Some("Reply 8."));
+    // Six turns more, which move every older one on by more than a page.
+    let grown: Vec<p::Turn> = numbered(12..18).into_iter().chain(older.clone()).collect();
+    let before = first["before"].as_str().map(str::to_string);
+    let next = read_flat(&args(View::Messages, before, Some(3)), &grown).await.unwrap();
+    assert_eq!(texts(&next), ["Ask 8.", "Reply 7.", "Ask 7."]);
+    // A cursor whose turn is gone says so.
+    let gone = serde_json::to_string(&Cursor { page: None, turn: Some("99".into()), item: 0 }).unwrap();
+    assert!(read_flat(&args(View::Messages, Some(gone), None), &grown).await.is_err());
+}
+
+#[tokio::test]
+async fn ids_are_cut_and_an_item_that_cannot_fit_is_not_shown() {
+    let from = crate::assignment::marker::Marker { from: ThreadId("i".repeat(30_000)), title: None, report: None };
+    let marked = json!({"type": "userMessage", "id": "u", "content": [{"type": "text", "text": crate::assignment::marker::render(&from)}, {"type": "text", "text": "Go."}]});
+    let read = read_flat(&args(View::Messages, None, None), &[turn("1", "completed", json!([marked]))]).await.unwrap();
+    assert!(read["items"][0]["from"]["thread"].as_str().unwrap().ends_with("[cut: 29800 more characters]"), "{}", read["items"][0]);
+    let one = turn("1", "completed", json!([said("r", &"x".repeat(5000), None)]));
+    let items = TurnItems::new(&one, View::Messages);
+    let value = items.entry(0, FULL).unwrap();
+    assert_eq!(fit(&items, 0, value, 40), json!({"kind": "reply", "text": "[too large to show]"}));
+}

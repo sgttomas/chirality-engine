@@ -104,6 +104,10 @@ describe("the threads @ offers", () => {
     expect(typedMention("mail", "mail@", 5)).toBeNull();
     expect(typedMention("Ask @Pile plan", "Ask @Pile plan ", 15)).toBeNull();
     expect(typedMention("", "Ask @", 5)).toBeNull();
+    // Typed over a selection, it opens; an `@` a deletion leaves at the caret does not.
+    expect(typedMention("Ask the deck", "Ask @ deck", 5)).toEqual({ start: 4, end: 5, query: "" });
+    expect(typedMention("Ask @x", "Ask @", 5)).toBeNull();
+    expect(typedMention("Ask x", "Ask @x", 5)).toEqual({ start: 4, end: 5, query: "" });
     expect(mentionFrom("Ask @Pile pl", 4, 12)).toEqual({ start: 4, end: 12, query: "Pile pl" });
     expect(mentionFrom("Ask @ Pile", 4, 10)).toBeNull();
     expect(mentionFrom("Ask @Pile\nplan", 4, 14)).toBeNull();
@@ -193,11 +197,12 @@ describe("mentioning a thread", () => {
     await settle();
     expect(composer().value, "another field's keys are its own").toBe("Ask @");
     expect(list()).toBeInTheDocument();
-    // Enter while an input method composes is the input method's.
-    fireEvent.keyDown(composer(), { key: "Enter", isComposing: true });
+    // While an input method composes, every key is the input method's.
+    const chosen = () => within(list()!).getAllByRole("option").findIndex((o) => o.getAttribute("aria-selected") === "true");
+    for (const key of ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"]) fireEvent.keyDown(composer(), { key, isComposing: true });
     await settle();
     expect(composer().value).toBe("Ask @");
-    expect(list()).toBeInTheDocument();
+    expect([list() !== null, chosen()]).toEqual([true, 0]);
     composer().setSelectionRange(1, 1);
     fireEvent.select(composer());
     await settle();
@@ -208,10 +213,12 @@ describe("mentioning a thread", () => {
     fireEvent.blur(composer());
     await settle();
     expect(list()).not.toBeInTheDocument();
-    await typeAt("Ask @");
+    await type("Ask ");
+    await typeAt("Ask ");
+    expect(list()).toBeInTheDocument();
     fireEvent.keyDown(composer(), { key: "Escape" });
     await settle();
-    expect(list()).not.toBeInTheDocument();
+    expect([list(), composer().value]).toEqual([null, "Ask @"]);
   });
 
   it("shows each thread a sent message mentions as a chip that opens it", async () => {

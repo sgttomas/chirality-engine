@@ -105,8 +105,7 @@ impl Inner {
     async fn start_admitted(&self, thread: &ThreadId, delivery: &Delivery) -> std::result::Result<Start, NotStarted> {
         let unsent = |error| NotStarted { error, sent: None };
         let entry = self.known_thread(thread).map_err(unsent)?;
-        // A turn running there, or one that ended still being looked at for its report.
-        if !crate::store::is_idle(&entry) || self.assignments.is_looking(thread) {
+        if !crate::store::is_idle(&entry) {
             return Ok(Start::Busy);
         }
         // Its sender, or the assignment it reports on, may have gone while it waited for the thread.
@@ -178,14 +177,14 @@ impl Inner {
         self.store.update_thread(thread, |e| e.starting = Some(settings));
         *sent = true;
         // A turn started with another thread's message (not a report) reports back to it.
-        let reports = from.is_some_and(|m| m.report.is_none());
-        if reports {
-            self.assignments.starting(thread);
+        let reports = from.filter(|m| m.report.is_none());
+        if let Some(sender) = reports {
+            self.assignments.starting(thread, &sender.from);
         }
         let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {
-                if reports {
+                if reports.is_some() {
                     self.assignments.started(thread, None);
                 }
                 self.store.update_thread(thread, |entry| entry.starting = None);
@@ -193,8 +192,10 @@ impl Inner {
             }
         };
         let turn = TurnId(started.turn.id);
-        if reports {
-            self.assignments.started(thread, Some(&turn));
+        if reports.is_some() {
+            // Unless Codex has told of the turn's end already.
+            let ended = self.store.thread(thread).is_some_and(|e| e.last_ended.as_ref() == Some(&turn));
+            self.assignments.started(thread, (!ended).then_some(&turn));
         }
         self.store.update_thread(thread, |e| {
             if let Some(settings) = e.starting.take() {

@@ -11,7 +11,8 @@
 
 mod admission;
 mod assignment_paths;
-mod report_looks;
+mod read_paths;
+mod report_order;
 mod assignments;
 mod apptools;
 pub(crate) mod catalog;
