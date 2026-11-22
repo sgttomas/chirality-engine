@@ -260,7 +260,7 @@ to a thread (its own `replace_dynamic_tools` is not in the app-server API); a
 fork keeps them. `features.multi_agent_v2_dynamic_tools=true` gives a new subagent all
 of its parent's tools, the engine's and the application's (Codex gives one all
 or none, and none without the setting); a subagent's call comes to the engine
-on its own thread and turn. Codex announces a turn's end before
+on its own thread and turn. Multi-agent v2 has no depth limit (`agent_max_depth` is v1's): a subagent has the tools to start subagents whenever its model declares v2, as every current model does. The engine passes `features.multi_agent_v2.max_concurrent_threads_per_session=8` (eight threads at once to a session, the parent's included; Codex's default is four) and a subagent usage hint, in place of the model's own, telling a subagent to do its task, report to its parent and start no subagents of its own; an application's own settings come after these and win. Codex announces a turn's end before
 the next `turn/start` is taken as a new turn: a start sent once the end is
 heard begins a turn, never steers; and a turn's first message and last reply
 are in its history (`itemsView: summary`) once its end is heard.
@@ -300,7 +300,7 @@ still how threads ask for judgment or action.
 - Codex's refusals (of a thread it no longer has, or a turn it does not know) reach the person in Codex's words.
 - A draft edited in a just-created thread while its first send is still being accepted can be replaced by the moved draft, and an attachment picked across that moment can land in the project's next new thread.
 - A project's thread listing in flight when a thread is archived can list it again until the next listing.
-- Subagents (Codex 0.171.0, multi-agent v2): the person cannot message one (Codex refuses), and one cannot ask the person a question (Codex refuses it to the agent). The task and messages an agent gives a subagent are in neither thread's history. Stopping a subagent does not tell its parent, and stopping the parent does not stop its subagents. The nickname is known once Codex lists the subagent. A subagent's settings shown are those of the turn that started it. A fork has no subagents, and a revert leaves the reverted turn's subagents listed. After Codex restarts, a subagent is read but runs again only once its parent is resumed. Live, an agent's wait for a subagent comes before the subagent's finish; read again, after it.
+- Subagents (Codex 0.171.0, multi-agent v2): the person cannot message one (Codex refuses), and one cannot ask the person a question (Codex refuses it to the agent). The task and messages an agent gives a subagent are in neither thread's history. Stopping a subagent does not tell its parent, and stopping the parent does not stop its subagents. The nickname is known once Codex lists the subagent. A subagent's settings shown are those of the turn that started it. A subagent is told not to start subagents of its own, but nothing stops one that does. A fork has no subagents, and a revert leaves the reverted turn's subagents listed. After Codex restarts, a subagent is read but runs again only once its parent is resumed. Live, an agent's wait for a subagent comes before the subagent's finish; read again, after it.
 
 ## Non-goals
 
