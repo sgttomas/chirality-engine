@@ -20,13 +20,9 @@ use super::{ItemId, ProjectId, ThreadId, TurnId};
 /// namespaces of their own, and it leaves out, without saying, an
 /// application's tool whose namespace and name are the same as one of those.
 ///
-/// Subagents: the engine keeps Codex from giving a new subagent the
-/// application's tools (and its own). A subagent Codex starts from a forked copy of its
-/// parent's conversation can still carry them, since Codex restores a thread's
-/// tools from forked history. For a subagent's thread that has them, a call
-/// made just as its parent is archived can still reach the handler (Codex
-/// ends the subagents after answering the archive), and Codex replaying a
-/// subagent's earlier turn can let its calls through again.
+/// Subagents: a subagent has its parent's tools, these and the engine's, and
+/// its calls to these come to the handler as any other, naming the subagent's
+/// own thread and turn. The engine refuses its own tools to a subagent.
 #[derive(Clone)]
 pub struct AppTools {
     /// The one name the agent sees the tools under, with what they are for.
@@ -62,11 +58,12 @@ pub struct AppTool {
 /// The agent's call to one of the application's tools.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolCall {
-    /// The thread it shows on (a subagent's call shows on its root thread).
+    /// The thread that made the call, where it shows: a subagent's own when a
+    /// subagent made it (its parent is in the snapshot, [`crate::Subagent`]).
     pub thread: ThreadId,
     /// The project of that thread, when it is one of the engine's.
     pub project: Option<ProjectId>,
-    /// The turn that made the call (a subagent's own turn when a subagent made it).
+    /// The turn of that thread that made the call.
     pub turn: TurnId,
     /// The call's item in the thread, [`Item::id`].
     pub item: ItemId,

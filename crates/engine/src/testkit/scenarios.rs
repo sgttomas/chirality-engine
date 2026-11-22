@@ -10,7 +10,7 @@ use crate::api::*;
 
 pub use super::assignments::{assignment, assignment_access, assignment_exchange, assignment_person, assignment_projects, assignment_waits};
 pub use super::history::unkept_thread;
-pub use super::subagents::{subagent, subagent_message, subagent_stop};
+pub use super::subagents::{subagent, subagent_message, subagent_stop, subagent_tools};
 
 async fn project(ctx: &Ctx) -> Project {
     ctx.engine.add_project(ctx.run.project()).await.expect("the project is added")

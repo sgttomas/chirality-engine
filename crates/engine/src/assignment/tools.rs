@@ -20,6 +20,9 @@ const MESSAGE: &str = "message";
 const THREADS: &str = "threads";
 const CLOSE: &str = "close";
 
+/// The answer to a subagent's call to any of these tools.
+pub(crate) const SUBAGENT_REFUSED: &str = "A subagent cannot assign threads or message them.";
+
 const ABOUT: &str = "Work with the person's other threads. A thread you assign is an ordinary thread the person can open, \
 talk to and stop; its agent works on your brief, and when a turn you gave it (by the brief or a message) ends, its last reply \
 comes back to you as a message. A message from another thread is a user message that begins with \
@@ -164,10 +167,9 @@ impl Inner {
 
     async fn engine_tool(self: Arc<Self>, call: ToolCall) -> Answer {
         let caller = call.thread.clone();
-        let entry = self.known_thread(&caller).map_err(|e| e.to_string())?;
-        // Codex gives a subagent these tools only from a forked copy of its parent's history.
-        if entry.subagent.is_some() || self.store.owner(caller.clone()) != caller {
-            return Err("A subagent cannot use these tools.".into());
+        // A subagent has its parent's tools, these too; Codex refuses any message to one, so it could hear no report.
+        if self.store.owner(caller.clone()) != caller || self.known_thread(&caller).map_err(|e| e.to_string())?.subagent.is_some() {
+            return Err(SUBAGENT_REFUSED.into());
         }
         match call.tool.as_str() {
             ASSIGN => self.assign(&caller, args(call.arguments)?).await,

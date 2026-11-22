@@ -8,7 +8,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::harness::{Ctx, settings, text};
-use super::stub::{Reply, Script, hangs, message, shell_call};
+use super::apptools::{CHECK, NAMESPACE};
+use super::stub::{Reply, Script, hangs, message, shell_call, tool_call};
 use crate::api::*;
 
 /// A call to one of Codex's own subagent tools.
@@ -120,6 +121,48 @@ pub async fn subagent_message(ctx: &mut Ctx) {
     let (_, turn) = super::scenarios::check_turn(ctx, Some(&lead), &project, "check", 7).await;
     assert_eq!(tools.called(1).await[0].thread, lead);
     assert!(turn.items.iter().any(|i| matches!(&i.body, ItemBody::ToolCall { status: ToolCallStatus::Completed, .. })), "{:?}", turn.items);
+}
+
+/// A subagent has its parent's tools: its call to the application's comes to
+/// the handler, naming the subagent; its call to the engine's is refused, and
+/// it and its parent go on.
+pub async fn subagent_tools(ctx: &mut Ctx) {
+    let project = ctx.engine.add_project(ctx.run.project()).await.unwrap();
+    let tools = ctx.app_tools();
+    ctx.script("lead", steps("lead", vec![spawn("call_spawn", "worker", "STUB[worker] check and hand on"), wait("call_wait")], "Lead done."));
+    let check = tool_call("call_check", NAMESPACE, CHECK, json!({"total": 9}));
+    let assign = tool_call("call_assign", crate::assignment::NAMESPACE, "assign", json!({"title": "Piles", "brief": "Check the piles."}));
+    ctx.script("worker", Arc::new(move |request| match (request.outputs.get("call_check"), request.outputs.get("call_assign")) {
+        (None, _) => Reply::Items(vec![check.clone()]),
+        (Some(_), None) => Reply::Items(vec![assign.clone()]),
+        (Some(checked), Some(assigned)) => Reply::Items(vec![message("msg_worker_done", &format!("{checked} {assigned}"))]),
+    }));
+    let lead = ctx.engine.start_thread(&project.id, text("STUB[lead] delegate the check"), settings(Access::Ask)).await.unwrap();
+    let worker = new_subagent(ctx, "/root/worker").await.id;
+    assert_eq!(ctx.turn_ended(&lead).await.1, TurnState::Completed);
+
+    let worker_view = ctx.read_thread(&worker).await;
+    let call = ToolCall {
+        thread: worker.clone(),
+        project: Some(project.id.clone()),
+        turn: worker_view.turns[0].id.clone(),
+        item: ItemId("call_check".into()),
+        namespace: Some(NAMESPACE.into()),
+        tool: CHECK.into(),
+        arguments: json!({"total": 9}),
+    };
+    assert_eq!(tools.called(1).await, vec![call]);
+    let items = bodies(&worker_view);
+    let checked = ItemBody::ToolCall { server: Some(NAMESPACE.into()), tool: CHECK.into(), arguments: r#"{"total":9}"#.into(),
+        status: ToolCallStatus::Completed, result: Some("The estimate of 9 checks out.".into()), images: vec![] };
+    assert!(items.contains(&checked), "{items:?}");
+    let refused = ItemBody::ThreadTool { tool: ThreadTool::Assign, thread: None, text: Some("Check the piles.".into()), status: ToolCallStatus::Failed };
+    assert!(items.contains(&refused), "{items:?}");
+    let Some(ItemBody::AgentMessage { text: heard }) = items.last() else { panic!("{items:?}") };
+    assert!(heard.contains("checks out") && heard.contains(crate::assignment::tools::SUBAGENT_REFUSED), "{heard}");
+    // Nothing was assigned, and the parent went on.
+    assert_eq!(ctx.engine.snapshot().threads.len(), 2);
+    assert_eq!(bodies(&ctx.read_thread(&lead).await).last(), Some(&ItemBody::AgentMessage { text: "Lead done.".into() }));
 }
 
 pub async fn subagent_stop(ctx: &mut Ctx) {
