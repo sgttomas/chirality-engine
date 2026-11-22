@@ -295,20 +295,18 @@ still how threads ask for judgment or action.
 
 Designed 2026-11-22 for SWBPIPE; not yet built.
 
-SWBPIPE is a desktop application that runs the agent under strict
-containment: one Codex process per agent session, with one ephemeral thread,
-in a private home whose provider the person configures, with no shell, file,
-patch or web capability, remote control off, and any built-in tool activity
-ending the session. It keeps its own sandbox, process scope, supplier pin
-check, provider store, relay, proposal review and receipts, and uses the
-engine's core crate directly, without the Tauri adapter. The engine gives it
-what follows. It is opt-in: an engine made with `Engine::new` and used as
-before behaves as it does now for the person. It reports more (remote
-control, requests it refused, items it does not map), which the interface
-shows only where an application asks; and ending it ends what Codex started
-too (below).
+SWBPIPE runs the agent under strict containment: one Codex process per agent
+session with one ephemeral thread, a private home with a provider the person
+configures, no shell, file, patch or web capability, remote control off, and
+any built-in tool activity ending the session. It keeps its own sandbox,
+process scope, supplier pin check, provider store, relay, proposal review and
+receipts, and uses the core crate without the Tauri adapter. All of this is
+opt-in: an engine made with `Engine::new` and used as before behaves as now
+for the person. It reports more (remote control, refused requests, unmapped
+items), which the interface shows only where an application asks, and ending
+it ends what Codex started too.
 
-**An embedded engine.** `Engine::embedded(config)` makes an engine, before
+**An embedded engine.** `Engine::embedded(config)` makes an engine before
 Codex starts, as `Engine::new` does; `connect` starts it.
 
 ```rust
@@ -316,59 +314,46 @@ pub struct EmbeddedConfig {
     pub launch: LaunchSpec,
     /// Where the engine keeps its projects list.
     pub state_dir: PathBuf,
-    /// The only tools the agent has, besides what Codex's own settings leave it.
+    /// The agent's only tools, besides what the home's settings leave it.
     pub tools: Option<AppTools>,
 }
 
 /// The whole command that runs `codex app-server` over stdio.
 pub struct LaunchSpec {
-    /// The program run, such as `/usr/bin/sandbox-exec`.
     pub program: PathBuf,
     /// Every argument, in order.
     pub args: Vec<OsString>,
     /// The whole environment; nothing is inherited.
     pub env: Vec<(OsString, OsString)>,
-    /// The working directory.
     pub cwd: PathBuf,
 }
 ```
 
-- Codex is started from the launch spec and nothing else: the program, its
-  arguments as given (SWBPIPE's are `-f <root>/sandbox.sb <root>/codex
-  app-server --listen stdio://`), the environment cleared and set to exactly
-  the one given, and the working directory. The engine adds no `-c` setting,
-  no argument, no `CODEX_HOME` and no `PATH` entry. It still speaks over the
-  process's stdin and stdout, and drains stderr.
-- `codex_bin`, `codex_home` and `codex_settings` have no part in it: the
-  program and arguments replace the binary and the `-c` settings, the
-  environment names the home, and Codex's settings are in that home's
-  `config.toml`. Checking the binary is the application's.
-- The threads carry only the application's tools: no `chirality` tools, so
-  no assignment, messages, reports or reads between threads; the engine
-  starts no turn of its own and reads no history for a report. With no tools,
-  `thread/start` names none.
-- No subagent settings: neither `features.multi_agent_v2_dynamic_tools`, the
-  subagent limits and hint, nor `features.default_mode_request_user_input`.
-  Whether the agent has subagents or questions is the home's settings'.
-- One Codex: when it ends, the engine does not start another. Its status is
-  failed and stays so, and every call after says Codex is not running.
-- Sign-in through Codex is refused (`EngineError::Invalid`); the provider is
-  the application's.
-- What the engine sends Codex by itself is its start (`initialize`,
-  `initialized`, `account/read`, `model/list`, `thread/list` for each
-  project) and what the application's calls ask; never a `remoteControl/*`
-  request.
+- Codex is started from the launch spec alone (SWBPIPE's:
+  `/usr/bin/sandbox-exec -f <root>/sandbox.sb <root>/codex app-server --listen
+  stdio://`, its ten variables, `<root>/work`). The engine adds no `-c`
+  setting, argument, `CODEX_HOME` or `PATH` entry; it speaks over stdin and
+  stdout and drains stderr. `codex_bin`, `codex_home` and `codex_settings`
+  have no part: the spec replaces the binary and settings, the environment
+  names the home, and the settings are in its `config.toml`.
+- Only the application's tools: no `chirality` tools, so no assignment,
+  delivery or report, and the engine starts no turn of its own. No
+  `multi_agent_v2_dynamic_tools`, subagent limits or hint, nor
+  `default_mode_request_user_input`: those are the home's to set. The two go
+  together because the engine's tools need settings a launch spec does not
+  carry; they can be parted if an application needs one without the other.
+- One Codex: when it ends the engine starts no other, and its status stays
+  failed. Sign-in through Codex is refused (`EngineError::Invalid`).
+- Unasked, the engine sends Codex only its start (`initialize`,
+  `initialized`, `account/read`, `model/list`, `thread/list` per project),
+  never a `remoteControl/*` request.
+- The application adds one project (SWBPIPE's `<root>/work`) in a
+  per-session `state_dir`.
 
-The two belong together: the engine's own tools need its subagent settings,
-which a launch spec does not carry, and an application that launches Codex
-itself is one that decides everything the agent can do. They can be parted
-later if an application needs one without the other.
-
-**A thread with options, and what Codex says of it.** `Engine::open_thread`
-starts a thread in a project without a first message, with what `thread/start`
-takes beside the folder, and gives Codex's answer. The first turn is the
-application's `send`, made when it is ready (after it has checked the answer,
-and seen remote control disabled). It is on every engine.
+**A thread with options.** On every engine, `open_thread` starts a thread
+without a first message and gives Codex's answer to `thread/start`; the first
+turn is the application's `send`, made once it has checked the answer and
+seen remote control disabled.
 
 ```rust
 pub async fn open_thread(&self, project: &ProjectId, options: ThreadOptions) -> Result<OpenedThread>;
@@ -376,145 +361,115 @@ pub async fn open_thread(&self, project: &ProjectId, options: ThreadOptions) -> 
 #[derive(Clone, Debug, Default)]
 pub struct ThreadOptions {
     pub model: Option<String>,
-    /// A provider the Codex home names (`model_providers`).
+    /// A provider the home names (`model_providers`).
     pub provider: Option<String>,
     /// In place of Codex's own base instructions.
     pub base_instructions: Option<String>,
-    /// Codex keeps nothing of the thread once it ends.
     pub ephemeral: bool,
     /// Codex's sandbox and approval policy for the thread; its turns then send none.
     pub policy: Option<ThreadPolicy>,
-    /// `Some(vec![])` gives the thread no environment; `None` leaves Codex's default.
+    /// `Some(vec![])`: no environment; `None`: Codex's default.
     pub environments: Option<Vec<ThreadEnvironment>>,
 }
-
 pub struct ThreadPolicy { pub sandbox: SandboxMode, pub approval: ApprovalPolicy }
 pub enum SandboxMode { ReadOnly, WorkspaceWrite, DangerFullAccess }
 pub enum ApprovalPolicy { Untrusted, OnFailure, OnRequest, Never }
 pub struct ThreadEnvironment { pub id: String, pub cwd: PathBuf }
 
-/// Codex's answer to `thread/start`.
 pub struct OpenedThread {
     pub thread: ThreadId,
-    /// `None` for a policy that is none of the four (Codex's granular one).
+    /// `None` for Codex's granular policy.
     pub approval_policy: Option<ApprovalPolicy>,
+    /// Codex's `sandbox.type` (`readOnly`, ...) and `sandbox.networkAccess`.
     pub sandbox: ReportedSandbox,
     pub ephemeral: bool,
-    /// `None` when Codex did not say.
+    /// `None` when Codex does not say.
     pub environments: Option<Vec<ThreadEnvironment>>,
 }
-
-/// The sandbox Codex reports: its type as Codex names it (`readOnly`,
-/// `workspaceWrite`, `externalSandbox`, `dangerFullAccess`) and whether it
-/// lets the network through.
 pub struct ReportedSandbox { pub kind: String, pub network_access: bool }
 ```
 
-- The thread is in the snapshot from its start, idle, and its first `send`
-  starts its first turn. A thread whose first turn never comes is not kept
-  by Codex, as now.
-- A thread opened with a policy has Codex's policy, not the engine's access
-  levels: its turns send no approval policy, sandbox or reviewer (Codex keeps
-  the thread's for every turn that names none), and `TurnSettings::access` is
-  ignored there. Approvals and questions are as Codex's policy makes them
-  (with `never`, none come). The model and reasoning level still go with each
-  turn. The engine knows a thread has its own policy for as long as it
-  runs; after an ordinary engine restarts, the thread's turns send an access
-  level again.
-- An ephemeral thread has no history in Codex: it is read as a thread Codex
-  has not yet kept (no turns, numbered from before it opened) until its first
-  turn ends, and after that a read is refused; a view keeps what the events
-  made. Codex's listing leaves it out.
-- `start_thread` is unchanged: a new thread with the access of its first
-  turn and the engine's tools.
+- The thread is in the snapshot, idle, from its start.
+- With a policy, its turns send no approval policy, sandbox or reviewer
+  (Codex keeps the thread's), `TurnSettings::access` is ignored there, and
+  approvals come as Codex's policy makes them (with `never`, none). Model
+  and reasoning level still go with each turn. An ordinary engine knows the
+  policy until it restarts; after, the thread's turns send an access level.
+- An ephemeral thread is read as one Codex has not kept (no turns, numbered
+  from before it opened) until its first turn ends; then a read is refused,
+  and a view keeps what the events made.
 
-**Remote control.** Codex says whether remote control is on.
+**Remote control and refused requests.**
 
 ```rust
 pub enum RemoteControl { Disabled, Connecting, Connected, Errored, Other }
-
-// in Snapshot: None until Codex says, again from each start of Codex
-#[ts(optional)]
-pub remote_control: Option<RemoteControl>,
-
-// in Event
+// Snapshot: None until Codex says, again from each start of Codex
+#[ts(optional)] pub remote_control: Option<RemoteControl>,
+// Event
 RemoteControl { status: RemoteControl },
-```
-
-The hold is the application's: it sends nothing until it has seen
-`Disabled`, from the snapshot or the event. Codex says it once, as it answers
-`initialize`, so an application that subscribes before `connect` sees it, and
-the snapshot has it once the engine has read it. The engine does nothing more:
-an embedded engine starts no turn of its own, so nothing goes to the model
-before the application's first send.
-
-`remoteControl/enable` and `remoteControl/pairing/start` are requests a client
-sends Codex, not ones Codex sends a client (at 0.171.0 they are in the
-client's requests, and Codex's own requests are approvals, questions, tool
-calls, an MCP elicitation, a ChatGPT token refresh and an attestation). The
-engine never sends them. What it can expose is any request from Codex it does
-not take, which it already answers as not supported:
-
-```rust
-// in Event
 Refused { thread: Option<ThreadId>, method: String },
 ```
 
-so an application can count any such request as a failure.
+- The hold is the application's: it sends nothing until it has seen
+  `Disabled`. Codex says it as it answers `initialize`, so an application
+  that subscribes before `connect` sees it; an embedded engine starts no turn
+  of its own, so the engine needs nothing more.
+- `remoteControl/enable` and `remoteControl/pairing/start` are requests a
+  client sends Codex; Codex never sends them, and the engine never does.
+- Any request Codex sends that the engine does not take (anything but an
+  approval, a question or a call to the application's tools) is put in the
+  stream as `Refused` (with the request's `threadId`, if it has one) before
+  the answer is written, and the answer is the error `-32601` (`not supported
+  by this client`): an error, never a result, so it grants nothing. For
+  SWBPIPE any `Refused` ends the session.
 
-**Built-in activity, shown.** Every item Codex reports is an item of the
-thread. One the engine does not map (its kind unknown to the engine, its
-shape not what the engine reads, or an activity or subagent tool it does not
-name) is
+**Built-in activity, shown.** An item the engine does not map (its kind
+unknown, its shape not what the engine reads, or an activity or subagent tool
+it does not name) is an item all the same, live and in a read:
 
 ```rust
-// in ItemBody
-/// An item the engine does not map: Codex's kind and the item as Codex sent it, as JSON.
+// ItemBody
 Other { kind: String, json: String },
 ```
 
-emitted as any item is, live and in a read. The interface shows nothing for
-it unless the application's item view does (below). SWBPIPE's tripwire kinds
-arrive as:
-
-| Codex's kind | Item body |
+| Built-in activity | Arrives as |
 | --- | --- |
-| `commandExecution` | `Command` |
-| `fileChange` | `FileChange` |
+| `commandExecution`, `fileChange`, `webSearch` | `Command`, `FileChange`, `WebSearch` |
 | `mcpToolCall` | `ToolCall` with `server` set |
-| `collabAgentToolCall` | `SubagentTool`; one the engine does not name, `Other` |
-| `subAgentActivity` | `Subagent`; one the engine does not name, `Other` |
-| `webSearch` | `WebSearch` |
+| `collabAgentToolCall`, `subAgentActivity` | `SubagentTool`, `Subagent`; one the engine does not name, `Other` |
 | `imageView`, `sleep`, `imageGeneration` | `Other` |
+| `send_message_to_user_async` | `AgentMessage` |
+| code-mode `exec` and `wait` | nothing: Codex reports no item (below) |
 
-An application's own tools are `ToolCall` with its namespace as `server`; the
-engine's are `ThreadTool` (none in an embedded engine). Items of a thread the
-engine does not hold (not in a project, not a subagent of one) are not
-emitted, as now.
+Items of a thread the engine does not hold are not emitted, as now.
 
-**One engine per session, and its end.** An embedded engine is one session:
-the application makes one, connects it, and drops it or shuts it down when
-the session ends.
+**The end of Codex.**
 
-- Today `shutdown` closes Codex's input, gives it two seconds, then kills it,
-  and returns once it is reaped, waiting at most five seconds for that. Only
-  the process the engine started is ended: one Codex started (such as a git
-  fetch of plugins) goes on after Codex has gone. Dropping every `Engine`
-  ends nothing: the engine's own tasks hold it, and Codex runs until the
-  runtime ends.
-- Codex is started in a process group of its own. Shutdown, once Codex has
-  ended (or been killed), kills what is left of the group, and returns once
-  Codex is reaped. A process that left the group is not followed; under a
-  launch spec, the application's sandbox bounds it.
-- Dropping the application's last `Engine` handle does the same at once:
-  every process in the group is killed, and drop returns once Codex is
-  reaped, which after the kill takes milliseconds. The engine's tasks hold
-  their part of it, not a handle, so they keep nothing alive.
-- These hold for every engine. An application that shuts the engine down
-  before it exits, as both current ones do, sees no difference.
+- Today: `shutdown` closes Codex's input, gives it two seconds, kills it, and
+  waits at most five seconds for it to be reaped. Nothing below Codex is
+  ended, and dropping every `Engine` ends nothing, since the engine's tasks
+  hold it.
+- The engine starts its direct child as the leader of a new process group
+  (`Command::process_group(0)`: `setpgid(0, 0)` before exec). Under
+  `sandbox-exec` the child is `sandbox-exec`, which execs Codex in place, so
+  Codex is the leader; were it to start Codex as a child, Codex would be in
+  the group. Codex puts some children in groups of their own, so the group
+  alone is not enough.
+- Ending Codex: the engine stops (`SIGSTOP`) the direct child and every
+  process below it, found by walking children (`proc_listchildpids`) until a
+  pass finds none new, then kills (`SIGKILL`) each, and each group one leads,
+  and returns once the direct child is reaped. A stopped process keeps its
+  pid, so none is reused before the kill. A process that left the tree before
+  the walk (its parent already gone) is not found; for SWBPIPE any such
+  process is already a containment failure.
+- `shutdown` on an ordinary engine first stops what is below Codex, closes
+  its input and gives it two seconds; an embedded engine ends Codex at once.
+  Dropping the application's last `Engine` handle ends Codex at once, and
+  drop returns once it is reaped. The engine's tasks hold their part, not a
+  handle. Both current applications shut down before they exit and see no
+  difference.
 
-**The application's views of items** (`packages/ui`). An application can
-show an item its own way:
+**The application's views of items** (`packages/ui`).
 
 ```tsx
 export const ItemView = createContext<((item: Item) => ReactNode | null) | undefined>(undefined);
@@ -522,85 +477,79 @@ export const ItemView = createContext<((item: Item) => ReactNode | null) | undef
 itemView?: (item: Item) => ReactNode | null;
 ```
 
-`Turns` asks the view for each item; what it gives stands in the turn in the
-item's place, outside the folded work; on `null`, the item shows as it does
-now (an `Other` item, not at all). The view is called as a function; the
-components it returns may use hooks. `StandardLayout` provides it from
-`itemView`; an application composing `Turns` itself provides `ItemView`, as
-it does `FeaturedWorkflows`.
+Exported from the package's root, beside `PanelContext` and
+`FeaturedWorkflows`. `Turns` asks the view for every item at every render,
+and grouping (`blocksOf`) follows the answer: an item with a node is a block
+of its own, keyed by `item.id`, and the folded work before and after it stays
+folded on either side; on `null` the item is grouped and shown as now (an
+`Other` item, not at all). A view may answer `null` while a call runs and a
+node once it ends; the item leaves the live work when it does. The view is
+called as a function; the components it returns may use hooks.
+`StandardLayout` provides it from `itemView`; an application composing
+`Turns` itself provides `ItemView`.
 
-**What the engine does not do.** It does not check the launch spec, the
-binary, the home's settings or Codex's answer to `thread/start`: SWBPIPE
-checks those against its own policy, and the engine passes on what Codex says
-without judging it. It does not end a session on built-in activity: it shows
-the activity, and the application ends the session by dropping the engine.
-It does not hold the first turn for remote control: the application does not
-send. It adds no permission model: a thread opened with a policy has Codex's.
+**What the engine does not do.** It does not check the launch spec, binary,
+settings or Codex's answers (the application does, against its own policy),
+end a session on built-in activity (it shows it; the application drops the
+engine), hold the first turn (the application does not send), or add a
+permission model (a policy thread has Codex's).
 
-**Established at the pin (0.171.0).** Observed with the pinned binary over
-stdio, launched through `/usr/bin/sandbox-exec -f <profile>` with an exact
-environment, a scratch home with SWBPIPE's `config.toml`, and a loopback stub
-for its provider; no account, no model, no network.
+**Established at the pin (0.171.0).** The pinned binary over stdio, launched
+through `sandbox-exec` with a profile denying all network but loopback, dead
+proxies, an exact environment, a scratch home with SWBPIPE's `config.toml`
+and plugins off, and a loopback stub for the provider; no account, no model.
 
-- The launch: `sandbox-exec` runs Codex in its own place (one process, no
-  child), and stdio works through it.
-- Remote control: Codex sends `remoteControl/status/changed` once, with
-  `status: "disabled"` (and `serverName`, `installationId`,
-  `environmentId`), as it answers `initialize`, before any other request is
-  answered; `remoteControl/status/read` agrees. That is so with
-  `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1` and without it, with
-  no ChatGPT sign-in. Started with `--remote-control`, Codex says `"errored"`
-  with the variable and without it. The variable is still in the binary, but
-  its effect could not be seen without a ChatGPT sign-in (not made). A
-  `requirements.toml` with `allow_remote_control = false` in the home did not
-  change `"errored"` either. `remoteControl/enable` is refused (`remote control
-  requires ChatGPT authentication`), and `remoteControl/pairing/start` too
-  (`requires remote control to be enabled`).
-- SWBPIPE's settings: every key parses (`--strict-config
-  --print-startup-config` accepts the file; a misspelled feature fails it).
-  Codex warns that `[features].multi_agent` is deprecated. With a model Codex
-  has no metadata for, the model is offered only the application's namespace:
-  `[features]` and `web_search = "disabled"` remove `exec_command`,
-  `write_stdin`, `view_image`, the goal tools, the multi-agent v1 tools and
-  `web_search` that the same provider without them offers, and
-  `request_user_input` goes too. Plugins off, no git fetch of
-  `openai/plugins` starts (with them on, one does as Codex starts).
-  The provider's `env_key` is sent as the bearer token;
-  `requires_openai_auth = false` leaves `account/read` with no account and
-  `requiresOpenaiAuth: false`. `model/list` answers from Codex's bundled
-  catalogue and asks the provider nothing.
-- But a model Codex has metadata for (its bundled `gpt-6.2-sol`) chooses its
-  own tools: with SWBPIPE's settings it is offered a code-mode `exec` (whose
-  nested tools are `apply_patch`, the MCP resource tools, `clock` and the
-  application's), `wait`, `send_message_to_user_async`, `clock.sleep`, and
-  multi-agent v2 (`collaboration.spawn_agent` and the rest). `[agents]
-  enabled = false` removes the multi-agent tools. Code mode fails closed
-  without its host (Codex warns so), so the application's tools, reachable
-  only inside `exec`, cannot be called. A model's catalogue entry decides
-  this before `[features]` does.
+- `sandbox-exec` execs Codex in place: the engine's direct child is Codex.
+- **Unverified: that `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1`
+  turns remote control off.** Without ChatGPT sign-in, Codex sends
+  `remoteControl/status/changed` with `"disabled"` once, as it answers
+  `initialize`, with the variable and without it; with `--remote-control`,
+  `"errored"` with it and without it. These runs show only that remote
+  control was off, not that the variable did it; that would need a sign-in.
+  `remoteControl/enable` and `remoteControl/pairing/start` are refused.
+- Every SWBPIPE key parses under `--strict-config`. A `config.toml` that does
+  not parse does not stop Codex: it starts on its defaults, warns
+  (`Invalid configuration; using defaults.`) and refuses `thread/start`.
+- The tools offered depend on the model's slug. For one Codex has no
+  metadata for, SWBPIPE's settings leave only the application's namespace.
+  For one in Codex's catalogue (`gpt-6.2-sol`), the catalogue's code-only
+  tool mode decides before `[features]`. With SWBPIPE's settings and
+  `[agents] enabled = false`, it is offered `exec` (nesting `apply_patch`,
+  the three MCP resource tools, `clock__curr_time` and the application's
+  tools), `wait`, `send_message_to_user_async` and `clock.sleep`. Settings
+  that close more:
+  - `[features] sleep_tool = false` removes `clock.sleep`;
+  - `[features.code_mode] direct_only_tool_namespaces = ["<namespace>"]`
+    offers the application's tools directly, out of `exec`;
+  - `[features.code_mode] excluded_tool_namespaces = ["functions", "clock"]`
+    leaves `exec` with nothing nested (no `apply_patch`).
+  `exec`, `wait` and `send_message_to_user_async` remain: no setting removes
+  them (the only gate on `exec` is a policy Codex sets internally), short of
+  a catalogue entry (`model_catalog_json`, not relied on). With the code-mode
+  host off, `exec` and `wait` answer the model `code-mode host is disabled`
+  and Codex reports nothing of them to the client; they are seen only in the
+  provider's next request. A recorded test of this comes with build PR 2.
+- `[skills] include_instructions = false` and `[skills.bundled] enabled =
+  false` together leave `skills/.system` uninstalled and no skills listed.
 - `thread/start` takes `ephemeral`, `baseInstructions`, `environments: []`,
-  `sandbox: "read-only"`, `approvalPolicy: "never"`, `modelProvider` and
-  `dynamicTools` (`environments` and `dynamicTools` need the experimental
-  API, which the engine declares). It answers `approvalPolicy: "never"`, `sandbox: {type:
-  "readOnly", networkAccess: false}`, `thread.ephemeral: true` and
-  `thread.environments: []`. The base instructions go to the model in place
-  of Codex's own; the skills Codex installs in the home are still listed to
-  it.
-- An ephemeral thread: `thread/read` with turns and `thread/turns/list` are
-  refused (`ephemeral threads do not support ...`), and `thread/list` leaves
-  it out; its turn runs and is told of as any other.
-- A `turn/start` naming no approval policy or sandbox keeps the thread's
-  (Codex: they apply "for this turn and subsequent turns").
-- Closing Codex's input ends it at once (exit 0) under these settings, with
-  nothing left. Under the default settings, the plugins fetch Codex started
-  (git and its helpers) went on after Codex had ended.
+  `sandbox`, `approvalPolicy`, `modelProvider` and `dynamicTools` (the
+  experimental API, which the engine declares, for the last two and
+  `environments`), and answers `approvalPolicy: "never"`, `sandbox: {type:
+  "readOnly", networkAccess: false}`, `thread.ephemeral: true`,
+  `thread.environments: []`. Base instructions replace Codex's own. A
+  `turn/start` naming no policy keeps the thread's.
+- An ephemeral thread is refused by `thread/turns/list` and `thread/read`
+  with turns, and left out of `thread/list`.
+- The provider's `env_key` is the bearer token; `account/read` has no
+  account; `model/list` answers from the catalogue without asking the
+  provider.
+- Under these settings Codex starts no process, and ends at once (exit 0)
+  when its input closes. A running app's Codex started
+  `codex-code-mode-host` as its child in a group of its own.
 
-**Not observed.** Whether the remote-control variable is honoured with a
-ChatGPT sign-in, and whether a catalogue (`model_catalog_json`) can give a
-known model direct tools: both need what this verification did not use (a
-sign-in, a real model's behaviour). How `imageView`, `sleep` and
-`imageGeneration` items look on the wire was read from the protocol's
-schema, not seen.
+**Not observed.** The variable's effect (needs a sign-in); how `imageView`
+and `imageGeneration` items look (read from the schema); whether a
+`model_catalog_json` entry can give a catalogued slug direct tools.
 
 ## Known limits
 
