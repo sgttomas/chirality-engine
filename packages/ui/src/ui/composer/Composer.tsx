@@ -94,9 +94,9 @@ function ThreadComposer() {
     edit((d) => ({ attachments: [...d.attachments, ...added.filter((n) => !d.attachments.some((x) => x.path === n.path))] }));
   };
 
-  const onChange = (value: string, at: number) => {
+  const onChange = (value: string, at: number, deleted: boolean) => {
     // An open mention follows the typing; only an `@` typed fresh opens one.
-    const now = open.current ? mentionFrom(value, open.current.start, at) : typedMention(text, value, at);
+    const now = open.current ? mentionFrom(value, open.current.start, at) : deleted ? null : typedMention(text, value, at);
     edit({ text: value });
     setMention(matching(now));
     setActive(0);
@@ -192,7 +192,7 @@ function ThreadComposer() {
           rows={thread ? 1 : 3}
           placeholder={running ? "Steer the turn" : thread ? "Reply" : "What should we work on?"}
           value={text}
-          onChange={(e) => onChange(e.target.value, e.target.selectionStart)}
+          onChange={(e) => onChange(e.target.value, e.target.selectionStart, !!(e.nativeEvent as InputEvent).inputType?.startsWith("delete"))}
           onBlur={() => setMention(null)}
           onSelect={(e) => {
             // The caret moved away from the name being typed: the list closes.

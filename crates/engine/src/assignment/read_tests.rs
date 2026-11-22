@@ -165,3 +165,20 @@ async fn ids_are_cut_and_an_item_that_cannot_fit_is_not_shown() {
     let value = items.entry(0, FULL).unwrap();
     assert_eq!(fit(&items, 0, value, 40), json!({"kind": "reply", "text": "[too large to show]"}));
 }
+
+#[tokio::test]
+async fn a_cursor_too_long_is_refused_and_none_given_is_too_long() {
+    let turns: Vec<p::Turn> = (0..3).map(|n| turn(&n.to_string(), "completed", json!([user("Go."), said("r", "Done.", None)]))).collect();
+    let long = serde_json::to_string(&Cursor { page: Some("p".repeat(40_000)), turn: Some("1".into()), item: 0 }).unwrap();
+    assert!(read_flat(&args(View::Messages, Some(long), None), &turns).await.is_err());
+    // Codex's own page too long to give back: the cursor names the turn alone, and goes on from it.
+    let fetch = |cursor: Option<String>| {
+        let page = if cursor.is_none() { Some((turns.clone(), Some("c".repeat(5000)))) } else { None };
+        async move { page }
+    };
+    let read = answer(header("Piles"), &args(View::Messages, None, Some(1)), fetch).await.unwrap();
+    let before = read["before"].as_str().unwrap();
+    assert!(before.len() <= MOST_CURSOR, "{before}");
+    let next = read_flat(&args(View::Messages, Some(before.to_string()), Some(1)), &turns).await.unwrap();
+    assert_eq!(kinds(&next), ["person"]);
+}

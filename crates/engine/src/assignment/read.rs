@@ -21,6 +21,8 @@ use crate::protocol as p;
 pub(crate) const ANSWER_LIMIT: usize = 16 * 1024;
 const DEFAULT_ITEMS: usize = 20;
 const MOST_ITEMS: usize = 100;
+/// The longest `before` taken: longer than any a read gives.
+const MOST_CURSOR: usize = 1024;
 /// Turns asked of Codex at a time, and how many such pages one read looks through at most.
 pub(crate) const PAGE_TURNS: u32 = 5;
 const MOST_PAGES: usize = 20;
@@ -177,6 +179,9 @@ impl<'a> TurnItems<'a> {
                 let files: Vec<String> = changes.iter().take(at.paths).map(|c| cut(&c.path, at.name)).collect();
                 json!({ "kind": "fileChange", "status": status, "files": files, "moreFiles": changes.len() - files.len() })
             }
+            // In the messages view, only a message in is mapped: the work is not built to be left out.
+            p::ThreadItem::UserMessage { .. } => other(&crate::mapping::item(item, true)?.body, activity, at)?,
+            _ if !activity => return None,
             _ => other(&crate::mapping::item(item, true)?.body, activity, at)?,
         })
     }
@@ -241,7 +246,8 @@ where
     Fut: Future<Output = Option<(Vec<p::Turn>, Option<String>)>>,
 {
     let start: Cursor = match &args.before {
-        Some(text) => serde_json::from_str(text).map_err(|_| "`before` is not one a read gave.".to_string())?,
+        Some(text) if text.len() <= MOST_CURSOR => serde_json::from_str(text).map_err(|_| "`before` is not one a read gave.".to_string())?,
+        Some(_) => return Err("`before` is not one a read gave.".into()),
         None => Cursor::default(),
     };
     let answer = json!({
@@ -254,11 +260,15 @@ where
         "more": false,
     });
     let limit = args.limit.unwrap_or(DEFAULT_ITEMS).clamp(1, MOST_ITEMS);
-    // Room for the cursor, which names Codex's own.
-    let mut used = size(&answer) + 512;
+    // Room for the cursor, escaped.
+    let mut used = size(&answer) + 2 * MOST_CURSOR;
     let mut shown: Vec<Value> = Vec::new();
     let finish = |mut answer: Value, shown: Vec<Value>, cursor: Option<Cursor>| {
-        if let Some(cursor) = cursor {
+        if let Some(mut cursor) = cursor {
+            // Codex's own page too long to give back: the turn named is found from the newest.
+            if serde_json::to_string(&cursor).unwrap_or_default().len() > MOST_CURSOR {
+                cursor.page = None;
+            }
             answer["more"] = json!(true);
             answer["before"] = json!(serde_json::to_string(&cursor).unwrap_or_default());
         }

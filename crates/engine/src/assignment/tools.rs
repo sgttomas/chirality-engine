@@ -72,7 +72,7 @@ pub(crate) fn spec() -> p::DynamicToolSpec {
             READ,
             "Read another thread, in any project, a subagent's too, to see where it stands or what it did; it is not woken. \
              Gives its title, project, status and last error, then its items newest first; when there are more, `before` \
-             in the answer gives the ones before.",
+             in the answer gives the ones before. An answer can have no items and still have more: go on with its `before`.",
             json!({"type": "object", "properties": {
                 "thread": thread,
                 "view": {"type": "string", "enum": ["messages", "activity"], "description": "messages (the default): messages in and the agent's final replies; activity adds commands, file changes and tool calls."},

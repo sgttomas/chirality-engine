@@ -36,18 +36,20 @@ pub(crate) struct Assignments {
     /// Assignments closed while the engine runs, (assigner, assigned); after a
     /// restart a close is found in the assigner's history.
     closed: Mutex<HashSet<(ThreadId, ThreadId)>>,
-    /// Each thread's turn the engine started with another thread's message (not a report), and
-    /// that thread: the turn's end reports back to it. One a thread at most, as it runs one turn.
-    opened: Mutex<HashMap<ThreadId, (TurnId, ThreadId)>>,
+    /// Each turn the engine started with another thread's message (not a report), by thread and
+    /// turn, and that thread: the turn's end reports back to it. By turn, as Codex may answer the
+    /// next turn's start before it tells of this one's end.
+    opened: Mutex<HashMap<(ThreadId, TurnId), ThreadId>>,
     /// Threads whose `turn/start` for such a message is in flight, with the sender: Codex may tell
     /// of the turn before it answers.
     starting: Mutex<HashMap<ThreadId, ThreadId>>,
     /// Each recipient's last report looked at, so the next to it waits: a thread's reports come
     /// in the order their turns ended, and no recipient waits on another's.
     last_report: Mutex<HashMap<ThreadId, oneshot::Receiver<()>>>,
-    /// How many times each thread has gone from the engine (archived, its project removed): a
-    /// report looked at across that is not made.
-    gone: Mutex<HashMap<ThreadId, u64>>,
+    /// Each thread a report in flight involves (reporting, or to hear it): how many such reports,
+    /// and how many times it has gone from the engine (archived, its project removed) meanwhile; a
+    /// report looked at across that is not made. Kept only while such a report is in flight.
+    reporting: Mutex<HashMap<ThreadId, (usize, u64)>>,
     /// Turn ends looked at for a report, for tests to wait on.
     #[cfg(test)]
     pub reports: std::sync::atomic::AtomicUsize,
@@ -78,7 +80,7 @@ impl Assignments {
     pub fn started(&self, thread: &ThreadId, turn: Option<&TurnId>) {
         let Some(sender) = self.starting.lock().unwrap().remove(thread) else { return };
         if let Some(turn) = turn {
-            self.opened.lock().unwrap().insert(thread.clone(), (turn.clone(), sender));
+            self.opened.lock().unwrap().insert((thread.clone(), turn.clone()), sender);
         }
     }
 
@@ -86,34 +88,67 @@ impl Assignments {
     /// the one the engine is starting, if a start from that sender is in flight there.
     pub fn marked_message(&self, thread: &ThreadId, turn: &TurnId, sender: &ThreadId) {
         if self.starting.lock().unwrap().get(thread) == Some(sender) {
-            self.opened.lock().unwrap().insert(thread.clone(), (turn.clone(), sender.clone()));
+            self.opened.lock().unwrap().insert((thread.clone(), turn.clone()), sender.clone());
         }
     }
 
     /// The thread whose message the engine started the ended turn with, if it did; forgotten.
     pub fn take_opened(&self, thread: &ThreadId, turn: &TurnId) -> Option<ThreadId> {
-        let mut opened = self.opened.lock().unwrap();
-        let sender = opened.get(thread).filter(|(t, _)| t == turn).map(|(_, s)| s.clone())?;
-        opened.remove(thread);
-        Some(sender)
+        self.opened.lock().unwrap().remove(&(thread.clone(), turn.clone()))
     }
 
-    pub fn generation(&self, thread: &ThreadId) -> u64 {
-        self.gone.lock().unwrap().get(thread).copied().unwrap_or(0)
+    /// A report from `thread` to `recipient` begins: how many times each has gone so far.
+    pub fn begin_report(&self, thread: &ThreadId, recipient: &ThreadId) -> (u64, u64) {
+        let mut reporting = self.reporting.lock().unwrap();
+        let mut begin = |t: &ThreadId| {
+            let entry = reporting.entry(t.clone()).or_default();
+            entry.0 += 1;
+            entry.1
+        };
+        (begin(thread), begin(recipient))
+    }
+
+    pub fn generations(&self, thread: &ThreadId, recipient: &ThreadId) -> (u64, u64) {
+        let reporting = self.reporting.lock().unwrap();
+        let gone = |t: &ThreadId| reporting.get(t).map_or(0, |e| e.1);
+        (gone(thread), gone(recipient))
+    }
+
+    pub fn end_report(&self, thread: &ThreadId, recipient: &ThreadId) {
+        let mut reporting = self.reporting.lock().unwrap();
+        for t in [thread, recipient] {
+            if let Some(entry) = reporting.get_mut(t) {
+                entry.0 -= 1;
+                if entry.0 == 0 {
+                    reporting.remove(t);
+                }
+            }
+        }
     }
 
     /// The thread is gone from the engine (archived, or its project removed): nothing of it is kept,
-    /// and no report looked at before is made.
+    /// and no report in flight from or to it is made.
     pub fn forget_thread(&self, thread: &ThreadId) {
         self.deliveries.forget(thread);
-        self.opened.lock().unwrap().remove(thread);
+        self.opened.lock().unwrap().retain(|(t, _), _| t != thread);
         self.starting.lock().unwrap().remove(thread);
-        *self.gone.lock().unwrap().entry(thread.clone()).or_default() += 1;
+        self.last_report.lock().unwrap().remove(thread);
+        if let Some(entry) = self.reporting.lock().unwrap().get_mut(thread) {
+            entry.1 += 1;
+        }
     }
 
-    /// Codex stopped: no turn it ran will end, and no start in flight was answered.
+    /// How many entries `opened`, `last_report` and `reporting` hold, for tests.
+    #[cfg(test)]
+    pub fn held(&self) -> (usize, usize, usize) {
+        (self.opened.lock().unwrap().len(), self.last_report.lock().unwrap().len(), self.reporting.lock().unwrap().len())
+    }
+
+    /// Codex stopped, or the engine shuts down: no turn it ran will end, no start in flight was
+    /// answered, and no report waits on one before it.
     pub fn codex_stopped(&self) {
         self.opened.lock().unwrap().clear();
         self.starting.lock().unwrap().clear();
+        self.last_report.lock().unwrap().clear();
     }
 }

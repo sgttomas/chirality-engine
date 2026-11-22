@@ -219,7 +219,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Jason",
+          "nickname": "Ramanujan",
           "parent": "00000000-0000-0000-0000-000000000009",
           "path": "/root/worker"
         },
@@ -820,6 +820,22 @@
       "type": "item"
     },
     {
+      "item": {
+        "body": {
+          "kind": "subagentTool",
+          "prompt": null,
+          "status": "running",
+          "threads": [],
+          "tool": "wait"
+        },
+        "done": false,
+        "id": "call_wait"
+      },
+      "thread": "00000000-0000-0000-0000-000000000009",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "item"
+    },
+    {
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
@@ -848,22 +864,6 @@
       "thread": "00000000-0000-0000-0000-000000000012",
       "turn": "00000000-0000-0000-0000-000000000013",
       "type": "turnStarted"
-    },
-    {
-      "item": {
-        "body": {
-          "kind": "subagentTool",
-          "prompt": null,
-          "status": "running",
-          "threads": [],
-          "tool": "wait"
-        },
-        "done": false,
-        "id": "call_wait"
-      },
-      "thread": "00000000-0000-0000-0000-000000000009",
-      "turn": "00000000-0000-0000-0000-000000000010",
-      "type": "item"
     },
     {
       "item": {
@@ -1173,7 +1173,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Jason",
+          "nickname": "Ramanujan",
           "parent": "00000000-0000-0000-0000-000000000009",
           "path": "/root/worker"
         },
@@ -1331,7 +1331,7 @@
             "state": "idle"
           },
           "subagent": {
-            "nickname": "Jason",
+            "nickname": "Ramanujan",
             "parent": "00000000-0000-0000-0000-000000000009",
             "path": "/root/worker"
           },

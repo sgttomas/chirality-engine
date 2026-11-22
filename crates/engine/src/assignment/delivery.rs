@@ -254,8 +254,13 @@ impl Inner {
         }
     }
 
-    fn not_reported(&self, thread: &ThreadId, message: &str) {
-        self.store.update_thread(thread, |e| e.failed = Some(format!("This thread's reply was not reported back: {message}")));
+    /// A report owed and not made, said in the turn: neither the turn nor the thread changes.
+    fn not_reported(&self, thread: &ThreadId, turn: &TurnId, why: &str) {
+        if self.store.thread(thread).is_some() {
+            let body = ItemBody::Error { message: format!("This turn's reply was not reported back: {why}.") };
+            let item = Item { id: ItemId(format!("report-{}", turn.0)), body, done: true };
+            self.store.emit(Event::Item { thread: thread.clone(), turn: turn.clone(), item });
+        }
     }
 
     fn not_delivered(&self, thread: &ThreadId, message: &str) {
@@ -345,63 +350,73 @@ impl Inner {
     /// waits on another's.
     pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, recipient: ThreadId, opened: bool) {
         let (before, done) = self.assignments.reserve_report(&recipient);
-        // Taken now, so a thread gone while the report waits is seen.
-        let generations = (self.assignments.generation(&thread), self.assignments.generation(&recipient));
+        // Counted from now, so a thread gone while the report waits is seen.
+        let generations = self.assignments.begin_report(&thread, &recipient);
         let inner = self.clone();
         tokio::spawn(async move {
             if let Some(before) = before {
                 let _ = before.await;
             }
-            inner.report(Ended { thread, turn, state, recipient, opened, generations }).await;
+            let ended = Ended { thread, turn, state, recipient, opened, generations };
+            inner.report(&ended).await;
+            inner.assignments.end_report(&ended.thread, &ended.recipient);
             let _ = done.send(());
         });
     }
 
     /// If the engine started the turn with another thread's message, or the thread that
     /// assigned this one did, its last reply and how it ended go back to that thread, unless
-    /// it assigned this one and has closed the assignment.
-    async fn report(self: &Arc<Self>, ended: Ended) {
-        let thread = ended.thread.clone();
-        match tokio::time::timeout(REPORT_LIMIT, self.check_report(ended)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => self.not_reported(&thread, &e.to_string()),
-            Err(_) => self.not_reported(&thread, "Codex did not answer in time"),
+    /// it assigned this one and has closed the assignment. Only the reads of history have a
+    /// deadline: a report found is posted, and delivered, as any message is.
+    async fn report(self: &Arc<Self>, ended: &Ended) {
+        let looked = tokio::time::timeout(REPORT_LIMIT, self.look(ended)).await.unwrap_or_else(|_| Err("Codex did not answer in time".into()));
+        match looked {
+            Ok(Some(found)) => self.post_report(ended, found).await,
+            Ok(None) => {}
+            // Said only where a report was owed: a turn the engine started with the recipient's message.
+            Err(why) if ended.opened => self.not_reported(&ended.thread, &ended.turn, &why),
+            Err(_) => {}
         }
         #[cfg(test)]
         self.assignments.reports.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    async fn check_report(self: &Arc<Self>, ended: Ended) -> Result<()> {
-        let Ended { thread, turn, state, recipient, opened, generations } = ended;
-        let (Some(entry), Some(end)) = (self.store.thread(&thread), end_of(&state)) else { return Ok(()) };
+    /// The ended turn as Codex keeps it, if it reports to the recipient.
+    async fn look(&self, ended: &Ended) -> std::result::Result<Option<Found>, String> {
+        let thread = &ended.thread;
+        let (Some(entry), Some(end)) = (self.store.thread(thread), end_of(&ended.state)) else { return Ok(None) };
         if entry.subagent.is_some() {
-            return Ok(());
+            return Ok(None);
         }
-        let session = self.session()?;
-        // The turn as Codex keeps it: its first message and its last reply.
-        let Some(kept) = find_turn(&session, &thread, &turn).await? else { return Ok(()) };
+        let session = self.session().map_err(|e| e.to_string())?;
+        // Its first message and its last reply.
+        let kept = find_turn(&session, thread, &ended.turn).await.map_err(|e| e.to_string())?.ok_or("its turn is not among the thread's latest")?;
         // A report's turn reports nothing, so exchanges of reports cannot go on.
-        let Some(sender) = opened_with(&kept).map(|(mark, _)| mark).filter(|m| m.report.is_none() && m.from != thread).map(|m| m.from) else { return Ok(()) };
-        if sender != recipient {
-            return Ok(());
+        let Some(sender) = opened_with(&kept).map(|(mark, _)| mark).filter(|m| m.report.is_none() && m.from != *thread).map(|m| m.from) else { return Ok(None) };
+        if sender != ended.recipient {
+            return Ok(None);
         }
         // A mark the person wrote is not a message the engine delivered; only the assigner's is
         // taken at its word (after a restart the engine has not seen how the turn began).
         let assigner = entry.assigned_by.as_ref() == Some(&sender);
-        if !opened && !assigner || assigner && self.closed(&session, &sender, &thread).await? {
-            return Ok(());
+        if !ended.opened && !assigner || assigner && self.closed(&session, &sender, thread).await.map_err(|e| e.to_string())? {
+            return Ok(None);
         }
+        Ok(Some(Found { entry, end, kept }))
+    }
+
+    async fn post_report(self: &Arc<Self>, ended: &Ended, Found { entry, end, kept }: Found) {
+        let (thread, recipient) = (&ended.thread, &ended.recipient);
         // Either thread gone from the engine since the turn ended (archived, its project removed).
-        if generations != (self.assignments.generation(&thread), self.assignments.generation(&sender)) {
-            return Ok(());
+        if ended.generations != self.assignments.generations(thread, recipient) {
+            return;
         }
         let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::ReadOnly, |s| s.access) } else { Access::ReadOnly };
-        let Some(fallback) = self.settings_of(&sender).or(entry.settings.clone()) else { return Ok(()) };
-        let from = Marker { from: thread, title: entry.title, report: Some(end) };
-        if let Posted::Refused(message) = self.post(sender.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
-            self.not_delivered(&sender, &message);
+        let Some(fallback) = self.settings_of(recipient).or(entry.settings.clone()) else { return };
+        let from = Marker { from: thread.clone(), title: entry.title, report: Some(end) };
+        if let Posted::Refused(message) = self.post(recipient.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
+            self.not_delivered(recipient, &message);
         }
-        Ok(())
     }
 
     /// Whether the assigner has closed the assignment: this run, or by its own call in its history.
@@ -420,6 +435,13 @@ impl Inner {
     }
 }
 
+/// What a look at an ended turn found that reports.
+struct Found {
+    entry: ThreadEntry,
+    end: TurnEnd,
+    kept: p::Turn,
+}
+
 /// A turn that ended and may report, and to whom.
 struct Ended {
     thread: ThreadId,
@@ -428,7 +450,7 @@ struct Ended {
     recipient: ThreadId,
     /// The engine started it with the recipient's message.
     opened: bool,
-    /// The thread's and the recipient's generations when the turn ended.
+    /// How many times the thread and the recipient had gone when the turn ended.
     generations: (u64, u64),
 }
 

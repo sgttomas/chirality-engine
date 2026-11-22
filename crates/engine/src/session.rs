@@ -222,6 +222,7 @@ impl Inner {
                 reaped.push(opening.reaped());
             }
             self.tool_calls.close();
+            self.assignments.codex_stopped();
             reaped
         };
         let _ = self.attempts.subscribe().wait_for(|n| *n == 0).await;

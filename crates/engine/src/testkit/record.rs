@@ -4,9 +4,10 @@
 //! while it drives the real Codex. The replay connector stands in for the
 //! Codex process: it checks each frame the engine sends against the next
 //! `expect_outbound`, in order, and plays each `emit_inbound` back once every
-//! frame before it was sent. A request the engine sends may come a little
-//! before its place (tasks running at once send in either order); its id is
-//! not compared, and Codex's answer goes back with the id it was sent with.
+//! frame before it was sent. A read of history the engine sends may come a
+//! little out of its place, before or after another request (tasks running at
+//! once send in either order); nothing else may. A request's id is not
+//! compared, and Codex's answer goes back with the id it was sent with.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -128,8 +129,12 @@ impl Connector for RecordingConnector {
 // ---------- replaying ----------
 
 /// How far ahead of the next expected frame a request the engine sends may be found: tasks that
-/// run at once (a report's look at history, a delivery's turn) send in either order.
+/// run at once (a report's or a read's look at history, a delivery's turn) send in either order.
 const LOOKAHEAD: usize = 24;
+
+/// The requests that may come out of their place: the engine's reads of history, which change
+/// nothing. Nothing else passes another frame, so what the person causes keeps its order.
+const READS: [&str; 2] = ["thread/turns/list", "thread/read"];
 
 struct Cursor {
     entries: Vec<Entry>,
@@ -185,6 +190,10 @@ impl Replay {
 /// A request the engine sends (not an answer to Codex, not a notification).
 fn is_request(frame: &Value) -> bool {
     frame.get("method").is_some() && frame.get("id").is_some_and(|id| !id.is_null())
+}
+
+fn is_read(frame: &Value) -> bool {
+    is_request(frame) && frame["method"].as_str().is_some_and(|m| READS.contains(&m))
 }
 
 /// The frame without its id.
@@ -269,9 +278,14 @@ async fn play(cursor: Arc<Mutex<Cursor>>, places: Places, mut out: mpsc::Unbound
                         let mut c = cursor.lock().unwrap();
                         let at = c.at;
                         let end = (at + LOOKAHEAD).min(c.entries.len());
+                        // Found later than its place only if it, or every frame it passes, is a read.
+                        let passes_reads = |n: usize| {
+                            (at..n).all(|k| c.matched.contains(&k) || !matches!(&c.entries[k], Entry::ExpectOutbound { frame, .. } if !is_read(frame)))
+                        };
                         let found = (at..end).find(|n| {
                             !c.matched.contains(n)
-                                && matches!(&c.entries[*n], Entry::ExpectOutbound { frame, .. } if (*n == at || is_request(&actual)) && matches(frame, &actual))
+                                && matches!(&c.entries[*n], Entry::ExpectOutbound { frame, .. } if matches(frame, &actual))
+                                && (*n == at || is_read(&actual) || passes_reads(*n))
                         });
                         if let Some(n) = found {
                             c.matched.insert(n);
@@ -299,5 +313,40 @@ async fn play(cursor: Arc<Mutex<Cursor>>, places: Places, mut out: mpsc::Unbound
             },
             Some(Entry::TranscriptStart { .. }) => advance(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn out(method: &str, id: u64) -> Entry {
+        Entry::ExpectOutbound { label: method.into(), frame: json!({"id": id, "method": method, "params": {"threadId": "t"}}) }
+    }
+
+    /// Plays `expected`, sending `sent` (methods, with ids in sending order); the failure, if any.
+    async fn play_out(expected: Vec<Entry>, sent: &[&str]) -> Option<String> {
+        let replay = Replay::new(expected, Places::new(vec![]));
+        let connection = replay.connect().await.unwrap();
+        for (id, method) in sent.iter().enumerate() {
+            let _ = connection.outgoing.send(json!({"id": id + 1, "method": method, "params": {"threadId": "t"}}).to_string());
+        }
+        for _ in 0..50 {
+            if replay.failure().is_some() || replay.cursor.lock().unwrap().at == sent.len() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        replay.failure()
+    }
+
+    #[tokio::test]
+    async fn only_a_read_of_history_comes_out_of_its_place() {
+        assert!(play_out(vec![out("thread/turns/list", 1), out("turn/start", 2)], &["turn/start", "thread/turns/list"]).await.is_none());
+        assert!(play_out(vec![out("turn/start", 1), out("thread/turns/list", 2)], &["thread/turns/list", "turn/start"]).await.is_none());
+        let reversed = play_out(vec![out("turn/interrupt", 1), out("turn/steer", 2)], &["turn/steer", "turn/interrupt"]).await;
+        assert!(reversed.is_some_and(|f| f.contains("turn/interrupt")));
     }
 }

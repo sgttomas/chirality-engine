@@ -19,6 +19,11 @@ const type = async (text: string, caret = text.length) => {
   fireEvent.change(composer(), { target: { value: text, selectionStart: caret } });
   await settle();
 };
+/** Deletes back to `text`, as Backspace does. */
+const erase = async (text: string) => {
+  fireEvent.input(composer(), { target: { value: text, selectionStart: text.length }, inputType: "deleteContentBackward" });
+  await settle();
+};
 /** Types `before`, then an `@` after it, as the person does. */
 const typeAt = async (before: string) => {
   await type(before);
@@ -104,9 +109,9 @@ describe("the threads @ offers", () => {
     expect(typedMention("mail", "mail@", 5)).toBeNull();
     expect(typedMention("Ask @Pile plan", "Ask @Pile plan ", 15)).toBeNull();
     expect(typedMention("", "Ask @", 5)).toBeNull();
-    // Typed over a selection, it opens; an `@` a deletion leaves at the caret does not.
+    // Typed over a selection, a mention's too, it opens.
     expect(typedMention("Ask the deck", "Ask @ deck", 5)).toEqual({ start: 4, end: 5, query: "" });
-    expect(typedMention("Ask @x", "Ask @", 5)).toBeNull();
+    expect(typedMention("Ask @Old", "Ask @", 5)).toEqual({ start: 4, end: 5, query: "" });
     expect(typedMention("Ask x", "Ask @x", 5)).toEqual({ start: 4, end: 5, query: "" });
     expect(mentionFrom("Ask @Pile pl", 4, 12)).toEqual({ start: 4, end: 12, query: "Pile pl" });
     expect(mentionFrom("Ask @ Pile", 4, 10)).toBeNull();
@@ -170,8 +175,12 @@ describe("mentioning a thread", () => {
     await typeAt("Ask ");
     await type("Ask @deck");
     expect(list(), "the current thread is not offered").not.toBeInTheDocument();
+    await erase("Ask @");
+    expect(list(), "closed for good, and a deletion opens nothing").not.toBeInTheDocument();
+    // A mention selected and typed over with `@` opens it again.
+    await type("Ask @Old");
     await type("Ask @");
-    expect(list(), "closed for good").not.toBeInTheDocument();
+    expect(list()).toBeInTheDocument();
     await type("Ask @ and ");
     await typeAt("Ask @ and ");
     await type("Ask @ and pile plan and the rest");

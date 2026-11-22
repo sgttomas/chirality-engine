@@ -154,7 +154,9 @@ thread the engine starts, beside the application's tools:
   page shows something or ends; no other item is added that does not fit. When
   there are more, the answer gives `before`, a cursor naming the turn and item
   it stopped at, which goes on from there however many turns have come since
-  (pages are read until that turn is found); `limit` bounds the items. Read
+  (pages are read until that turn is found, so an answer can have no items
+  and still have more); a `before` that is not one a read gave, or is too
+  long to be, is refused; `limit` bounds the items. Read
   from Codex a few turns at a time, newest first (`thread/turns/list`), each
   item built as it is added, until the answer is full, keeping nothing. Its description: read to see where a thread stands or what it did;
   message it to ask for its judgment or have it act.
@@ -196,11 +198,15 @@ subagent, so it could hear no report.
   whatever has started on the thread since. Who it goes to is known when the
   turn ends (the thread whose message the engine started it with, or else the
   assigner), and a thread's reports, from every thread, come in the order
-  their turns ended; no thread's reports wait on another's. The reads of
-  history a report needs have 30 seconds: one that fails or takes longer drops
-  that report, and the reporting thread shows why. A report whose thread or
-  recipient went from the engine (archived, its project removed) after its
-  turn ended is not made, even if it is back.
+  their turns ended; no thread's reports wait on another's. Only the reads of
+  history a report needs have a deadline, 30 seconds; a report found is
+  delivered as any message is. A report owed (the engine started the turn
+  with the recipient's message) that cannot be made, because a read failed or
+  took longer or the turn is not among the thread's latest 100, is said in that
+  turn as an error item; neither the turn nor the thread changes. A report not
+  known to be owed (an assigned thread's turn the engine did not start) says
+  nothing. A report whose thread or recipient went from the engine (archived,
+  its project removed) after its turn ended is not made, even if it is back.
 - A delivered turn runs with the receiving thread's settings as they are when
   it starts (a report's, the assigner's). The engine knows a thread's access
   once it has started a turn there; until then (after a restart, a listing)
@@ -286,7 +292,7 @@ still how threads ask for judgment or action.
 
 ## Known limits
 
-- Assignment: a thread started before the engine had its tools (or by another client) cannot assign, message or read; Codex tells its agent the call is unsupported. A turn whose start the engine did not see (another client's) reports only if its thread is assigned. A subagent's task is not in its history, so a read of one starts at its work. A `read` cursor whose turn is gone (the thread reverted under it) is refused. A mentioned thread's title and project are those the engine knew when the message was sent. A delivery waiting when the engine stops is not made, and a turn that ends because Codex stopped reports nothing. The sender's title in a mark is the one the engine knew when it sent it (none for a thread Codex has not yet titled); the interface shows the sender's current title. A message the person writes that begins with a mark is shown as from that thread; its turn reports only if that thread assigned this one. After a restart, a close is found by reading the assigner's history, once per report.
+- Assignment: a thread started before the engine had its tools (or by another client) cannot assign, message or read; Codex tells its agent the call is unsupported. A turn whose start the engine did not see (another client's) reports only if its thread is assigned. A subagent's task is not in its history, so a read of one starts at its work. A `read` cursor whose turn is gone (the thread reverted under it) is refused. A report not made is said in the turn only until the thread is read again (Codex does not keep it). A project removed and added back while a report's recipient is being resumed for it can still receive that report. A mentioned thread's title and project are those the engine knew when the message was sent. A delivery waiting when the engine stops is not made, and a turn that ends because Codex stopped reports nothing. The sender's title in a mark is the one the engine knew when it sent it (none for a thread Codex has not yet titled); the interface shows the sender's current title. A message the person writes that begins with a mark is shown as from that thread; its turn reports only if that thread assigned this one. After a restart, a close is found by reading the assigner's history, once per report.
 - A legacy-history exchange can stay doubled in a view the person switches away from while its read is pending, and can show doubled briefly before the completion read returns.
 - Text or a plan that streamed before a successful read whose history does not yet hold it (a thread opened mid-reply, a follow-up sent before a completion read returns) is missing from the view until its item completes, and stays missing if the person stops the turn first.
 - A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.
