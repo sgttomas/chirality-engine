@@ -43,7 +43,7 @@ function withInvisible(data: EngineData, after: number, done: boolean): EngineDa
   if (at.type !== "item" && at.type !== "turnStarted") throw new Error("not in a turn");
   const thread: ThreadId = at.thread;
   const turn: TurnId = at.turn;
-  const item = { id: "unseen", body: { kind: "sleep" }, done } as unknown as Item;
+  const item = { id: `unseen-${after}`, body: { kind: "sleep" }, done } as unknown as Item;
   const extra: Event = { type: "item", thread, turn, item };
   const events = [...data.events.slice(0, after), extra, ...data.events.slice(after)];
   return { ...data, events, reads: data.reads.map((r) => (r.afterEvents >= after ? { ...r, afterEvents: r.afterEvents + 1 } : r)) };
