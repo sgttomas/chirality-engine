@@ -100,19 +100,27 @@ with `"` or `\` arrives escaped.
 
 **Decoding** never unescapes through serde_json, and never uses
 `#[derive(Deserialize)]` on a frame.
-1. A pre-scan, allocation-free, checks the length and the depth.
+1. A pre-scan, allocation-free, checks the length and the depth. `new` runs
+   it on `tools` too.
 2. Hand-written visitors read every key and value as `&RawValue`
    (`serde_json`'s `raw_value` feature, enabled in step 1).
 3. A key is matched on its raw text, so an escaped key matches nothing.
-4. An identity, `model`, `modelProvider` and `cwd` are unescaped by the
-   engine's own decoder into a fixed stack buffer (256 bytes; 1,024 for
-   `cwd`). The decoder handles `\"`, `\\`, `\/`, the five control escapes and
-   `\u` pairs, and stops at the buffer's end. Only then is the string owned.
+4. An identity, `model`, `modelProvider`, `cwd` and an error's `message` are
+   unescaped by the engine's own decoder into a fixed stack buffer (256
+   bytes; 1,024 for `cwd` and `message`). The decoder handles `\"`, `\\`,
+   `\/`, the five control escapes and `\u` pairs, and stops at the buffer's
+   end. Only then is the string owned. A `message` may hold control
+   characters; an identity may not.
 5. Codex's own constants are taken only without escapes, since none
    contains `"`, `\` or a control character. These are `method`, `item.type`,
-   `status.type`, `turn.status`, `approvalPolicy` and `sandbox.type`.
-6. A string out of bound is a fault for an identity, and `Other` for a
-   reported fact.
+   `status.type`, `turn.status`, `approvalPolicy`, `sandbox.type` and remote
+   control's `status`; an escaped or unknown one is `Other`.
+6. Integers (`id`, `error.code`) are parsed from the raw text by the engine,
+   not by serde_json, whose `float_roundtrip` feature (enabled in SWBPIPE's
+   workspace) puts long digit runs in its scratch.
+7. A string out of bound faults when it is a frame's, reply's or turn's
+   required identity or an error's `message`, and is `Other` for a reported
+   fact. A `callId` out of bound makes its call `Refused`, as below.
 
 So serde_json's scratch holds only `ignore_value`'s nesting stack, at most
 127 bytes. The engine writes through one writer: a buffer of 131,071 bytes,
@@ -125,8 +133,10 @@ Methods run in their caller's task.
   its request until its future takes the reply, or until the future is
   dropped. The reply waits in the slot, not in a channel. So a method is in
   flight while its reply is uncollected, and a second call is `Invalid`.
-- A caller that gives up frees the slot. Its RPC id stays pending until the
-  reply, which is then discarded.
+- A caller that drops its future after the reply arrived frees the slot. One
+  that drops it before keeps the method in flight: the slot holds the RPC id
+  until the reply arrives, which is then discarded and frees the slot. So at
+  most four RPC ids are ever pending, one per slot.
 - **`connect`** writes `initialize` with `clientInfo` and `capabilities:
   {experimentalApi: true}`, which `thread/start`'s `environments` needs. The
   consumer writes `initialized` when it applies the reply. `connect` can be
