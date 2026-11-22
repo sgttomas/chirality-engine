@@ -93,18 +93,26 @@ one of these:
   `message`.
 
 Other members are ignored, and anything else faults. An identity is a
-non-empty string of at most 256 bytes, with no control characters and no
-escapes.
+non-empty string of at most 256 bytes, unescaped, with no control
+characters, as SWBPIPE defines it. RPC ids, `callId`s, and thread, turn and
+item ids are identities: Codex passes a provider's `callId` through, and one
+with `"` or `\` arrives escaped.
 
-**Decoding** never unescapes and never uses `#[derive(Deserialize)]` on a
-frame.
+**Decoding** never unescapes through serde_json, and never uses
+`#[derive(Deserialize)]` on a frame.
 1. A pre-scan, allocation-free, checks the length and the depth.
 2. Hand-written visitors read every key and value as `&RawValue`
    (`serde_json`'s `raw_value` feature, enabled in step 1).
 3. A key is matched on its raw text, so an escaped key matches nothing.
-4. A bounded string is taken only when its raw text has no backslash and fits
-   its bound. Otherwise it is out of bound: a fault for an identity, `Other`
-   for a reported fact.
+4. An identity, `model`, `modelProvider` and `cwd` are unescaped by the
+   engine's own decoder into a fixed stack buffer (256 bytes; 1,024 for
+   `cwd`). The decoder handles `\"`, `\\`, `\/`, the five control escapes and
+   `\u` pairs, and stops at the buffer's end. Only then is the string owned.
+5. Codex's own constants are taken only without escapes, since none
+   contains `"`, `\` or a control character. These are `method`, `item.type`,
+   `status.type`, `turn.status`, `approvalPolicy` and `sandbox.type`.
+6. A string out of bound is a fault for an identity, and `Other` for a
+   reported fact.
 
 So serde_json's scratch holds only `ignore_value`'s nesting stack, at most
 127 bytes. The engine writes through one writer: a buffer of 131,071 bytes,
@@ -112,9 +120,13 @@ allocated once, that refuses a frame past it without allocating.
 
 **One consumer.** The engine's one task, spawned in `connect`, takes each
 frame from `from_codex` and handles it before the next, never awaiting.
-Methods run in their caller's task. A caller that gives up leaves its RPC id
-pending until the reply, which is then discarded. Each method has at most one
-RPC in flight.
+Methods run in their caller's task.
+- Each method has one slot in the engine's state. A call holds the slot from
+  its request until its future takes the reply, or until the future is
+  dropped. The reply waits in the slot, not in a channel. So a method is in
+  flight while its reply is uncollected, and a second call is `Invalid`.
+- A caller that gives up frees the slot. Its RPC id stays pending until the
+  reply, which is then discarded.
 - **`connect`** writes `initialize` with `clientInfo` and `capabilities:
   {experimentalApi: true}`, which `thread/start`'s `environments` needs. The
   consumer writes `initialized` when it applies the reply. `connect` can be
@@ -285,8 +297,8 @@ pub struct OpenedThread {
     pub model_provider: Reported<String>,  // result.modelProvider
     pub cwd: Reported<String>,             // result.cwd
 }
-/// `Absent`: missing or `null`. `Other`: present but not of this type, or a
-/// string over 256 bytes (1,024 for `cwd`) or with an escape.
+/// `Absent`: missing or `null`. `Other`: present but not of this type, a string
+/// over 256 bytes once unescaped (1,024 for `cwd`), or a constant with an escape.
 pub enum Reported<T> { Absent, Value(T), Other }
 ```
 
@@ -328,10 +340,9 @@ faults at the next `try_send`, so an idle loss is noticed at the next write.
     `EmbeddedEvents`. `Closed` stays readable without holding completion.
   - The fixed row goes when the last of `EmbeddedEngine`, `EmbeddedEvents`
     and `Finished` drops.
-- **A reply put in a caller's oneshot is the caller's from then on.** That is
-  at most 4 KiB, and four replies in all. The host keeps 16 KiB of its
-  reservation for them until those futures are polled or dropped, so an
-  unpolled caller never holds `finished()`.
+- **Replies stay in their slots,** at most four of at most 4 KiB, until
+  their futures take them. Close empties the slots, so an unpolled caller
+  never holds `finished()`. Such a caller then gets `Closed`.
 - **Frames left in `from_codex`** are freed with the receiver.
 - **Frames in `to_codex`** are the host's. After `Closed` it discards them,
   closes Codex's stdin, then waits for and reaps Codex. The engine's
@@ -361,7 +372,7 @@ of at least 16 bytes, with old plus new counted while it grows. A charge past
 | The event ring | class(`event_bytes` / 512 × 128) | 256 KiB |
 | Unread events' strings | `event_bytes` | 1,024 KiB (theirs to set) |
 | The record: preallocated 56-byte entries, and two identities per request | class(`calls_per_turn` × 56) + `calls_per_turn` × 512 | 576 KiB |
-| Replies until delivered | 4 × 4 KiB | 16 KiB |
+| Replies until collected, one slot per method | 4 × 4 KiB | 16 KiB |
 | The writer buffer and one copy being sent | 2 × 128 KiB | 256 KiB |
 | Configuration until `open_thread` writes it: tools, description, `work_dir` | 128 + 4 + 1 KiB | 133 KiB |
 | Fixed: control block, consumer task, terminal slot, namespace, tool names | 64 KiB | 64 KiB |
@@ -369,7 +380,8 @@ of at least 16 bytes, with old plus new counted while it grows. A charge past
 
 Step 1's counting-allocator test drives adversarial frames down every path:
 - depth 127 and 128;
-- escaped keys and strings;
+- escaped keys, identities and constants;
+- replies left uncollected across repeated calls;
 - a ring filled, drained and refilled with different payload sizes;
 - close on every path, before and after `connect`.
 
