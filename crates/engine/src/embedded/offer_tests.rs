@@ -7,7 +7,7 @@
 
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -88,19 +88,38 @@ fn session(root: &Path, offer: &Value, port: u16) -> (std::path::PathBuf, std::p
     (root.join("home"), root.join("project"))
 }
 
+/// SWBPIPE's rule (as in `tests/support`): whether an event ends the session.
+fn ends_session(event: &EmbeddedEvent) -> bool {
+    match event {
+        EmbeddedEvent::RemoteControl { status } => *status != RemoteControl::Disabled,
+        EmbeddedEvent::Notification { method, item, status, .. } => match method {
+            Method::ThreadStarted | Method::TurnStarted | Method::TurnCompleted => false,
+            Method::ThreadStatus => !matches!(status.as_deref(), Some("active" | "idle")),
+            Method::ItemStarted | Method::ItemCompleted => {
+                !matches!(item.as_ref().and_then(|i| i.item_type.as_deref()), Some("userMessage" | "agentMessage" | "reasoning" | "dynamicToolCall"))
+            }
+            Method::AgentMessageDelta | Method::ReasoningSummaryDelta | Method::ReasoningSummaryPart | Method::ReasoningDelta => false,
+            Method::TokenUsage | Method::RateLimits | Method::Retrying => false,
+            Method::ThreadClosed | Method::Error | Method::Warning | Method::ConfigWarning => true,
+        },
+        EmbeddedEvent::Call { .. } => false,
+        EmbeddedEvent::Refused { .. } | EmbeddedEvent::Unheld { .. } | EmbeddedEvent::Unmapped { .. } | EmbeddedEvent::Closed { .. } => true,
+    }
+}
+
+/// The next event, failing on one that ends the session.
+async fn next(events: &mut EmbeddedEvents) -> EmbeddedEvent {
+    let event = events.recv().await.expect("an event");
+    assert!(!ends_session(&event), "an ending event: {event:?}");
+    event
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_fresh_request_offers_what_was_recorded() {
     let Some(codex) = codex() else { return };
     let offer = fixture("swbpipe-namespace-offer.json");
     let stub = Stub::start().await;
-    let seen: Arc<Mutex<Option<Value>>> = Arc::default();
-    stub.script("offer", {
-        let seen = seen.clone();
-        Arc::new(move |request| {
-            seen.lock().unwrap().get_or_insert_with(|| request.body["tools"].clone());
-            Reply::Items(vec![message("msg_offer", "Done.")])
-        })
-    });
+    stub.script("offer", Arc::new(|_| Reply::Items(vec![message("msg_offer", "Done.")])));
     let run = Run::new(&scratch(), "embedded-offer");
     let (codex_home, work) = session(&run.root, &offer, stub.port);
     let dir = |name: &str| run.root.join(name);
@@ -151,14 +170,14 @@ async fn a_fresh_request_offers_what_was_recorded() {
     };
     let turn = tokio::time::timeout(Duration::from_secs(60), async {
         engine.connect().await.unwrap();
+        while next(&mut events).await != (EmbeddedEvent::RemoteControl { status: RemoteControl::Disabled }) {}
         engine.open_thread(&options).await.unwrap();
-        let turn = engine.send_text("STUB[offer]").await.unwrap();
-        while let Some(event) = events.recv().await {
-            if let EmbeddedEvent::Notification { method: Method::TurnCompleted, status, .. } = event {
+        engine.send_text("STUB[offer]").await.unwrap();
+        loop {
+            if let EmbeddedEvent::Notification { method: Method::TurnCompleted, status, .. } = next(&mut events).await {
                 return status;
             }
         }
-        panic!("events ended before the turn, {turn:?}");
     })
     .await;
     engine.close();
@@ -169,8 +188,12 @@ async fn a_fresh_request_offers_what_was_recorded() {
         child.kill().await.unwrap();
     }
     assert_eq!(turn.expect("the turn ended in time").as_deref(), Some("completed"));
-    let tools = seen.lock().unwrap().take().expect("a provider request");
-    assert_eq!(tools, fixture("swbpipe-namespace-request.json"), "the recorded request");
-    offers_the_namespace_only(&tools, &offer);
+    // Every request the model saw, retries included.
+    let bodies = std::mem::take(&mut *stub.bodies.lock().unwrap());
+    assert!(!bodies.is_empty(), "a provider request");
+    for body in &bodies {
+        assert_eq!(body["tools"], fixture("swbpipe-namespace-request.json"), "the recorded request");
+        offers_the_namespace_only(&body["tools"], &offer);
+    }
     let _ = std::fs::remove_dir_all(&run.root);
 }
