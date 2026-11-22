@@ -70,7 +70,7 @@ give it another home, or run Codex itself and give the engine its transport
 - **Assignment between threads:** the engine's own tools (namespace `chirality`) on every thread it starts, with which one thread assigns work to another, ordinary thread, threads message each other, and one reads another; see below.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
-- **Embedding:** an application that contains the agent itself runs Codex and gives the engine its transport: an embedded engine, with its own tools only, one rule for what Codex asks, and bounded memory; see below.
+- **Embedding:** an application that runs Codex itself gives the engine its transport: an embedded engine, with one thread, its own tools only, one rule for what Codex asks, and bounded memory; see below.
 - **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds. A read is Codex's history, numbered from before the read: every event after that number applies to it (an item it has as done stays done; text for an item it lacks begins that item), and when a turn of the thread in view completes, the thread is read again (keeping that turn's plan, which Codex leaves out of history). The engine keeps no copy of the conversation: text Codex did not keep (of a reply a Stop cut short) is in the live view, and not in the thread read again.
 
 The API is Rust types. Bindings for an application's interface are generated
@@ -294,7 +294,7 @@ still how threads ask for judgment or action.
 
 ## Embedding under containment
 
-Designed 2026-11-22 for SWBPIPE, revised after two rounds of review; not yet
+Designed 2026-11-22 for SWBPIPE, revised after three rounds of review; not yet
 built.
 
 SWBPIPE runs one Codex per session, with one ephemeral thread, no built-in
@@ -303,210 +303,202 @@ Its host spawns, frames, observes and cleans up Codex, and the engine speaks
 JSON-RPC over the host's transport. All of this is opt-in: an ordinary engine
 behaves as now for the person (it reports more, shown only where asked).
 
-**An embedded engine.** The types are in `api/embedded.rs`.
+**The surface** (`api/embedded.rs`).
 
 ```rust
-pub fn embedded(config: EmbeddedConfig) -> Result<(Engine, EmbeddedEvents)>; // then `connect`
+pub fn embedded(config: EmbeddedConfig) -> Result<(Engine, EmbeddedEvents)>;
+/// What the host reserves before `connect`; see Memory.
+pub const fn embedded_max_bytes(limits: &EmbeddedLimits) -> u64;
 
 pub struct EmbeddedConfig {
     pub transport: HostTransport,
-    /// Holds the projects list; one project, the session's work folder.
-    pub state_dir: PathBuf,
-    /// The agent's only tools besides what the home's settings leave it (SWBPIPE's: namespace `swbpipe`).
-    pub tools: Option<AppTools>,
+    pub work_dir: PathBuf, // the thread's `cwd`
+    pub tools: AppTools,   // the agent's only tools (SWBPIPE's: namespace `swbpipe`)
+    pub limits: EmbeddedLimits,
 }
 /// One JSON-RPC message per frame, without its newline.
 pub struct HostTransport {
     pub from_codex: tokio::sync::mpsc::Receiver<String>,
     pub to_codex: tokio::sync::mpsc::Sender<String>,
 }
-/// The engine's only event stream; `subscribe` on an embedded engine gives a closed receiver.
-pub struct EmbeddedEvents(/* bounded, see Memory */);
+/// `embedded` refuses a value outside its range.
+pub struct EmbeddedLimits {
+    pub pending_calls: u32,  // 1..=16 application calls outstanding
+    pub calls_per_turn: u32, // 1..=1,024 requests from Codex per turn, refused ones included
+    pub argument_bytes: u32, // 1..=65,536 bytes of a call's arguments
+    pub event_bytes: u32,    // 256 KiB..=16 MiB of events not yet received
+}
+impl EmbeddedEvents {
+    pub async fn recv(&mut self) -> Option<Event>; // None after the terminal event
+    pub fn try_recv(&mut self) -> Result<Event, TryRecvError>;
+}
 ```
 
-The engine never spawns, signals or reaps. It is the existing `Connector`
-seam with one connection, the host's, and never reconnects. Not in an
-embedded engine: the `chirality` tools, assignment, deliveries and reports.
-These are each `Invalid`: sign-in, sign-out, cancelling a sign-in,
-`start_thread`, `fork` and `revert`.
+The engine it returns has only `connect` (`initialize`, with no account or
+model reads), `open_thread` once, `send` (text only), `interrupt`, `close()`
+(also on dropping the last handle), `finished()`, `shutdown()` (close, then
+`finished()`), `snapshot()` (holding only `remoteControl`), and the event
+stream. Everything else is `Invalid`, answers included. It never spawns,
+signals or reaps, touches no file, and has no `chirality` tools, assignment,
+deliveries or reports.
 
-**Frames.** A valid frame is one JSON object, of at most 128 KiB, that is
-exactly one of the following (other members, such as Codex's `emittedAtMs`,
-are ignored):
-- a request: an integer or string `id`, a string `method`, optional object
-  `params`, and no `result` or `error`;
-- a notification: a string `method`, optional object `params`, and no `id`;
-- a response: an integer `id` the engine has in flight, no `method`, and
+**Frames.** The host owns line framing, duplicate keys and numeric fidelity;
+its 128 KiB includes the newline both ways, so a frame's text is at most
+131,071 bytes. A valid frame is one JSON object that is exactly one of these
+(other members, such as Codex's `emittedAtMs`, are ignored):
+- a request: an integer `id` or a string one (non-empty, no control
+  characters, at most 256 bytes), a string `method`, optional object
+  `params`, no `result` or `error`;
+- a notification: a string `method`, optional object `params`, no `id`,
+  `result` or `error`;
+- a response: an integer `id` in flight, no `method` or `params`, and
   exactly one of `result` or an `error` object with an integer `code` and a
   string `message`.
 
-Anything else faults the transport, including a batch, a primitive, trailing
-data, a response with neither or both, or a bad or unknown `id`. Frames are
-parsed borrowed: the envelope and its `params` as raw text, and items into
-the engine's types. A raw field is a copy of its exact text. No whole frame
-becomes a `serde_json::Value`.
+Anything else faults the transport. A frame the engine writes is serialized
+into a writer that faults at 131,071 bytes, before allocating past them.
 
-**One queue, in wire order.**
-- The reader never blocks. Every frame, replies included, goes with
-  `try_send` into one bounded queue, and a full queue is a fault.
-- One consumer handles the queue in wire order and never awaits an RPC:
-  there are no account reads, and no handler waits on Codex.
-- A reply completes its caller when the consumer reaches it. Its effects on
-  admission (the thread `thread/start` returned, the turn `turn/start`
-  returned) are applied by the consumer before the next frame. So
-  `thread/started`, which the pin sends right after the `thread/start`
-  reply, meets a thread already held.
-- `connect` sends `initialize` and `initialized`, then `model/list`, and
-  returns when that reply is handled. Everything Codex sent before it has
-  been handled, including the remote-control status the pin sends as it
-  answers `initialize`.
-- Ordinary engines keep their unbounded queue. Their `connect` handles what
-  is queued once its last start reply is in, so the snapshot holds the
-  remote-control status there too, and the recordings are regenerated once.
+**One consumer, in wire order.** There is no reader task or engine queue:
+one consumer handles each frame from `from_codex` before the next, never
+awaiting an RPC or a lock held across one (the thread's send lock).
+- A reply's effect on admission (the thread `thread/start` returned, the
+  turn `turn/start` returned) is applied before its caller completes. At the
+  pin each reply came just before its `thread/started` or `turn/started`.
+- A turn is admitted only from its reply, and not if it has completed, or
+  the thread closed, by then. A turn notification on the held thread naming
+  a turn other than the admitted one, the last ended one, or (with a
+  `turn/start` in flight) the first new one faults, as does a reply naming
+  another than that first new one.
+- A caller that gives up leaves its id pending until the reply, then
+  discarded; at most one per operation.
+- `thread/closed` revokes admission for the rest of the session.
 
-**Teardown and faults.**
-- `Engine` holds a handle-only guard; the engine's own tasks hold `Inner`.
-  Dropping the application's last handle closes the engine, as `shutdown`
-  does.
-- Closing is synchronous and awaits nothing (no attempts, no
-  `tool_calls.idle()`), so it works on current-thread and multi-thread
-  runtimes alike:
-  - it drops `to_codex` from its slot (`opening` holds it during `connect`);
-  - it aborts the reader and the consumer, fails every waiter and cancels
-    every handler;
-  - it publishes `Codex { status: Failed }`.
-- After closing, under the same lock, nothing more is published or written.
-- `to_codex` is sent to only with `try_send`. A full or closed channel faults
-  the transport, as does the end of `from_codex`; the reader also wakes on
-  `to_codex.closed()`, so an idle close is noticed. No send's result is
-  discarded.
-- A fault closes the engine, with the reason in `Failed { message }`.
+**Close.** On the wire, close is the end of `to_codex`: the engine drops its
+only sender, and Codex exits at the end of its input (at the pin, exit 0
+within 10 ms, mid-turn). No RPC comes first: `thread/archive` refuses an
+ephemeral thread ("no rollout found"), and `thread/unsubscribe` leaves it
+loaded, still taking turns. The host waits for Codex to exit, as now.
 
-**Memory.** Every buffer an embedded engine keeps is bounded in bytes.
-Reaching a bound faults the transport; nothing is allocated past it. Sizes
-are counted as SWBPIPE counts them: each allocation at its class, the next
-power of two and at least 16 bytes. A computed size walks a value (strings
-and vectors by capacity, `Value` nodes at 32 bytes, B-tree nodes whole).
+Closing is synchronous and awaits nothing, on either runtime flavour. Under
+the publication lock it marks the engine closed, so nothing more is
+published or written; it takes `to_codex` from its slot (before `connect`,
+the whole `HostTransport`), fails every waiter (a waiting `connect` returns
+`Closed`), aborts the consumer and the handlers, and puts the terminal event
+in its own slot: `Codex { status: Stopped }`, or `Failed { message }`. The
+faults: an invalid frame, a charge past the budget, the end of `from_codex`,
+and a full or closed `to_codex` at a `try_send` (every send is one), so an
+idle close is noticed at the next send. Since aborting only schedules
+cancellation, `finished()` resolves once every task has ended and every
+charge is released, unread events included (released as the host takes
+them or drops `EmbeddedEvents`); the host keeps its reservation until then.
 
-| Buffer | Bound | Measured as |
+**Memory.** Every byte the engine holds is charged against one budget before
+it is allocated, at SWBPIPE's prices: each allocation at its class (the next
+power of two, at least 16 bytes), old plus new while one grows. A charge
+past the budget faults the transport instead. The budget is
+`embedded_max_bytes(&limits)`:
+
+| Charge | Bound | SWBPIPE |
 | --- | --- | --- |
-| Frames queued | 512 KiB | frame text |
-| The frame being handled (one at a time) | 32 × its text ≤ 4 MiB | design bound; the counting-allocator test in step 1 enforces it on adversarial frames for every decode path |
-| Admitted calls: at most 16, arguments at most 64 KiB of text each | 16 MiB | computed size of their `arguments` `Value` |
-| Events not yet taken by the host | 4 MiB | computed size |
-| Snapshot and engine state (one thread, models, call identities of the running turn, kept per turn) | 1 MiB | computed size |
-| Fixed: tasks, channels, maps | 1 MiB | |
-| **Sum** | **26.5 MiB** (27,787,264 bytes) | |
+| The frame in hand (a capacity over 128 KiB faults) and, before decoding, 32 × it for what it decodes to | 33 × 128 KiB | 4,224 KiB |
+| Admitted calls' arguments, as raw text | `pending_calls` × class(`argument_bytes`) | 512 KiB |
+| The turn's RPC ids and `callId`s | `calls_per_turn` × 576 B | 576 KiB |
+| Events not yet received | `event_bytes` | 1,024 KiB (theirs to set) |
+| The frame being written, and the send in flight | 2 × 128 KiB | 256 KiB |
+| Fixed: tasks, channels, the terminal slot, the thread, the turn | 1 MiB | 1,024 KiB |
+| **Sum** | | **7,616 KiB** (7,798,784 bytes) |
 
-- **Removed in embedded mode, so they need no bound:**
-  - the broadcast ring, replaced by one stream with no clone per subscriber;
-  - whole-frame `Value`s;
-  - replies held for their callers, now decoded by the consumer;
-  - file-change diffs kept for approvals;
-  - call identities of turns that have ended;
-  - `Lagged`: a full stream faults instead, so events cannot be lost.
-- **Why a call's arguments get 16 MiB:** a `Value` takes up to 109× its
-  text, as measured at serde_json 1.0.154 on nested one-key objects. Its
-  structural limit is one B-tree leaf, about 600 bytes, per 5 bytes of
-  `{"":` nesting. Allocation classes can double that, so the bound is 256 ×
-  64 KiB per call. The 16 MiB bounds all calls together by computed size.
-- **Host-side, not in the sum:** `to_codex`'s capacity, with each frame the
-  engine writes at most 128 KiB (a larger one faults), and the handler's own
-  allocations.
+- What a frame produces and the engine keeps (a call's arguments, an event,
+  a reply awaiting its caller, an identity) moves to its own row out of the
+  frame's charge; the rest is released when decoding ends.
+- Decoding builds no `serde_json::Value` (measured up to 109× its text) and
+  no serde `Content`, so no internally tagged enum: items, statuses and
+  inputs dispatch on `type` by peeking. Opaque parts (arguments, `source`,
+  `sandbox`, request ids, unmapped items) stay raw (`serde_json`'s
+  `raw_value`), and unknown fields are skipped unbuffered.
+- **Why 32×.** A decoded vector's element takes at most 8 bytes per byte of
+  its shortest text (a 24-byte `String` for `""` and its comma), since every
+  struct field kept is required. Doubling, class and old-plus-new add 2 ×
+  4/3 × 1.5: 32 in all. Step 1's counting-allocator test checks every decode
+  path on adversarial frames.
+- Not charged: the host's own allocations, its handler's included.
+- Gone: the broadcast ring (`subscribe` gives a closed receiver), history,
+  listings, account, models, files, and `Lagged` (a full stream faults).
 
-**The one rule.** An embedded engine gives the application an
-`item/tool/call` only if all of these hold:
-- it decodes, with `arguments` present;
-- it names the application's namespace and one of its tools;
-- it is on the thread id an `open_thread` reply returned;
-- it is in the turn id a `send` reply returned, while that turn runs;
-- its `callId` is new in that turn, under any RPC id;
-- the turn has had fewer than 1,024 calls;
-- its arguments are at most 64 KiB;
-- fewer than 16 calls are outstanding.
+**Stop.** `interrupt` waits for the turn to end on a `watch` of the store's
+sequence number (bumped on every change, closed on teardown), on both kinds
+of engine, instead of a subscription. A close ends the wait with `Closed`.
+The Stop-then-send test runs on both.
 
-Nothing else is ever held: same-folder `thread/started`, listings and
-subagents are not adopted. Everything else is refused, including approvals,
-questions, `chirality.*`, other namespaces or tools, malformed calls, calls
-on a closed thread, elicitations, token refreshes, attestations, the legacy
-approvals and unknown methods. The engine first publishes
+**The one rule.** Every request from Codex counts toward `calls_per_turn`,
+and its RPC id and `callId` go in the turn's record before dispatch (cleared
+when the next send starts a turn); a repeat, or a request past the count,
+faults. The application gets an `item/tool/call` only if it has
+`arguments`, names one of its tools, is in the admitted turn on the held
+thread, has arguments within `argument_bytes`, and fewer than
+`pending_calls` are outstanding. Any other request is refused: the engine
+publishes
 
 ```rust
 Refused { thread: Option<String>, method: String, json: String }, // json: the request's params
 ```
 
 then writes `{"id": …, "error": {"code": -32601, "message": "not supported by
-this client"}}`, which has no `result`. An embedded engine never answers a
-request with a `result` except the application's own (`Taken::Refused`
-becomes this refusal). `thread` here, and in `Unheld` and `Unmapped`, is
-taken from `threadId`, `thread.id` or `conversationId`. The test sends each
-kind of request. At the moment its answer frame reaches `to_codex`, the test
-checks that the numbered `Refused` is already published and that the frame
-has `error.code == -32601` and no `result`.
+this client"}}`. Only the application's call gets a `result`
+(`Taken::Refused` becomes this refusal); schema checks stay in the handler.
+The test sends each kind of request and checks that `Refused` is published
+before the answer, which has `error.code == -32601` and no `result`.
+`thread`, here and below, is from `threadId`, `thread.id` or
+`conversationId`.
 
-Assignment is coupled in at these places, each off in an embedded engine:
-1. `tools::specs` (the `chirality` spec on `thread/start`);
-2. `tools::on_tool_call` (`chirality` dispatch, now under the rule);
-3. `mapping::item`, `mapping::turn` and `threads::list_turns` (a `chirality` call maps as `ToolCall`);
-4. `mapping::user_message` and `title_from_preview` (no mark or thread-reference parsing);
-5. `events.rs` on `item/started` (`assignments.marked_message`);
-6. `events.rs` on `turn/completed` (`take_opened`, `assigned_by`, `report_in_order`);
-7. `events.rs` `take_thread`, `adopt_subagent`, and `threads.rs` `list_pages` (adoption, `needs_confirming`);
-8. `turns.rs` (marks, `assignments.starting/started`, deliveries), and a `Message` naming `threads` (`Invalid`).
+Assignment is off at each place it is coupled in: `tools::specs` and
+`tools::on_tool_call`; `mapping::{item, turn, user_message}`,
+`title_from_preview` and `threads::{list_turns, list_pages}`; in `events.rs`,
+the `item/started` mark, the `turn/completed` reports, `take_thread`,
+`adopt_subagent` and `thread_live` (which would clear a closing); and in
+`turns.rs`, marks, assignments and deliveries.
 
-**A thread with options.** Embedded engines only.
+**The thread.**
 
 ```rust
-pub async fn open_thread(&self, project: &ProjectId, options: ThreadOptions) -> Result<OpenedThread>;
+pub async fn open_thread(&self, options: ThreadOptions) -> Result<OpenedThread>;
 
 pub struct ThreadOptions {
     pub model: Option<String>,
     pub provider: Option<String>,
     pub base_instructions: Option<String>,
-    pub ephemeral: bool,
-    pub policy: Option<ThreadPolicy>,
-    /// `Some(vec![])`: none; `None`: Codex's default.
-    pub environments: Option<Vec<EnvironmentParams>>,
-    /// Codex's internal raw events (`experimentalRawEvents`), published as `RawResponseItem`.
-    pub raw_response_items: bool,
+    pub policy: ThreadPolicy,
+    pub raw_response_items: bool, // `experimentalRawEvents`, published as `RawResponseItem`
 }
 pub struct ThreadPolicy { pub sandbox: SandboxMode, pub approval: ApprovalPolicy }
 pub enum SandboxMode { ReadOnly, WorkspaceWrite, DangerFullAccess }
 pub enum ApprovalPolicy { Untrusted, OnRequest, Never }
-pub struct EnvironmentParams { pub environment_id: String, pub cwd: PathBuf, pub runtime_workspace_roots: Option<Vec<PathBuf>> }
 
 pub struct OpenedThread {
     pub thread: ThreadId,
-    /// `None` for Codex's granular policy.
-    pub approval_policy: Option<ApprovalPolicy>,
+    pub approval_policy: Option<ApprovalPolicy>, // None: Codex's granular policy
     pub sandbox: ReportedSandbox,
     pub ephemeral: bool,
-    /// `None` when Codex does not say.
-    pub environments: Option<Vec<ThreadEnvironment>>,
+    pub environments: Option<Vec<ThreadEnvironment>>, // None: Codex does not say
 }
-/// `kind`: Codex's `sandbox.type`. `network_access`: `Some` only when Codex says
-/// (`networkAccess` true or false; `externalSandbox` `enabled` or `restricted`).
+/// `network_access`: `Some` only when Codex says.
 pub struct ReportedSandbox { pub kind: String, pub network_access: Option<bool> }
 pub struct ThreadEnvironment { pub environment_id: String, pub cwd: PathBuf, pub runtime_workspace_roots: Vec<PathBuf> }
 ```
 
-- The first turn is the application's `send`, made once it has checked the
-  answer and seen remote control disabled.
-- A policy thread is marked in `ThreadEntry`. Its turns send no approval
-  policy, sandbox or reviewer (Codex keeps the thread's), and the access in
-  `TurnSettings` is ignored and never recorded: `take_thread`,
-  `refresh_thread` and turns keep its `settings` `None`, and `access_known`
-  false. Nothing can widen the policy, since an embedded engine has no
-  assignment, fork, revert or resume.
-- `thread/closed` revokes admission and clears the running turn. A later
-  `send` on that thread is `Invalid`, never a resume.
-- An ephemeral thread is read as one Codex has not kept until its first turn
-  ends. After that a read is refused, and the view keeps what the events
-  made.
+- `thread/start` carries `cwd`, `ephemeral: true`, `environments: []`,
+  `dynamicTools`, the policy and the options. A second `open_thread` is
+  `Invalid`; a cancelled one still uses up the thread. After
+  `thread/closed`, `send` is `Invalid`.
+- The first turn is the application's `send`, once it has checked the answer
+  and seen remote control disabled. Turns name no policy, so Codex keeps the
+  thread's; their access is never recorded (`settings` `None`, no
+  `starting`, `access_known` false).
 
 **Remote control.**
 
 ```rust
+#[serde(rename_all = "camelCase")]
 pub enum RemoteControl { Disabled, Connecting, Connected, Errored, Other } // Other: unknown or malformed
 // Snapshot, now #[serde(rename_all = "camelCase")]
 #[serde(default, skip_serializing_if = "Option::is_none")] #[ts(optional)]
@@ -515,40 +507,45 @@ pub remote_control: Option<RemoteControl>,
 RemoteControl { status: Option<RemoteControl> },
 ```
 
-The hold is the host's: it sends nothing until it has seen `Disabled`.
+The host sends nothing until it has seen `Disabled`. An ordinary engine's
+`connect` handles what is queued once its last start reply is in, so its
+snapshot holds the status too; the recordings are regenerated once.
 
-**Nothing built-in unseen.** In an embedded engine, every frame from Codex
-ends in exactly one of the following.
+**What each frame becomes**: the first of these that applies, and only it.
+1. A fault: an invalid frame, a repeated id or `callId`, a request past the count.
+2. A response: its caller.
+3. An admitted `item/tool/call`: the handler.
+4. Any other request: `Refused`.
+5. A notification naming a thread not held: `Unheld { thread, method, json }`.
+6. With `raw_response_items`, `rawResponseItem/completed`: `RawResponseItem { thread: ThreadId, turn: TurnId, json }`.
+7. A notification the engine maps on the held thread, or `remoteControl/status/changed`: its events, at least one.
+8. `Notice { thread: Option<ThreadId>, notice }`, below.
+9. Anything else, including a notification that does not decode, an item with no `id`, and a mapping that yields no event: `Unmapped { method, thread: Option<String>, json }`.
 
-| Disposition | What it is |
-| --- | --- |
-| Its mapped events | A notification the engine maps on a held thread, or a known global (`remoteControl/status/changed`) |
-| A reply's caller | |
-| `Refused` | Any request not admitted |
-| `Unheld { thread, method, json }` | Any notification naming a thread that is not held |
-| `Unmapped { method, thread: Option<String>, json }` | Anything else: hooks, MCP startup status, warnings, token usage and rate limits, account notices, malformed or unknown notifications, and an item with no `id` (an item without one cannot be merged into a view) |
-| `RawResponseItem { thread, turn, json }` | With `raw_response_items`, each `rawResponseItem/completed`. This is the only place code-mode `exec` and `wait` show, as a `custom_tool_call` and a `function_call` in namespace `functions`, each with its output. |
+```rust
+pub enum Notice {
+    ConfigWarning { summary: String, details: Option<String> }, // configWarning
+    Warning { message: String },                                 // warning
+    Retrying { message: String },                                // error with willRetry
+    Status { status: String },                                   // thread/status/changed: its type
+    TokenUsage { json: String },                                 // thread/tokenUsage/updated
+    RateLimits { json: String },                                 // account/rateLimits/updated
+}
+```
 
-Nothing falls through `_ => {}`, and no frame yields two of these.
+An embedded engine maps messages, reasoning, the plan and the application's
+calls; any other item, and on either engine one that does not decode, is
+`ItemBody::Other { codex_type, json }`, kept raw. Items carry `codex_type:
+Option<String>` (`None` for items the engine makes) and `AgentMessage`
+`delivery` (`"async"`), both optional and omitted when absent.
 
-- Items carry Codex's type:
-  `#[serde(default, skip_serializing_if = "Option::is_none")] #[ts(optional)] codex_type: Option<String>`.
-  It is `None` only for items the engine makes (a plan, an error).
-- An item that does not decode or map is
-  `ItemBody::Other { codex_type: String, json: String }`.
-- `AgentMessage` keeps `delivery` with the same attributes (`"async"` from
-  `send_message_to_user_async`).
-- The stream never loses an event: a full stream faults, and numbers stay
-  contiguous.
-
-| Built-in activity | Arrives as (`codex_type`) |
-| --- | --- |
-| `commandExecution`, `fileChange`, `webSearch`, `mcpToolCall` | `Command`, `FileChange`, `WebSearch`, `ToolCall` |
-| `collabAgentToolCall`, `subAgentActivity` | `SubagentTool`, `Subagent`, or `Other` when the engine does not name it |
-| `imageView`, `sleep`, `imageGeneration`, any other | `Other` |
-| `send_message_to_user_async` | `AgentMessage` with `delivery: "async"` |
-| hooks, MCP startup | `Unmapped` |
-| code-mode `exec`, `wait` | `RawResponseItem` when asked; otherwise nothing |
+**SWBPIPE's rule**, which the host applies: `Notice::Status`, `TokenUsage`
+and `RateLimits` don't end the session; a warning ends it unless its text is
+in the closed set recorded with the fixture (empty under the recorded
+launch), and the code-mode-host warning always does; everything else ends
+it. A test runs a whole turn recorded under that launch (startup, an
+application call, a text answer, usage, limits, statuses) through the rule,
+expects no end, then checks each ending case.
 
 **The application's views of items** (`packages/ui`).
 
@@ -557,110 +554,64 @@ export const ItemView = createContext<((item: Item) => ReactNode | null) | undef
 itemView?: (item: Item) => ReactNode | null; // StandardLayoutProps
 ```
 
-- `TurnView` reads the context and calls the view once per item per render.
-  An answer `!= null` is a node; `null` and `undefined` are not.
-- Items that show nothing are dropped before grouping: an `Other` with no
-  node, and an item whose view gives none and which has no standard view.
-  So they never split a fold.
-- The live summary and Working follow the last visible block.
-- An item with a node is a block of its own (`<Fragment key={item.id}>`),
-  with the work on either side still folded. Work blocks are keyed
-  `work:${id}`. The split follows the view's answer as it changes.
-- Tests: a middle call between two work items changing from `null` to a
-  node; the same turn with no provider; a trailing invisible item.
+- `TurnView` calls the view once per item per render; an answer `!= null`
+  is a node. Items that show nothing (an `Other` with no node; an item whose
+  view gives none and which has no standard view) are dropped before
+  grouping, and the live summary and Working follow the last visible block.
+- An item with a node is its own block, keyed `item:${id}`, with the work on
+  either side still folded (keyed `work:${id}`); the split follows the
+  view's answer as it changes.
+- Tests: a middle call changing from `null` to a node; no provider; a
+  trailing invisible item.
 
-**What the engine does not do.** It does not check Codex's answers or the
-home's settings (the host does), end a session (the host does, on `Refused`,
-`Unheld`, `Unmapped`, a fault or unexpected activity), hold the first turn,
-or add a permission model.
+The engine does not check Codex's answers or the home's settings, end a
+session, hold the first turn, or add a permission model.
 
-**Established at the pin (0.171.0).** All runs used scratch homes, plugins
-off, a loopback stub provider, `timeout`, and nothing left running.
+**Established at the pin (0.171.0).** Scratch homes, plugins off, a loopback
+stub provider, `timeout`, no credential (the relay variable held a dummy),
+nothing left running.
 
 - **The exact launch** is SWBPIPE's, rebuilt from its source
-  (`embedded_agent/{macos,sandbox}.rs`): its root layout, its Seatbelt recipe
-  (`deny default`, `deny process-fork`, TCP only to the stub's port), its ten
-  variables, its `config.toml`, and `<root>/codex` (a hard link to the
-  pinned binary). The first exact runs lacked `--strict-config`, as SWBPIPE
-  does today (it will add it); the later ones have it. Codex initialised, ran
-  turns and exited 0. Seatbelt logged no denied fork or exec for it, which
-  shows that none was attempted, not that one would be harmless. Runs
-  before the exact launch used an allow-all or network-only profile, eight
-  or eleven variables, or a direct launch.
-- **Remote control (direct launch): the variable's effect is unverified.**
-  Without ChatGPT sign-in, Codex sends `remoteControl/status/changed` with
-  `"disabled"` as it answers `initialize`, with the variable and without it.
-  With `--remote-control` it says `"errored"` either way. These runs show
-  only that remote control was off.
-- **Configuration.** `--strict-config` exits 1 before initialising on an
-  unknown key or malformed TOML, and runs when the file is valid. Without
-  it, an unparsable file starts Codex on its defaults.
-- **The tools offered depend on the slug.** For a slug with no bundled
-  metadata, SWBPIPE's settings leave only the application's namespace. For
-  `gpt-6.2-sol`, whose bundled entry asks for code mode, under the exact
-  launch:
-  - **SWBPIPE's file as it is:** `exec` (nesting `apply_patch`, three MCP
-    resource tools, `clock__curr_time` and the application's tools), `wait`,
-    `send_message_to_user_async`, `clock.sleep` and six `collaboration.*`
-    tools; skills are listed.
-  - **SWBPIPE's file with the lines below**, under `--strict-config`: exactly
-    `functions.exec` with nothing nested, `functions.wait`,
-    `functions.send_message_to_user_async` and `swbpipe.propose`. No skills
-    are installed or listed. This offer, for this slug's bundled metadata and
-    this file, is recorded in
-    `crates/engine/fixtures/codex/swbpipe-known-slug-offer.json` (sha256
-    `e4d808820a75dda53c95d70e287ba875338c1101cc9d33653b55d1f39b8db82e`). The
-    strict run's request matches it byte for byte.
-  - **A `model_catalog_json` entry for the same slug** with `tool_mode:
-    "direct"` and `experimental_supported_tools: []` (Astra's): exactly
-    `functions.apply_patch` and `swbpipe.propose`. `apply_patch` is a real
-    file edit that Codex carries out itself, so this is not a configuration
-    for SWBPIPE.
-  - **The same entry with `apply_patch_tool_type: null` too:** exactly
-    `swbpipe.propose`. SWBPIPE does not rely on a catalogue, and keeps code
-    mode with `exec` empty and no host.
+  (`embedded_agent/{macos,sandbox}.rs`) with `--strict-config`: its root
+  layout and `<root>/codex`, its Seatbelt recipe (`deny default`, `deny
+  process-fork`, TCP only to the stub), its ten variables and its file.
+  Codex ran turns and exited 0. Seatbelt logged no denied fork or exec, which
+  shows none was attempted, not that one would be harmless.
+- **The recorded configuration** is SWBPIPE's file with `model_catalog_json`
+  (a catalogue of one entry, replacing the bundled list), `[agents] enabled =
+  false` in place of `multi_agent = false`, and `[skills] include_instructions
+  = false` and `[skills.bundled] enabled = false`. An entry without any of
+  `slug`, `display_name`, `supported_reasoning_levels`, `shell_type`,
+  `visibility`, `supported_in_api`, `priority`, `support_verbosity`,
+  `truncation_policy`, `experimental_supported_tools` or `base_instructions`
+  stops Codex before it initialises. The recorded entry adds `tool_mode:
+  "direct"` and `apply_patch_tool_type: null`.
+- **It offers the namespace only.** With SWBPIPE's seven declarations, for
+  `gpt-6.2-sol` (bundled) and `swbpipe-relay-model` (not), every request's
+  only tool was `swbpipe` with the seven; Codex sent no warning and listed no
+  skills. `apply_patch_tool_type: "freeform"` adds `apply_patch`, and
+  `tool_mode: "code_mode"` adds the code-mode-host warning. SWBPIPE's file as
+  it is warns that `[features].multi_agent` is deprecated and lists skills.
+  Recorded, with the file and the entry, in
+  `crates/engine/fixtures/codex/swbpipe-namespace-offer.json` (sha256
+  `d35430e127d172f9daf2f0b600d1930bccaac39b65fb2f9e5b90c4d896b32868`), with
+  `builtIns: []` and `warnings: []`: the relay compares a request's other
+  tools with `builtIns`, and the namespace's names and descriptions with its
+  catalogue. Code-mode results are in this PR's history.
+- **Codex reduces the schemas** it sends: it drops length, range, pattern
+  and item-count bounds, turns `const` into `enum`, and replaces some nested
+  schemas with `{}` (`swbpipe_propose_operations`: 6,904 bytes declared,
+  1,854 sent). The host's own check of the arguments is what holds them.
+- **A turn** also sends two status changes, token usage and rate limits.
+- **Remote control: the variable's effect is unverified.** Without ChatGPT
+  sign-in, Codex sends `remoteControl/status/changed` `"disabled"` just after
+  its `initialize` reply, with the variable and without it.
+- `--strict-config` exits 1 on an unknown key or malformed TOML (without
+  it, Codex starts on its defaults). A thread's policy held over the home's
+  for turns naming none.
 
-  So no setting that leaves the bundled catalogue in place removes `exec`,
-  `wait` and `send_message_to_user_async`. A catalogue entry can. With the
-  code-mode host off, `exec` and `wait` answer `code-mode host is
-  disabled`. The tools must be in a namespace of their own: un-namespaced,
-  they fall in `functions`, which the exclusion hides (Astra's runs).
-
-  ```toml
-  [features]
-  # ... SWBPIPE's list without `code_mode = false`, and:
-  sleep_tool = false
-  [features.code_mode]
-  enabled = false
-  direct_only_tool_namespaces = ["swbpipe"]
-  excluded_tool_namespaces = ["functions", "clock"]
-  [agents]
-  enabled = false
-  [skills]
-  include_instructions = false
-  [skills.bundled]
-  enabled = false
-  ```
-- **Policy, while the thread stays loaded.** The home asks for
-  `workspace-write`/`on-request` and the thread for `read-only`/`never`.
-  Codex answers `never`, `readOnly`, `networkAccess: false`, and both turns
-  (naming no policy) tell the model `Approval policy is currently never`.
-  Without the thread's policy, it answers `on-request`, `workspaceWrite`, and
-  gives on-request escalation instructions.
-- `thread/start` takes `ephemeral`, `baseInstructions`, `environments: []`,
-  `modelProvider` and `dynamicTools`, and answers `thread.ephemeral: true`
-  and `thread.environments: []`. Its reply comes right before
-  `thread/started` on the wire. An ephemeral thread is refused by
-  `thread/turns/list` and `thread/read` with turns, and left out of
-  `thread/list`.
-- **`serde_json::Value`, at 1.0.154 (the engine's lock) with a counting
-  allocator:** a 128 KiB frame takes from 1× its text (long strings) to 109×
-  (nested one-key objects, 14.3 MB).
-- Elsewhere, a running app's Codex started `codex-code-mode-host` as its
-  child in a process group of its own.
-
-**Not observed.** The variable's effect (it needs a sign-in), and the
-`imageView` and `imageGeneration` items, which were read from the schema.
+**Not observed:** the variable's effect (it needs a sign-in); a
+`thread/closed` from Codex; the `imageView` and `imageGeneration` items.
 
 ## Known limits
 
