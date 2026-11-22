@@ -99,13 +99,10 @@ impl Turns {
 }
 
 /// The consumer task: takes each frame and handles it before the next, never
-/// awaiting while it does. `end` signals its end even when it is aborted
-/// before it first runs.
-pub(super) async fn consume(shared: Arc<Shared>, from_codex: mpsc::Receiver<String>, end: End) {
-    let _end = end;
-    let mut from_codex = from_codex;
+/// awaiting while it does.
+pub(super) async fn consume(shared: Arc<Shared>, mut input: Input) {
     loop {
-        let Some(frame) = from_codex.recv().await else {
+        let Some(frame) = input.recv().await else {
             let (mut out, mut st) = shared.lock();
             shared.close_step(&mut out, &mut st, Some(Fault::InputEnded));
             return;
@@ -116,13 +113,28 @@ pub(super) async fn consume(shared: Arc<Shared>, from_codex: mpsc::Receiver<Stri
     }
 }
 
-/// Signals the consumer's end, after the frame in hand and the receiver are
-/// freed.
-pub(super) struct End(pub(super) Arc<Ledger>);
+/// The consumer's input. Dropped, even by an abort before the task first
+/// runs, it frees the receiver and the frames left in it, then signals the
+/// consumer's end.
+pub(super) struct Input {
+    from_codex: Option<mpsc::Receiver<String>>,
+    ledger: Arc<Ledger>,
+}
 
-impl Drop for End {
+impl Input {
+    pub(super) fn new(from_codex: mpsc::Receiver<String>, ledger: Arc<Ledger>) -> Input {
+        Input { from_codex: Some(from_codex), ledger }
+    }
+
+    async fn recv(&mut self) -> Option<String> {
+        self.from_codex.as_mut()?.recv().await
+    }
+}
+
+impl Drop for Input {
     fn drop(&mut self) {
-        self.0.consumer_ended();
+        drop(self.from_codex.take());
+        self.ledger.consumer_ended();
     }
 }
 
@@ -243,10 +255,14 @@ fn absent(raw: Option<&RawValue>) -> bool {
     present(raw).is_none()
 }
 
-/// A constant fact: taken only without escapes.
-fn constant_fact(raw: Option<&RawValue>) -> Fact<'_> {
+/// The policies Codex reports (0.171.0): any other, or one with an escape, is `Other`.
+const APPROVALS: [&str; 3] = ["untrusted", "on-request", "never"];
+const SANDBOXES: [&str; 4] = ["readOnly", "workspaceWrite", "dangerFullAccess", "externalSandbox"];
+
+/// One of Codex's `known` constants, taken only without escapes.
+fn constant_fact<'a>(raw: Option<&'a RawValue>, known: &[&str]) -> Fact<'a> {
     match present(raw) {
-        Some(raw) => wire::bare(raw, IDENTITY).map_or(Fact::Other, Fact::Value),
+        Some(raw) => wire::constant(raw).filter(|c| known.contains(c)).map_or(Fact::Other, Fact::Value),
         None => Fact::Absent,
     }
 }
@@ -275,10 +291,10 @@ fn opened(cx: &mut Cx, result: &RawValue) -> Result<(OpenedThread, super::Charge
     let id = id.and_then(|id| wire::identity(id, &mut id_buf)).ok_or(Fault::InvalidFrame)?;
     let (sandbox_type, network_access) = match present(sandbox).map(|s| wire::pick(s.get(), ["type", "networkAccess"])) {
         None => (Fact::Absent, Reported::Absent),
-        Some(Some([kind, network])) => (constant_fact(kind), reported(network, wire::boolean)),
+        Some(Some([kind, network])) => (constant_fact(kind, &SANDBOXES), reported(network, wire::boolean)),
         Some(None) => (Fact::Other, Reported::Other),
     };
-    let approval = constant_fact(approval);
+    let approval = constant_fact(approval, &APPROVALS);
     let (mut model_buf, mut provider_buf, mut cwd_buf) = ([0; IDENTITY], [0; IDENTITY], [0; LONG_TEXT]);
     let model = text_fact(model, &mut model_buf);
     let provider = text_fact(provider, &mut provider_buf);
@@ -326,9 +342,14 @@ fn refuse(cx: &mut Cx, id: &RawValue, method: &RawValue, params: Option<&RawValu
     let [thread_id, thread, conversation] = params.and_then(|p| wire::pick(p.get(), ["threadId", "thread", "conversationId"])).unwrap_or_default();
     let thread_dot_id = thread.and_then(|t| wire::pick(t.get(), ["id"])).and_then(|[id]| id);
     // The first of them that is an identity.
-    let mut thread_buf = [0; IDENTITY];
-    let thread = [thread_id, thread_dot_id, conversation].into_iter().flatten().find(|raw| wire::identity(raw, &mut [0; IDENTITY]).is_some());
-    let thread = thread.and_then(|raw| wire::identity(raw, &mut thread_buf));
+    let (mut buf, mut len) = ([0; IDENTITY], None);
+    for raw in [thread_id, thread_dot_id, conversation].into_iter().flatten() {
+        if let Some(id) = wire::identity(raw, &mut buf) {
+            len = Some(id.len());
+            break;
+        }
+    }
+    let thread = len.map(|len| std::str::from_utf8(&buf[..len]).unwrap_or_default());
     publish(cx, &[name, thread.unwrap_or_default(), json], || EmbeddedEvent::Refused {
         method: name.to_owned(),
         thread: thread.map(str::to_owned),
@@ -423,7 +444,16 @@ fn notification(cx: &mut Cx, method: &RawValue, params: Option<&RawValue>) -> Re
         cx.st.remote = Some(status);
         return publish(cx, &[], || EmbeddedEvent::RemoteControl { status });
     }
-    // 7 and 8. The turn rule, then the table.
+    // 7. Any notification on the held thread naming a turn the rule forbids.
+    if on_held.contains(&true) {
+        let turn_dot_id = fields[4].and_then(|t| wire::pick(t.get(), ["id"])).and_then(|[id]| id);
+        for raw in [fields[3], turn_dot_id].into_iter().flatten() {
+            if wire::identity(raw, &mut buf).is_some_and(|id| !cx.st.turns.admits(Ident::new(id))) {
+                return Err(Fault::WrongTurn);
+            }
+        }
+    }
+    // 8. The table.
     let (mut turn_buf, mut item_buf) = ([0; IDENTITY], [0; IDENTITY]);
     let note = match constant.and_then(table) {
         Some(route) => decode(cx, route, &fields, on_held, &mut turn_buf, &mut item_buf)?,
@@ -450,8 +480,7 @@ fn notification(cx: &mut Cx, method: &RawValue, params: Option<&RawValue>) -> Re
     })
 }
 
-/// Rules 7 and 8: a turn the rule forbids faults; otherwise the method's
-/// required fields, or `None` when one does not decode.
+/// Rule 8: the method's required fields, or `None` when one does not decode.
 fn decode<'a>(
     cx: &mut Cx,
     route: Route,
@@ -473,16 +502,13 @@ fn decode<'a>(
         Route::TokenUsage | Route::Item(_) | Route::Delta(_) | Route::Error => turn_id,
         _ => None,
     };
-    // 7. A turn named on the held thread must be one the rule admits.
+    // A required turn that is a string but not an identity faults; rule 7
+    // has admitted the one that is.
     let mut turn_name = None;
     if let Some(raw) = turn_raw.filter(|r| r.get().starts_with('"'))
         && on_held[0]
     {
-        let id = wire::identity(raw, turn_buf).ok_or(Fault::InvalidFrame)?;
-        if !cx.st.turns.admits(Ident::new(id)) {
-            return Err(Fault::WrongTurn);
-        }
-        turn_name = Some(id);
+        turn_name = Some(wire::identity(raw, turn_buf).ok_or(Fault::InvalidFrame)?);
     }
     if !thread_ok || (turn_raw.is_some() && turn_name.is_none()) {
         return Ok(None);

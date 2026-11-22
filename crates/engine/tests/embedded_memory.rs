@@ -1,11 +1,13 @@
 //! The embedded engine's maximum, measured: a counting allocator prices every
 //! allocation the engine makes at its class (SWBPIPE's `allocation_envelope`),
 //! old and new together while a buffer grows, and the peak must stay within
-//! `max_bytes`. After `finished`, only the fixed row may remain.
+//! `max_bytes`. Once `finished`, with only its handles holding the engine, it
+//! holds no more than the fixed row; once they drop, nothing.
 //!
-//! The host's own allocations (its frames, its channels) are not counted: the
-//! allocator counts only what is allocated on the test thread while not
-//! paused, and frees only what it counted.
+//! What the host makes is made paused and not counted, until the engine owns
+//! it: the configuration from `new`, and each frame from when it is sent
+//! (the host waits for the engine to take it before the next). Every scenario
+//! runs once unmeasured first, so one-time runtime state is not counted.
 
 mod support;
 
@@ -33,7 +35,11 @@ std::thread_local! {
     static PAUSED: Cell<bool> = const { Cell::new(false) };
     static LIVE: Cell<u64> = const { Cell::new(0) };
     static PEAK: Cell<u64> = const { Cell::new(0) };
+    static START: Cell<u64> = const { Cell::new(0) };
 }
+
+/// The fixed row: control block, consumer task, terminal slot, namespace, tool names.
+const FIXED_ROW: u64 = 64 * 1024;
 
 /// SWBPIPE's `allocation_envelope`: max(16, the next power of two), 0 for 0.
 fn price(size: usize) -> u64 {
@@ -110,6 +116,23 @@ fn pause(f: &mut dyn FnMut()) {
     PAUSED.with(|p| p.set(was));
 }
 
+/// An allocation the host made, the engine's from now on.
+fn adopt(ptr: *const u8, capacity: usize) {
+    if measured() && capacity > 0 {
+        track(ptr as usize, capacity);
+    }
+}
+
+/// The engine has finished: with only its handles holding it, within the fixed row.
+fn at_finished() {
+    if measured() {
+        let held = LIVE.with(Cell::get) - START.with(Cell::get);
+        assert!(held <= FIXED_ROW, "{held} bytes held once finished, over the fixed row");
+    }
+}
+
+const METER: support::Meter = support::Meter { pause, adopt, finished: at_finished };
+
 /// `f`'s result, made as the host.
 fn host<T>(f: impl FnOnce() -> T) -> T {
     let mut f = Some(f);
@@ -119,17 +142,23 @@ fn host<T>(f: impl FnOnce() -> T) -> T {
 }
 
 /// Runs a scenario: its peak above where it began within the maximum, and
-/// what it leaves behind once finished no more than the fixed row.
+/// nothing left once every handle, the host's too, has dropped.
 async fn scenario<F: Future<Output = ()>>(label: &str, limits: &EmbeddedLimits, run: impl FnOnce() -> F) {
     let start = LIVE.with(Cell::get);
+    START.with(|s| s.set(start));
     PEAK.with(|p| p.set(start));
-    run().await;
-    let (peak, live) = (PEAK.with(Cell::get) - start, LIVE.with(Cell::get) - start);
+    // A buffer whose charge is never released holds `finished`: fail, not hang.
+    let ran = tokio::time::timeout(std::time::Duration::from_secs(20), run()).await;
+    assert!(ran.is_ok(), "{label}: timed out");
+    if !measured() {
+        return;
+    }
+    let (peak, left) = (PEAK.with(Cell::get) - start, LIVE.with(Cell::get) as i64 - start as i64);
     let max = EmbeddedEngine::max_bytes(limits);
-    host(|| eprintln!("{label}: peak {peak} of {max}, left {live}"));
+    host(|| eprintln!("{label}: peak {peak} of {max}, left {left}"));
     assert!(peak <= max, "{label}: peak {peak} over {max}");
     assert!(peak > 0, "{label}: nothing counted");
-    assert!(live == 0 || live <= 4096, "{label}: {live} bytes left after every handle dropped");
+    assert_eq!(left, 0, "{label}: bytes left after every handle dropped");
 }
 
 // ---------- a scripted host ----------
@@ -142,6 +171,8 @@ struct Session {
 
 const THREAD: &str = "thread-1";
 
+/// A session whose tools are large, so configuration kept past `open_thread`
+/// or close would show at `finished`.
 fn session(limits: EmbeddedLimits) -> Session {
     let (transport, host_side) = host(support::transport);
     let config = host(|| EmbeddedConfig {
@@ -149,9 +180,12 @@ fn session(limits: EmbeddedLimits) -> Session {
         work_dir: "/scratch/work".into(),
         namespace: "swbpipe".into(),
         namespace_description: "SWBPIPE tools.".into(),
-        tools: r#"[{"type":"function","name":"swbpipe_solve","description":"Solve.","inputSchema":{"type":"object"}}]"#.into(),
+        tools: format!(r#"[{{"type":"function","name":"swbpipe_solve","description":"{}","inputSchema":{{"type":"object"}}}}]"#, "d".repeat(100_000))
+            .into_boxed_str()
+            .into_string(),
         limits,
     });
+    METER.adopt_config(&config);
     let (engine, events) = EmbeddedEngine::new(config).unwrap();
     Session { engine, events, host: host_side }
 }
@@ -160,10 +194,7 @@ fn session(limits: EmbeddedLimits) -> Session {
 /// framing gives it.
 async fn feed(host: &Host, frame: impl FnOnce() -> String) {
     let frame = self::host(|| frame().into_boxed_str().into_string());
-    if host.to_engine.send(frame).await.is_err() {
-        panic!("the engine closed");
-    }
-    settle().await;
+    assert!(METER.feed(host, frame).await, "the engine closed");
 }
 
 async fn written(host: &mut Host) -> Value {
@@ -235,25 +266,15 @@ impl Session {
 
     /// Finished, holding only the fixed row; then every handle dropped.
     async fn finish(self) {
-        let finished = self.engine.finished();
-        finished.clone().await;
-        let held = LIVE.with(Cell::get);
+        self.engine.finished().await;
+        at_finished();
         drop(self);
-        let fixed = held - LIVE.with(Cell::get);
-        assert!(fixed <= 64 * 1024, "{fixed} bytes held once finished, over the fixed row");
-        finished.await;
     }
 }
 
 async fn poll_once<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
     let mut future = Some(future);
     poll_fn(|cx| Poll::Ready(future.take().unwrap().poll(cx))).await
-}
-
-async fn settle() {
-    for _ in 0..4 {
-        tokio::task::yield_now().await;
-    }
 }
 
 fn nested(depth: usize) -> String {
@@ -264,18 +285,23 @@ fn nested(depth: usize) -> String {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_engine_stays_within_its_maximum() {
-    MEASURED.with(|m| m.set(true));
-    let limits = LIMITS;
+    for measured in [false, true] {
+        MEASURED.with(|m| m.set(measured));
+        scenarios(LIMITS).await;
+    }
+    MEASURED.with(|m| m.set(false));
+}
 
+async fn scenarios(limits: EmbeddedLimits) {
     scenario("recorded text turns", &limits, || async {
         let lines = host(|| support::recording("embedded_text_turn"));
-        support::replay(lines, &pause).await;
+        support::replay(lines, &METER).await;
     })
     .await;
 
     scenario("recorded retry", &limits, || async {
         let lines = host(|| support::recording("embedded_retry"));
-        support::replay(lines, &pause).await;
+        support::replay(lines, &METER).await;
     })
     .await;
 
@@ -429,8 +455,7 @@ async fn the_engine_stays_within_its_maximum() {
         }
         drop(s);
         finished.await;
+        at_finished();
     })
     .await;
-
-    MEASURED.with(|m| m.set(false));
 }

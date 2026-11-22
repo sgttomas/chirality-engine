@@ -202,10 +202,30 @@ const RESERVED: [&str; 14] = [
     "web",
 ];
 
+/// The most tools a namespace has, and a tool name's length.
+const TOOLS: usize = 64;
+const TOOL_NAME: usize = 128;
+
+/// The tools' names, unescaped, checked on the stack before anything is
+/// allocated for them.
+pub(crate) struct ToolNames {
+    names: [[u8; TOOL_NAME]; TOOLS],
+    lens: [u8; TOOLS],
+    count: usize,
+}
+
+impl ToolNames {
+    fn holds(&self, name: &str) -> bool {
+        self.iter().any(|n| n == name)
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &str> {
+        self.names[..self.count].iter().zip(&self.lens).map(|(name, len)| std::str::from_utf8(&name[..*len as usize]).unwrap_or_default())
+    }
+}
+
 impl EmbeddedConfig {
-    /// Checks the configuration against the design's bounds and Codex's own
-    /// rules; the tools' names when it holds.
-    pub(crate) fn validate(&self) -> Result<Vec<String>, &'static str> {
+    pub(crate) fn check_limits(&self) -> Result<(), &'static str> {
         let limits = &self.limits;
         let ranges = [
             (limits.pending_calls, 1, 16),
@@ -214,9 +234,16 @@ impl EmbeddedConfig {
             (limits.result_bytes, 1, 65_536),
             (limits.event_bytes, 256 * 1024, 16 * 1024 * 1024),
         ];
-        if ranges.iter().any(|(value, low, high)| !(low..=high).contains(&value)) {
-            return Err("a limit is out of range");
+        match ranges.iter().any(|(value, low, high)| !(low..=high).contains(&value)) {
+            true => Err("a limit is out of range"),
+            false => Ok(()),
         }
+    }
+
+    /// Checks the configuration against the design's bounds and Codex's own
+    /// rules; the tools' names when it holds. Allocates only serde_json's
+    /// nesting stack, which the caller has charged.
+    pub(crate) fn validate(&self) -> Result<ToolNames, &'static str> {
         let namespace = &self.namespace;
         if !is_name(namespace, 64) || is_mcp(namespace) || RESERVED.contains(&namespace.as_str()) || namespace.capacity() > 64 {
             return Err("the namespace is not one Codex takes");
@@ -228,21 +255,27 @@ impl EmbeddedConfig {
         if !self.work_dir.is_absolute() || work_dir.is_empty() || work_dir.len() > 1024 || self.work_dir.capacity() > 1024 {
             return Err("work_dir is not an absolute UTF-8 path of at most 1,024 bytes");
         }
-        if self.tools.capacity() > 128 * 1024 || !wire::prescan(&self.tools) {
-            return Err("tools is not JSON of at most 128 KiB");
+        // `thread/start` carries `tools` as is, inside its own containers, on one line.
+        let one_line = !self.tools.bytes().any(|b| b == b'\n' || b == b'\r');
+        if self.tools.capacity() > 128 * 1024 || !one_line || !wire::prescan_within(&self.tools, wire::TOOLS_DEPTH) {
+            return Err("tools is not JSON of at most 128 KiB on one line");
         }
-        let mut names: Vec<String> = Vec::with_capacity(64);
+        let mut names = ToolNames { names: [[0; TOOL_NAME]; TOOLS], lens: [0; TOOLS], count: 0 };
         let mut bad = false;
         let count = wire::elements(wire::trim(&self.tools), &mut |tool| {
-            let mut buf = [0; 128];
+            let mut buf = [0; TOOL_NAME];
             let name = wire::pick(tool.get(), ["name"]).and_then(|[name]| name).and_then(|name| wire::unescape(name, &mut buf));
             match name {
-                Some(name) if names.len() < 64 && is_name(name, 128) && !is_mcp(name) && !names.iter().any(|n| n == name) => names.push(name.to_owned()),
+                Some(name) if names.count < TOOLS && is_name(name, TOOL_NAME) && !name.starts_with("mcp") && !names.holds(name) => {
+                    names.names[names.count][..name.len()].copy_from_slice(name.as_bytes());
+                    names.lens[names.count] = name.len() as u8;
+                    names.count += 1;
+                }
                 _ => bad = true,
             }
         });
         match count {
-            Some(1..=64) if !bad => Ok(names),
+            Some(1..=TOOLS) if !bad => Ok(names),
             _ => Err("tools is not an array of 1 to 64 objects with unique names Codex takes"),
         }
     }

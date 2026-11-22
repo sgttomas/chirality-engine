@@ -21,6 +21,7 @@ pub use types::*;
 
 use budget::{Charge, FRAME_TEXT, Ledger, REPLY_SLOTS, Ring, class};
 use consumer::{Held, Turns};
+use types::ToolNames;
 use wire::Writer;
 
 /// Each method's slot.
@@ -48,8 +49,15 @@ impl EmbeddedEngine {
     /// The engine over the host's transport, once its input is valid; nothing
     /// refused is kept.
     pub fn new(config: EmbeddedConfig) -> Result<(EmbeddedEngine, EmbeddedEvents), EmbeddedError> {
-        let tools = config.validate().map_err(|reason| EmbeddedError::Invalid { reason })?;
-        let shared = Arc::new(Shared::new(config, tools).map_err(|_| invalid("limits exceed the budget"))?);
+        config.check_limits().map_err(|reason| EmbeddedError::Invalid { reason })?;
+        // The ledger first, so validation's one allocation, its nesting stack,
+        // is charged; the names are checked on the stack.
+        let ledger = Ledger::new(&config.limits);
+        let names = {
+            let _nesting = ledger.charge(budget::NESTING).map_err(|_| invalid("limits exceed the budget"))?;
+            config.validate().map_err(|reason| EmbeddedError::Invalid { reason })?
+        };
+        let shared = Arc::new(Shared::new(config, ledger, &names).map_err(|_| invalid("limits exceed the budget"))?);
         Ok((EmbeddedEngine { shared: shared.clone() }, EmbeddedEvents { shared }))
     }
 
@@ -70,25 +78,27 @@ impl EmbeddedEngine {
             if st.connect_called {
                 return Err(invalid("connect was called"));
             }
-            let Some(transport) = st.transport.take() else {
+            let Some(HostTransport { from_codex, to_codex }) = st.transport.take() else {
                 return Err(invalid("no transport"));
             };
             st.connect_called = true;
-            out.to_codex = Some(transport.to_codex);
+            out.to_codex = Some(to_codex);
             let id = st.next_id;
             let sent = out.send(&self.shared.ledger, |w| {
                 w.raw("{\"id\":").integer(id).raw(",\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"chirality-embedded\",\"version\":");
                 w.string(env!("CARGO_PKG_VERSION")).raw("},\"capabilities\":{\"experimentalApi\":true}}}");
             });
             if let Err(unsent) = sent {
+                // Codex's frames are freed before the close can finish.
+                drop(from_codex);
                 return Err(self.shared.unsent(&mut out, &mut st, unsent));
             }
             st.next_id += 1;
             st.slots[INITIALIZE] = Slot::waiting(id);
             self.shared.ledger.consumer_started();
-            let end = consumer::End(self.shared.ledger.clone());
-            st.consumer = Some(tokio::spawn(consumer::consume(self.shared.clone(), transport.from_codex, end)));
-            Wait::new(&self.shared, INITIALIZE)
+            let input = consumer::Input::new(from_codex, self.shared.ledger.clone());
+            st.consumer = Some(tokio::spawn(consumer::consume(self.shared.clone(), input)));
+            Wait { shared: &self.shared, slot: INITIALIZE, done: false }
         };
         match wait.await? {
             Reply::Codex { code, message } => Err(EmbeddedError::Codex { code, message }),
@@ -157,7 +167,10 @@ impl EmbeddedEngine {
     /// Asks Codex to stop the running turn; returns on Codex's reply.
     pub async fn interrupt(&self) -> Result<(), EmbeddedError> {
         let wait = self.shared.call(TURN_INTERRUPT, |out, st, ledger, id| {
-            let (Some(thread), Some(turn)) = (st.thread.as_ref(), st.turns.running.as_ref()) else {
+            let Some(thread) = st.thread.as_ref().filter(|t| t.open) else {
+                return Err(invalid("no open thread"));
+            };
+            let Some(turn) = st.turns.running.as_ref() else {
                 return Err(invalid("no turn runs"));
             };
             Ok(out.send(ledger, |w| {
@@ -236,7 +249,9 @@ impl Future for Finished {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let this = self.project();
+        let mut this = self.project();
+        // Registered before the check, so a finish between the two still wakes it.
+        this.notified.as_mut().enable();
         if this.shared.ledger.is_finished() {
             return Poll::Ready(());
         }
@@ -250,12 +265,6 @@ struct Wait<'e> {
     shared: &'e Shared,
     slot: usize,
     done: bool,
-}
-
-impl<'e> Wait<'e> {
-    fn new(shared: &'e Shared, slot: usize) -> Wait<'e> {
-        Wait { shared, slot, done: false }
-    }
 }
 
 impl Future for Wait<'_> {
@@ -334,7 +343,7 @@ impl Shared {
         }
         st.next_id += 1;
         st.slots[slot] = Slot::waiting(id);
-        Ok(Wait::new(self, slot))
+        Ok(Wait { shared: self, slot, done: false })
     }
 
     /// A frame not sent: too long is `Invalid`; a fault closes.
@@ -476,9 +485,10 @@ enum Terminal {
 }
 
 impl Shared {
-    fn new(config: EmbeddedConfig, tool_names: Vec<String>) -> Result<Shared, Fault> {
+    fn new(config: EmbeddedConfig, ledger: Arc<Ledger>, names: &ToolNames) -> Result<Shared, Fault> {
         let EmbeddedConfig { transport, work_dir, namespace, namespace_description, tools, limits } = config;
-        let ledger = Ledger::new(&limits);
+        // In the fixed row.
+        let tool_names = names.iter().map(str::to_owned).collect();
         let held = class(tools.capacity() as u64) + class(namespace_description.capacity() as u64) + class(work_dir.capacity() as u64);
         let config = Config { tools, description: namespace_description, work_dir, _charge: ledger.charge(held)? };
         let writer_charge = ledger.charge(class(FRAME_TEXT as u64))?;
@@ -579,5 +589,9 @@ fn codex(reply: Reply) -> EmbeddedError {
     }
 }
 
+#[cfg(test)]
+mod bounds_tests;
+#[cfg(test)]
+mod close_tests;
 #[cfg(test)]
 mod tests;

@@ -181,3 +181,26 @@ fn thread_start_carries_the_policy_and_the_namespace() {
     }});
     assert_eq!(sent, expected);
 }
+
+#[test]
+fn the_unescaper_is_self_contained() {
+    let mut buf = [0; 16];
+    for bad in [r"\x", r"\u+12a", r"\u12", r"\", r"\ud83d\u+e00", r"\u00g0"] {
+        assert_eq!(unescape_text(bad, &mut buf), None, "{bad}");
+    }
+    assert_eq!(unescape_text(r"\u00e9", &mut buf), Some("é"));
+}
+
+#[test]
+fn tools_at_their_depth_keep_thread_start_within_127() {
+    let tools = |depth: usize| format!("[{{\"name\":\"a\",\"x\":{}{}}}]", "[".repeat(depth - 2), "]".repeat(depth - 2));
+    let offer = |tools: &str| {
+        let mut w = Writer::new();
+        let offer = Offer { namespace: "n", description: "", tools, work_dir: "/w" };
+        thread_start(&mut w, 1, &offer, &crate::embedded::tests::OPTIONS);
+        frame(w.text().unwrap()).is_some()
+    };
+    assert!(prescan_within(&tools(TOOLS_DEPTH), TOOLS_DEPTH) && offer(&tools(TOOLS_DEPTH)));
+    assert!(!prescan_within(&tools(TOOLS_DEPTH + 1), TOOLS_DEPTH));
+    assert!(!offer(&tools(TOOLS_DEPTH + 1)), "deeper tools would make the frame Codex reads too deep");
+}

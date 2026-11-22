@@ -5,10 +5,6 @@ mod support;
 
 use chirality_engine::embedded::EmbeddedEvent;
 
-fn no_pause(f: &mut dyn FnMut()) {
-    f()
-}
-
 fn names(events: &[EmbeddedEvent]) -> Vec<String> {
     events.iter().map(support::name).collect()
 }
@@ -31,7 +27,7 @@ const TURN: [&str; 13] = [
 
 #[tokio::test]
 async fn a_text_only_whole_turn_then_another() {
-    let events = support::replay(support::recording("embedded_text_turn"), &no_pause).await;
+    let events = support::replay(support::recording("embedded_text_turn"), &support::UNMEASURED).await;
     let mut expected = vec!["RemoteControl".to_string(), "ThreadStarted".into()];
     expected.extend(TURN.iter().chain(TURN.iter()).map(|n| n.to_string()));
     assert_eq!(names(&events), expected);
@@ -42,7 +38,7 @@ async fn a_text_only_whole_turn_then_another() {
 
 #[tokio::test]
 async fn a_stream_cut_short_is_retried() {
-    let events = support::replay(support::recording("embedded_retry"), &no_pause).await;
+    let events = support::replay(support::recording("embedded_retry"), &support::UNMEASURED).await;
     let expected = [
         "RemoteControl",
         "ThreadStarted",

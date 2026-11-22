@@ -116,21 +116,59 @@ pub fn transport() -> (HostTransport, Host) {
     (HostTransport { from_codex, to_codex }, Host { to_engine, from_engine })
 }
 
-/// Runs `f` as the host: outside what the engine is charged for.
-pub type Pause<'a> = &'a dyn Fn(&mut dyn FnMut());
+/// How a run is measured; [`UNMEASURED`] when it is not.
+pub struct Meter {
+    /// Runs `f` as the host: outside what the engine is charged for.
+    pub pause: fn(&mut dyn FnMut()),
+    /// The engine owns this allocation, made as the host, from now on.
+    pub adopt: fn(*const u8, usize),
+    /// The engine has finished, and only its handles hold it.
+    pub finished: fn(),
+}
+
+pub const UNMEASURED: Meter = Meter { pause: |f| f(), adopt: |_, _| {}, finished: || {} };
+
+impl Meter {
+    /// The configuration's strings, the engine's from `new`.
+    pub fn adopt_config(&self, config: &EmbeddedConfig) {
+        for text in [&config.tools, &config.namespace, &config.namespace_description] {
+            (self.adopt)(text.as_ptr(), text.capacity());
+        }
+        (self.adopt)(config.work_dir.as_os_str().as_encoded_bytes().as_ptr(), config.work_dir.capacity());
+    }
+
+    /// Hands Codex's frame to the engine, and waits until the engine has
+    /// taken it, so no more than one frame is counted waiting.
+    pub async fn feed(&self, host: &Host, frame: String) -> bool {
+        (self.adopt)(frame.as_ptr(), frame.capacity());
+        let (mut frame, mut sent) = (Some(frame), false);
+        (self.pause)(&mut || sent = frame.take().is_some_and(|frame| host.to_engine.try_send(frame).is_ok()));
+        if sent {
+            while host.to_engine.capacity() < host.to_engine.max_capacity() && !host.to_engine.is_closed() {
+                tokio::task::yield_now().await;
+            }
+            for _ in 0..4 {
+                tokio::task::yield_now().await;
+            }
+        }
+        sent
+    }
+}
 
 /// Drives the recorded session through the engine as SWBPIPE's host would:
 /// connect, wait for `Disabled`, open the thread, send each recorded text
 /// once the turn before has completed, then close. Codex's side is fed from
 /// the recording; every frame the engine writes is checked against it.
 /// Returns the events, each checked against SWBPIPE's rule.
-pub async fn replay(lines: Vec<Line>, pause: Pause<'_>) -> Vec<EmbeddedEvent> {
+pub async fn replay(lines: Vec<Line>, meter: &Meter) -> Vec<EmbeddedEvent> {
+    let pause = meter.pause;
     let mut built = None;
     pause(&mut || {
         let (transport, host) = transport();
         built = Some((config(&lines, transport), options(&lines), texts(&lines), host));
     });
     let (config, options, texts, mut host) = built.unwrap();
+    meter.adopt_config(&config);
     let (engine, mut events) = EmbeddedEngine::new(config).unwrap();
     let mut seen = Vec::new();
     let script = async {
@@ -156,11 +194,12 @@ pub async fn replay(lines: Vec<Line>, pause: Pause<'_>) -> Vec<EmbeddedEvent> {
         assert_eq!(closed, Some(EmbeddedEvent::Closed { fault: None }));
         assert_eq!(events.recv().await, None);
         engine.finished().await;
+        (meter.finished)();
     };
     let codex = async {
         for line in lines {
             match line {
-                Line::Inbound(line) => host.to_engine.send(line).await.unwrap(),
+                Line::Inbound(line) => assert!(meter.feed(&host, line).await),
                 Line::Outbound(expected) => {
                     let sent = host.from_engine.recv().await.unwrap();
                     pause(&mut || assert_eq!(serde_json::from_str::<Value>(&sent).unwrap(), serde_json::from_str::<Value>(&expected).unwrap()));
@@ -170,7 +209,7 @@ pub async fn replay(lines: Vec<Line>, pause: Pause<'_>) -> Vec<EmbeddedEvent> {
         assert_eq!(host.from_engine.recv().await, None, "close is the end of to_codex");
     };
     tokio::join!(script, codex);
-    drop(engine);
+    drop((engine, events, host));
     seen
 }
 

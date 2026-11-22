@@ -8,40 +8,39 @@ use std::task::Poll;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::budget::FIXED;
 use super::*;
 
 pub(super) const LIMITS: EmbeddedLimits =
     EmbeddedLimits { pending_calls: 16, calls_per_turn: 1024, argument_bytes: 65_536, result_bytes: 65_536, event_bytes: 256 * 1024 };
-const TOOLS: &str = r#"[{"type":"function","name":"swbpipe_solve","description":"Solve.","inputSchema":{"type":"object"}}]"#;
-const THREAD: &str = "thread-1";
+pub(super) const TOOLS: &str = r#"[{"type":"function","name":"swbpipe_solve","description":"Solve.","inputSchema":{"type":"object"}}]"#;
+pub(super) const THREAD: &str = "thread-1";
 
-struct Host {
-    to_engine: Option<mpsc::Sender<String>>,
-    from_engine: mpsc::Receiver<String>,
+pub(super) struct Host {
+    pub(super) to_engine: Option<mpsc::Sender<String>>,
+    pub(super) from_engine: mpsc::Receiver<String>,
 }
 
 impl Host {
-    async fn next(&mut self) -> Value {
+    pub(super) async fn next(&mut self) -> Value {
         let frame = self.from_engine.recv().await.expect("a frame");
         assert!(!frame.ends_with('\n'));
         serde_json::from_str(&frame).unwrap()
     }
 
-    async fn send(&self, frame: impl ToString) {
+    pub(super) async fn send(&self, frame: impl ToString) {
         self.send_as_is(frame.to_string()).await;
     }
 
-    async fn send_as_is(&self, frame: String) {
+    pub(super) async fn send_as_is(&self, frame: String) {
         self.to_engine.as_ref().unwrap().send(frame).await.unwrap();
     }
 
-    fn reply(&self, id: &Value, result: Value) -> String {
+    pub(super) fn reply(&self, id: &Value, result: Value) -> String {
         json!({"id": id, "result": result}).to_string()
     }
 }
 
-fn config(transport: HostTransport) -> EmbeddedConfig {
+pub(super) fn config(transport: HostTransport) -> EmbeddedConfig {
     EmbeddedConfig {
         transport,
         work_dir: "/scratch/work".into(),
@@ -52,7 +51,7 @@ fn config(transport: HostTransport) -> EmbeddedConfig {
     }
 }
 
-fn host_with(capacity: usize, edit: impl FnOnce(&mut EmbeddedConfig)) -> (EmbeddedEngine, EmbeddedEvents, Host) {
+pub(super) fn host_with(capacity: usize, edit: impl FnOnce(&mut EmbeddedConfig)) -> (EmbeddedEngine, EmbeddedEvents, Host) {
     let (to_engine, from_codex) = mpsc::channel(64);
     let (to_codex, from_engine) = mpsc::channel(capacity);
     let mut config = config(HostTransport { from_codex, to_codex });
@@ -61,31 +60,31 @@ fn host_with(capacity: usize, edit: impl FnOnce(&mut EmbeddedConfig)) -> (Embedd
     (engine, events, Host { to_engine: Some(to_engine), from_engine })
 }
 
-const OPTIONS: ThreadOptions = ThreadOptions {
+pub(super) const OPTIONS: ThreadOptions = ThreadOptions {
     model: None,
     provider: None,
     base_instructions: None,
     policy: ThreadPolicy { sandbox: SandboxMode::ReadOnly, approval: ApprovalPolicy::Never },
 };
 
-fn policy() -> ThreadOptions {
+pub(super) fn policy() -> ThreadOptions {
     OPTIONS
 }
 
 /// Polls `future` once.
-async fn poll_once<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
+pub(super) async fn poll_once<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
     let mut future = Some(future);
     poll_fn(|cx| Poll::Ready(future.take().unwrap().poll(cx))).await
 }
 
-async fn settle() {
+pub(super) async fn settle() {
     for _ in 0..8 {
         tokio::task::yield_now().await;
     }
 }
 
 /// Connected, remote control `Disabled`, and the thread held.
-async fn opened() -> (EmbeddedEngine, EmbeddedEvents, Host) {
+pub(super) async fn opened() -> (EmbeddedEngine, EmbeddedEvents, Host) {
     let (engine, mut events, mut host) = host_with(64, |_| {});
     let ((), opened) = tokio::join!(async { engine.connect().await.unwrap() }, async {
         let init = host.next().await;
@@ -104,7 +103,7 @@ async fn opened() -> (EmbeddedEngine, EmbeddedEvents, Host) {
 }
 
 /// A turn running on the held thread.
-async fn running(engine: &EmbeddedEngine, host: &mut Host, turn: &str) {
+pub(super) async fn running(engine: &EmbeddedEngine, host: &mut Host, turn: &str) {
     let (started, ()) = tokio::join!(engine.send_text("hi"), async {
         let start = host.next().await;
         assert_eq!(start["params"], json!({"threadId": THREAD, "input": [{"type": "text", "text": "hi", "text_elements": []}]}));
@@ -113,11 +112,11 @@ async fn running(engine: &EmbeddedEngine, host: &mut Host, turn: &str) {
     assert_eq!(started.unwrap().0, turn);
 }
 
-fn note(method: &str, params: Value) -> String {
+pub(super) fn note(method: &str, params: Value) -> String {
     json!({"method": method, "params": params}).to_string()
 }
 
-async fn closed_with(events: &mut EmbeddedEvents) -> Option<Fault> {
+pub(super) async fn closed_with(events: &mut EmbeddedEvents) -> Option<Fault> {
     loop {
         match events.recv().await.expect("Closed before None") {
             EmbeddedEvent::Closed { fault } => return fault,
@@ -182,6 +181,10 @@ fn new_refuses_what_codex_or_the_bounds_would_and_keeps_nothing() {
         many(65),
         format!("[{},{}]", tool("a"), tool("a")),
         format!("[{}]", tool("mcp__a")),
+        format!("[{}]", tool("mcpLookup")),
+        format!("[\n  {}\n]", tool("a")),
+        format!("[{}\r]", tool("a")),
+        format!("[{{\"name\":\"a\",\"x\":{}{}}}]", "[".repeat(wire::TOOLS_DEPTH - 1), "]".repeat(wire::TOOLS_DEPTH - 1)),
         format!("[{}]", tool(&"a".repeat(129))),
         "{}".into(),
         "[1]".into(),
@@ -192,6 +195,9 @@ fn new_refuses_what_codex_or_the_bounds_would_and_keeps_nothing() {
         assert!(refused(&|c| c.tools = tools.clone()), "{tools}");
     }
     assert!(!refused(&|c| c.tools = format!("[{}]", tool("\\u0061b"))), "a name is read unescaped");
+    assert!(!refused(&|c| c.tools = format!("[ {}\t]", tool("a"))), "spaces and tabs keep it on one line");
+    let deepest = format!("[{{\"name\":\"a\",\"x\":{}{}}}]", "[".repeat(wire::TOOLS_DEPTH - 2), "]".repeat(wire::TOOLS_DEPTH - 2));
+    assert!(!refused(&|c| c.tools = deepest.clone()), "tools at the depth thread/start leaves them");
     assert!(refused(&|c| c.tools = String::with_capacity(128 * 1024 + 1) + TOOLS));
     for work_dir in ["relative", "", &format!("/{}", "w".repeat(1024))] {
         assert!(refused(&|c| c.work_dir = work_dir.into()), "{work_dir}");
@@ -273,21 +279,34 @@ async fn open_thread_reports_what_codex_did() {
     assert!(matches!(engine.open_thread(&policy()).await, Err(EmbeddedError::Invalid { .. })));
 }
 
+/// Connected, before a thread is held.
+pub(super) async fn connected(capacity: usize) -> (EmbeddedEngine, EmbeddedEvents, Host) {
+    let (engine, events, mut host) = host_with(capacity, |_| {});
+    let ((), ()) = tokio::join!(async { engine.connect().await.unwrap() }, async {
+        let init = host.next().await;
+        host.send(host.reply(&init["id"], json!({}))).await;
+        host.next().await;
+    });
+    (engine, events, host)
+}
+
 #[tokio::test]
-async fn sandbox_facts_absent_or_other_together() {
-    for (sandbox, kind, network) in [(json!(null), Reported::Absent, Reported::Absent), (json!("readOnly"), Reported::Other, Reported::Other)] {
-        let (engine, _events, mut host) = host_with(8, |_| {});
-        let ((), ()) = tokio::join!(async { engine.connect().await.unwrap() }, async {
-            let init = host.next().await;
-            host.send(host.reply(&init["id"], json!({}))).await;
-            host.next().await;
-        });
+async fn policy_facts_are_absent_other_or_known() {
+    let other = Reported::<String>::Other;
+    let cases = [
+        (json!(null), json!(null), Reported::Absent, Reported::Absent, Reported::Absent),
+        (json!("readOnly"), json!("never"), other.clone(), Reported::Other, Reported::Value("never".to_string())),
+        (json!({"type": "futureSandbox", "networkAccess": true}), json!("futurePolicy"), other.clone(), Reported::Value(true), other.clone()),
+        (json!({"type": "externalSandbox"}), json!({"granular": {}}), Reported::Value("externalSandbox".to_string()), Reported::Absent, other.clone()),
+    ];
+    for (sandbox, approval, kind, network, policy) in cases {
+        let (engine, _events, mut host) = connected(8).await;
         let (opened, ()) = tokio::join!(engine.open_thread(&OPTIONS), async {
             let start = host.next().await;
-            host.send(host.reply(&start["id"], json!({"thread": {"id": "t"}, "sandbox": sandbox}))).await;
+            host.send(host.reply(&start["id"], json!({"thread": {"id": "t"}, "sandbox": sandbox, "approvalPolicy": approval}))).await;
         });
         let opened = opened.unwrap();
-        assert_eq!((opened.sandbox_type, opened.network_access), (kind, network));
+        assert_eq!((opened.sandbox_type, opened.network_access, opened.approval_policy), (kind, network, policy));
     }
 }
 
@@ -499,108 +518,51 @@ async fn a_response_not_in_flight_faults() {
 }
 
 #[tokio::test]
-async fn close_ends_everything_once_and_the_first_fault_wins() {
+async fn any_notification_naming_a_turn_follows_the_rule() {
     let (engine, mut events, mut host) = opened().await;
     running(&engine, &mut host, "t").await;
-    host.send(note("thread/status/changed", json!({"threadId": THREAD, "status": {"type": "active"}}))).await;
-    let mut stop = pin!(engine.interrupt());
-    assert!(poll_once(stop.as_mut()).await.is_pending());
-    host.next().await;
-    host.send("not json").await;
-    settle().await;
-    engine.close();
-    engine.close();
-    assert_eq!(stop.await, Err(EmbeddedError::Closed { fault: Some(Fault::InvalidFrame) }));
-    assert_eq!(events.recv().await, Some(EmbeddedEvent::Closed { fault: Some(Fault::InvalidFrame) }), "unread events are discarded");
-    assert_eq!(events.recv().await, None);
-    assert_eq!(events.try_recv(), Err(TryRecvError::Disconnected));
-    assert_eq!(host.from_engine.recv().await, None, "to_codex ended");
-    let finished = engine.finished();
-    finished.clone().await;
-    finished.await;
-    assert_eq!(engine.shared.ledger.used(), FIXED);
-    assert_eq!(engine.send_text("hi").await, Err(EmbeddedError::Closed { fault: Some(Fault::InvalidFrame) }));
+    host.send(note("turn/plan/updated", json!({"threadId": THREAD, "turnId": "t"}))).await;
+    assert!(matches!(events.recv().await, Some(EmbeddedEvent::Unmapped { .. })), "an admitted turn, unlisted");
+    host.send(note("turn/plan/updated", json!({"threadId": THREAD, "turnId": "stray"}))).await;
+    assert_eq!(closed_with(&mut events).await, Some(Fault::WrongTurn));
+    let (engine, mut events, mut host) = opened().await;
+    running(&engine, &mut host, "t").await;
+    host.send(note("turn/diff/updated", json!({"threadId": THREAD, "turn": {"id": "stray"}}))).await;
+    assert_eq!(closed_with(&mut events).await, Some(Fault::WrongTurn));
 }
 
 #[tokio::test]
-async fn close_before_connect_releases_the_transport() {
-    let (engine, mut events, mut host) = host_with(8, |_| {});
-    let finished = engine.finished();
-    drop(engine);
-    finished.await;
-    assert_eq!(host.from_engine.recv().await, None);
-    assert!(host.to_engine.take().unwrap().send("x".into()).await.is_err(), "from_codex freed with the transport");
-    assert_eq!(events.recv().await, Some(EmbeddedEvent::Closed { fault: None }));
-}
-
-#[tokio::test]
-async fn input_ended_output_closed_and_output_full_fault() {
-    let (_engine, mut events, mut host) = opened().await;
-    host.to_engine = None;
-    assert_eq!(closed_with(&mut events).await, Some(Fault::InputEnded));
-
-    let (engine, mut events, host) = opened().await;
-    drop(host.from_engine);
-    assert_eq!(engine.send_text("hi").await, Err(EmbeddedError::Closed { fault: Some(Fault::OutputClosed) }));
-    assert_eq!(closed_with(&mut events).await, Some(Fault::OutputClosed));
-    engine.finished().await;
-
-    let (engine, mut events, host) = host_with(1, |_| {});
-    let (connected, ()) = tokio::join!(engine.connect(), async {
-        host.send(json!({"id": 1, "result": {}})).await;
+async fn a_turn_start_reply_naming_another_turn_than_the_one_seen_faults() {
+    let (engine, mut events, mut host) = opened().await;
+    let (sent, ()) = tokio::join!(engine.send_text("hi"), async {
+        let start = host.next().await;
+        host.send(note("turn/started", json!({"threadId": THREAD, "turn": {"id": "seen", "status": "inProgress"}}))).await;
+        host.send(host.reply(&start["id"], json!({"turn": {"id": "other", "status": "inProgress"}}))).await;
     });
-    // `initialize` still waits in the host's channel of one, so `initialized` did not fit.
-    assert_eq!(connected, Err(EmbeddedError::Closed { fault: Some(Fault::OutputFull) }));
-    assert_eq!(closed_with(&mut events).await, Some(Fault::OutputFull));
+    assert_eq!(sent, Err(EmbeddedError::Closed { fault: Some(Fault::WrongTurn) }));
+    assert_eq!(closed_with(&mut events).await, Some(Fault::WrongTurn));
 }
 
 #[tokio::test]
-async fn a_full_ring_faults_and_a_drained_one_takes_more() {
-    let (_engine, mut events, host) = opened().await;
-    let slots = LIMITS.event_bytes as usize / 512;
-    for round in 0..2 {
-        for n in 0..slots {
-            host.send(note("account/rateLimits/updated", json!({"n": n, "round": "r".repeat(round * 100)}))).await;
-        }
-        settle().await;
-        for _ in 0..slots {
-            assert!(matches!(events.try_recv(), Ok(EmbeddedEvent::Notification { method: Method::RateLimits, .. })));
-        }
-        assert_eq!(events.try_recv(), Err(TryRecvError::Empty));
-    }
-    for n in 0..=slots {
-        host.send(note("account/rateLimits/updated", json!({"n": n}))).await;
-    }
-    settle().await;
-    assert_eq!(closed_with(&mut events).await, Some(Fault::OverBudget));
+async fn a_thread_closed_before_the_turn_start_reply_admits_no_turn() {
+    let (engine, mut events, mut host) = opened().await;
+    let (sent, ()) = tokio::join!(engine.send_text("hi"), async {
+        let start = host.next().await;
+        host.send(note("thread/closed", json!({"threadId": THREAD}))).await;
+        host.send(host.reply(&start["id"], json!({"turn": {"id": "t", "status": "inProgress"}}))).await;
+    });
+    assert_eq!(sent.unwrap().0, "t");
+    assert!(matches!(events.recv().await, Some(EmbeddedEvent::Notification { method: Method::ThreadClosed, .. })));
+    assert_eq!(engine.interrupt().await, Err(EmbeddedError::Invalid { reason: "no open thread" }));
+    assert_eq!(engine.send_text("hi").await, Err(EmbeddedError::Invalid { reason: "no open thread" }));
 }
 
 #[tokio::test]
-async fn unread_strings_are_bounded_by_event_bytes() {
-    let (_engine, mut events, host) = opened().await;
-    let big = note("account/rateLimits/updated", json!({"pad": "p".repeat(100_000)}));
-    host.send(&big).await;
-    host.send(&big).await;
-    settle().await;
-    assert!(events.try_recv().is_ok());
-    host.send(&big).await;
-    host.send(&big).await;
-    settle().await;
-    assert_eq!(closed_with(&mut events).await, Some(Fault::OverBudget));
-}
-
-#[tokio::test]
-async fn a_frame_over_its_bounds_faults() {
-    let (_engine, mut events, host) = opened().await;
-    let mut frame = String::with_capacity(128 * 1024 + 1);
-    frame.push_str(&note("account/rateLimits/updated", json!({})));
-    host.send_as_is(frame).await;
-    assert_eq!(closed_with(&mut events).await, Some(Fault::OverBudget));
-
-    let (_engine, mut events, host) = opened().await;
-    let pad = |n: usize| note("account/rateLimits/updated", json!({"pad": "p".repeat(n)}));
-    let frame = pad(131_072 - pad(0).len());
-    assert_eq!(frame.len(), 131_072, "a frame's text is at most 131,071 bytes");
-    host.send(frame).await;
-    assert_eq!(closed_with(&mut events).await, Some(Fault::InvalidFrame));
+async fn interrupt_is_invalid_once_the_thread_closed_mid_turn() {
+    let (engine, mut events, mut host) = opened().await;
+    running(&engine, &mut host, "t").await;
+    host.send(note("thread/closed", json!({"threadId": THREAD}))).await;
+    events.recv().await;
+    assert_eq!(engine.interrupt().await, Err(EmbeddedError::Invalid { reason: "no open thread" }));
+    assert!(host.from_engine.try_recv().is_err(), "nothing written for the revoked thread");
 }

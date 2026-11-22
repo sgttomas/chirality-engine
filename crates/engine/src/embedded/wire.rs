@@ -21,12 +21,22 @@ pub(crate) const CONSTANT: usize = 64;
 /// Whether `text` is one JSON value of at most [`FRAME_TEXT`] bytes nesting at
 /// most [`DEPTH`] deep: a strict RFC 8259 check that allocates nothing.
 pub(crate) fn prescan(text: &str) -> bool {
-    text.len() <= FRAME_TEXT && Scan { b: text.as_bytes(), i: 0 }.document()
+    text.len() <= FRAME_TEXT && prescan_within(text, DEPTH)
+}
+
+/// The deepest `tools` may nest: `thread/start` writes it inside four
+/// containers (the frame, `params`, `dynamicTools` and the namespace).
+pub(crate) const TOOLS_DEPTH: usize = DEPTH - 4;
+
+/// Whether `text` is one JSON value nesting at most `depth` deep.
+pub(crate) fn prescan_within(text: &str, depth: usize) -> bool {
+    Scan { b: text.as_bytes(), i: 0, max: depth }.document()
 }
 
 struct Scan<'a> {
     b: &'a [u8],
     i: usize,
+    max: usize,
 }
 
 impl Scan<'_> {
@@ -55,7 +65,7 @@ impl Scan<'_> {
                 Some(open @ (b'{' | b'[')) => {
                     self.i += 1;
                     depth += 1;
-                    if depth > DEPTH {
+                    if depth > self.max {
                         return false;
                     }
                     let object = open == b'{';
@@ -338,7 +348,13 @@ pub(crate) fn bare(raw: &RawValue, max: usize) -> Option<&str> {
 /// control escapes and `\u` (pairs for astral characters). `None` when `raw`
 /// is not a string, holds a lone surrogate, or does not fit `buf`.
 pub(crate) fn unescape<'b>(raw: &RawValue, buf: &'b mut [u8]) -> Option<&'b str> {
-    let inner = raw.get().strip_prefix('"')?.strip_suffix('"')?.as_bytes();
+    unescape_text(raw.get().strip_prefix('"')?.strip_suffix('"')?, buf)
+}
+
+/// A string's text between its quotes, unescaped into `buf`; `None` for any
+/// escape outside JSON's.
+fn unescape_text<'b>(inner: &str, buf: &'b mut [u8]) -> Option<&'b str> {
+    let inner = inner.as_bytes();
     let (mut i, mut n) = (0, 0);
     while i < inner.len() {
         let byte = inner[i];
@@ -357,7 +373,8 @@ pub(crate) fn unescape<'b>(raw: &RawValue, buf: &'b mut [u8]) -> Option<&'b str>
             b'n' => Some(b'\n'),
             b'r' => Some(b'\r'),
             b't' => Some(b'\t'),
-            _ => None,
+            b'u' => None,
+            _ => return None,
         };
         if let Some(byte) = simple {
             *buf.get_mut(n)? = byte;
@@ -390,8 +407,10 @@ pub(crate) fn unescape<'b>(raw: &RawValue, buf: &'b mut [u8]) -> Option<&'b str>
     std::str::from_utf8(&buf[..n]).ok()
 }
 
+/// Four hex digits, and nothing else (no sign).
 fn hex4(digits: &[u8]) -> Option<u32> {
-    std::str::from_utf8(digits).ok().and_then(|d| u32::from_str_radix(d, 16).ok())
+    let digits: &[u8; 4] = digits.try_into().ok()?;
+    digits.iter().try_fold(0, |code, digit| Some(code * 16 + (*digit as char).to_digit(16)?))
 }
 
 /// An identity: a non-empty string of at most 256 bytes once unescaped, with
