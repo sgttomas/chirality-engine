@@ -9,6 +9,8 @@
 //! (the host waits for the engine to take it before the next). Every scenario
 //! runs once unmeasured first, so one-time runtime state is not counted.
 
+#[path = "memory/calls.rs"]
+mod calls;
 mod support;
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -339,6 +341,7 @@ async fn the_engine_stays_within_its_maximum() {
     for measured in [false, true] {
         MEASURED.with(|m| m.set(measured));
         scenarios(LIMITS).await;
+        calls::scenarios(LIMITS).await;
     }
     MEASURED.with(|m| m.set(false));
 }

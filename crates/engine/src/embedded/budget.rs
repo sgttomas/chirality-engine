@@ -3,12 +3,16 @@
 //! its class, the next power of two of at least 16 bytes).
 
 use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
+use std::task::{Context, Poll};
 
 use tokio::sync::Notify;
+use tokio::sync::futures::OwnedNotified;
 
-use super::types::{EmbeddedEvent, EmbeddedLimits, Fault};
+use super::types::{EmbeddedEvent, EmbeddedLimits, Fault, RpcId};
 
 const KIB: u64 = 1024;
 
@@ -32,7 +36,7 @@ pub(crate) const RING_SLOT: u64 = 128;
 /// Unread events' bytes per ring slot.
 pub(crate) const EVENT_BYTES_PER_SLOT: u64 = 512;
 /// The record: one preallocated entry per request, and two identities.
-const RECORD_ENTRY: u64 = 56;
+pub(crate) const RECORD_ENTRY: u64 = 56;
 const RECORD_IDENTITIES: u64 = 512;
 /// One reply waiting in its method's slot.
 pub(crate) const REPLY: u64 = 4 * KIB;
@@ -190,6 +194,22 @@ impl Charge {
     pub(crate) fn ledger(&self) -> &Arc<Ledger> {
         &self.ledger
     }
+
+    /// Charges `bytes` more to this guard.
+    pub(crate) fn grow(&mut self, bytes: u64) -> Result<(), Fault> {
+        debug_assert!(!self.event);
+        add(&self.ledger.used, bytes, self.ledger.max)?;
+        self.bytes += bytes;
+        Ok(())
+    }
+
+    /// Releases all this guard holds, once what it paid for is freed.
+    pub(crate) fn release_all(&mut self) {
+        let bytes = std::mem::take(&mut self.bytes);
+        if bytes > 0 {
+            self.ledger.release(bytes);
+        }
+    }
 }
 
 impl Drop for Charge {
@@ -255,8 +275,53 @@ pub(crate) fn event_bytes(event: &EmbeddedEvent) -> u64 {
         EmbeddedEvent::Notification { turn, item, status, json, .. } => {
             turn.as_ref().map_or(0, |t| size(&t.0)) + item.as_ref().map_or(0, |i| size(&i.id) + maybe(&i.item_type)) + maybe(status) + size(json)
         }
+        EmbeddedEvent::Call { call, tool, arguments } => {
+            let rpc = match &call.rpc_id {
+                RpcId::Text(id) => size(id),
+                RpcId::Integer(_) => 0,
+            };
+            rpc + size(&call.call_id) + size(&call.turn.0) + size(tool) + class(arguments.len() as u64)
+        }
         EmbeddedEvent::Refused { method, thread, json } | EmbeddedEvent::Unmapped { method, thread, json } => size(method) + maybe(thread) + size(json),
         EmbeddedEvent::Unheld { method, thread, json } => size(method) + size(thread) + size(json),
+    }
+}
+
+// ---------- finished ----------
+
+pin_project_lite::pin_project! {
+    /// Resolves once the engine has finished ([`super::EmbeddedEngine::finished`]).
+    pub struct Finished {
+        shared: Arc<super::Shared>,
+        #[pin]
+        notified: OwnedNotified,
+    }
+}
+
+impl Finished {
+    pub(super) fn new(shared: Arc<super::Shared>) -> Finished {
+        let notified = shared.ledger.notify.clone().notified_owned();
+        Finished { shared, notified }
+    }
+}
+
+impl Clone for Finished {
+    fn clone(&self) -> Finished {
+        Finished::new(self.shared.clone())
+    }
+}
+
+impl Future for Finished {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let mut this = self.project();
+        // Registered before the check, so a finish between the two still wakes it.
+        this.notified.as_mut().enable();
+        if this.shared.ledger.is_finished() {
+            return Poll::Ready(());
+        }
+        this.notified.poll(cx)
     }
 }
 

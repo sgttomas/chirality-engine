@@ -85,7 +85,11 @@ pub(super) async fn settle() {
 
 /// Connected, remote control `Disabled`, and the thread held.
 pub(super) async fn opened() -> (EmbeddedEngine, EmbeddedEvents, Host) {
-    let (engine, mut events, mut host) = host_with(64, |_| {});
+    opened_with(|_| {}).await
+}
+
+pub(super) async fn opened_with(edit: impl FnOnce(&mut EmbeddedConfig)) -> (EmbeddedEngine, EmbeddedEvents, Host) {
+    let (engine, mut events, mut host) = host_with(64, edit);
     let ((), opened) = tokio::join!(async { engine.connect().await.unwrap() }, async {
         let init = host.next().await;
         host.send(host.reply(&init["id"], json!({}))).await;

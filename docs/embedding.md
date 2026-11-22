@@ -1,8 +1,8 @@
 # Embedding under containment
 
 Part of the engine's design (`SPEC.md`). Designed 2026-11-22 for SWBPIPE,
-revised after five rounds of review. Step 1 (the core) is built; calls
-(`calls.rs`) are not yet.
+revised after five rounds of review. Step 1 (the core) and step 2 (calls,
+`calls.rs`) are built.
 
 SWBPIPE runs one Codex per session, with one ephemeral thread, no built-in
 capability, and remote control off; any built-in activity ends the session.
@@ -172,17 +172,24 @@ Methods run in their caller's task.
   - its `callId` is an identity;
   - it names the namespace and one of its tools;
   - it is in the running turn on the held thread;
-  - its `arguments` are present and within `argument_bytes`;
+  - its `arguments` are present (`null` too, as its raw text) and within
+    `argument_bytes`;
   - fewer than `pending_calls` are pending.
 - **Refusal.** Any other request, including a call without a valid `callId`,
   becomes `Refused`. Then `{"id": …, "error": {"code": -32601, "message":
   "not supported by this client"}}` is written.
+- **Generations.** Each admitted call's `CallRef` carries a generation the
+  engine issues, never repeated in a session. Codex may reuse an ended turn's
+  id, an RPC id and a `callId` in a later turn, and the record is cleared
+  between them, so the ids alone do not name a call; the generation does.
 - **Answers.** `answer` writes `{"id": …, "result": {"contentItems":
   [{"type": "inputText", "text": …}], "success": …}}`.
   - It is `Invalid` if the text is over `result_bytes`, or the encoded frame
     is over 131,071 bytes; the call stays pending. A 65,515-byte text, for
     example, makes a 65,710-byte line and is written.
-  - It is `Invalid` for a retired call, and writes nothing then.
+  - It is `Invalid` for a retired call, and writes nothing then. Close
+    retires every call, so after close a call the engine issued is
+    `Invalid` too; only a call it never issued is `Closed`.
 - **Retirement.** A call is retired by its answer, or by any of these:
   - an `item/completed` of type `dynamicToolCall` whose `item.id` is its
     `callId`, in the running turn;
@@ -208,13 +215,13 @@ an event that ends its session.
 pub enum EmbeddedEvent {
     RemoteControl { status: RemoteControl },
     Notification { method: Method, turn: Option<TurnId>, item: Option<ItemRef>, status: Option<String>, json: String },
-    Call { call: CallRef, tool: String, arguments: String },
+    Call { call: CallRef, tool: String, arguments: Box<str> },
     Refused { method: String, thread: Option<String>, json: String },
     Unheld { method: String, thread: String, json: String },
     Unmapped { method: String, thread: Option<String>, json: String },
     Closed { fault: Option<Fault> },
 }
-pub struct CallRef { pub rpc_id: RpcId, pub call_id: String, pub turn: TurnId }
+pub struct CallRef { pub rpc_id: RpcId, pub call_id: String, pub turn: TurnId, pub generation: u64 }
 pub enum RpcId { Integer(i64), Text(String) }
 pub struct ItemRef { pub id: String, pub item_type: Option<String> } // deltas carry no type
 pub enum RemoteControl { Disabled, Connecting, Connected, Errored, Other }
@@ -396,8 +403,14 @@ Step 1's counting-allocator test drives adversarial frames down every path:
 - a ring filled, drained and refilled with different payload sizes;
 - close on every path, before and after `connect`.
 
+Step 2 adds calls to it:
+- the recorded call, answered with 65,515 bytes, and the recorded interrupt;
+- calls pending and answered at their largest arguments and text;
+- a full record of refused requests with 256-byte identities, then one more.
+
 It counts the engine's allocations at classes, old plus new, and fails above
-`max_bytes`. Another test checks that an event is at most 128 bytes.
+`max_bytes`. Another test checks that an event is at most 128 bytes (so a call's
+`arguments` are a `Box<str>`).
 
 **Established at the pin (0.171.0).** These runs used scratch homes, plugins
 off, a loopback stub provider, `timeout` and a dummy relay variable. They used

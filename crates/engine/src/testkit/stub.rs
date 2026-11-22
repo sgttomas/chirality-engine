@@ -33,6 +33,8 @@ pub type Script = Arc<dyn Fn(&Request) -> Reply + Send + Sync>;
 pub struct Stub {
     pub port: u16,
     scripts: Arc<Mutex<HashMap<String, Script>>>,
+    /// Every model request's body, scripted or not, in order.
+    pub bodies: Arc<Mutex<Vec<Value>>>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -47,15 +49,16 @@ impl Stub {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("loopback listener");
         let port = listener.local_addr().unwrap().port();
         let scripts: Arc<Mutex<HashMap<String, Script>>> = Arc::default();
+        let bodies: Arc<Mutex<Vec<Value>>> = Arc::default();
         let task = tokio::spawn({
-            let scripts = scripts.clone();
+            let (scripts, bodies) = (scripts.clone(), bodies.clone());
             async move {
                 while let Ok((stream, _)) = listener.accept().await {
-                    tokio::spawn(serve(stream, scripts.clone()));
+                    tokio::spawn(serve(stream, scripts.clone(), bodies.clone()));
                 }
             }
         });
-        Stub { port, scripts, task }
+        Stub { port, scripts, bodies, task }
     }
 
     pub fn base_url(&self) -> String {
@@ -67,7 +70,7 @@ impl Stub {
     }
 }
 
-async fn serve(mut stream: TcpStream, scripts: Arc<Mutex<HashMap<String, Script>>>) {
+async fn serve(mut stream: TcpStream, scripts: Arc<Mutex<HashMap<String, Script>>>, bodies: Arc<Mutex<Vec<Value>>>) {
     let Some((head, body)) = read_request(&mut stream).await else { return };
     let mut lines = head.lines();
     let request_line = lines.next().unwrap_or_default().to_string();
@@ -82,6 +85,7 @@ async fn serve(mut stream: TcpStream, scripts: Arc<Mutex<HashMap<String, Script>
         return plain(&mut stream, 404).await;
     }
     let Ok(body) = serde_json::from_slice::<Value>(&body) else { return plain(&mut stream, 400).await };
+    bodies.lock().unwrap().push(body.clone());
     let (text, outputs) = turn_view(&body);
     let key = text.split_once("STUB[").and_then(|(_, rest)| rest.split_once(']')).map(|(k, _)| k.to_string());
     let script = key.as_ref().and_then(|k| scripts.lock().unwrap().get(k).cloned());

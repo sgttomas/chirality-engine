@@ -64,15 +64,38 @@ pub enum Fault {
     OutputFull,
 }
 
+/// What the engine tells the host. A `Call` is one the host answers
+/// ([`super::EmbeddedEngine::answer`]); its `arguments` are their raw text,
+/// a `Box<str>` so that the event keeps to its 128-byte ring slot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EmbeddedEvent {
     RemoteControl { status: RemoteControl },
     Notification { method: Method, turn: Option<TurnId>, item: Option<ItemRef>, status: Option<String>, json: String },
+    Call { call: CallRef, tool: String, arguments: Box<str> },
     Refused { method: String, thread: Option<String>, json: String },
     Unheld { method: String, thread: String, json: String },
     Unmapped { method: String, thread: Option<String>, json: String },
     Closed { fault: Option<Fault> },
+}
+
+/// A call, as the host names it to answer it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallRef {
+    pub rpc_id: RpcId,
+    pub call_id: String,
+    pub turn: TurnId,
+    /// Issued by the engine, never repeated in a session.
+    pub generation: u64,
+}
+
+/// A request's RPC id: an integer, or an identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum RpcId {
+    Integer(i64),
+    Text(String),
 }
 
 /// An item a notification names; deltas carry no type.
