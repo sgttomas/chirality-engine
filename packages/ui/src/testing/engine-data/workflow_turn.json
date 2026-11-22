@@ -407,6 +407,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[flow] Estimate this",
+          "threads": [],
           "workflow": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md"
         },
         "done": false,
@@ -432,6 +433,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[flow] Estimate this",
+          "threads": [],
           "workflow": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md"
         },
         "done": true,
@@ -568,6 +570,7 @@
                   "from": null,
                   "kind": "userMessage",
                   "text": "STUB[flow] Estimate this",
+                  "threads": [],
                   "workflow": "/work/run/project/.chirality/workflows/estimate/WORKFLOW.md"
                 },
                 "done": true,

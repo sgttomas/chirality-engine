@@ -28,7 +28,6 @@ pub(crate) fn handle<R: Runtime>(invoke: Invoke<R>) -> bool {
         mark_read,
         answer,
         read_file,
-        find_files,
     ];
     handler(invoke)
 }
@@ -107,9 +106,5 @@ async fn answer(s: S<'_>, request: RequestId, answer: Answer) -> Result<()> {
 #[tauri::command(rename = "engine:read_file")]
 async fn read_file(s: S<'_>, project: ProjectId, path: PathBuf) -> Result<String> {
     started(&s).await?.read_file(&project, path).await
-}
-#[tauri::command(rename = "engine:find_files")]
-async fn find_files(s: S<'_>, project: ProjectId, query: String) -> Result<Vec<PathBuf>> {
-    started(&s).await?.find_files(&project, query).await
 }
 

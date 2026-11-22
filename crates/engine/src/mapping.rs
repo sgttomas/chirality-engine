@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use crate::api::*;
-use crate::assignment::marker::{self, Marker};
+use crate::assignment::marker::{self, Marker, Mention};
 use crate::protocol::{self as p, ThreadItem, UserInput};
 
 // ---------- what the person sends ----------
@@ -23,11 +23,13 @@ pub(crate) struct PickedWorkflow {
 }
 
 /// The turn input for a message: another thread's mark when it sent it, the
-/// text, then each attachment, then a picked workflow as its own text, the
+/// text, each thread it mentions (`mentions`, the message's threads with their
+/// projects), then each attachment, then a picked workflow as its own text, the
 /// way Codex sends a picked skill.
-pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>, from: Option<&Marker>) -> Vec<UserInput> {
+pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>, from: Option<&Marker>, mentions: &[Mention]) -> Vec<UserInput> {
     let mut input: Vec<UserInput> = from.map(|m| UserInput::text(marker::render(m))).into_iter().collect();
     input.push(UserInput::text(message.text.clone()));
+    input.extend(mentions.iter().map(|m| UserInput::text(marker::render_ref(m))));
     for attachment in &message.attachments {
         match attachment {
             Attachment::Image { path } => input.push(UserInput::LocalImage { path: path.display().to_string() }),
@@ -44,7 +46,7 @@ pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>
 /// parts: the text comes first (after another thread's mark), so it is what is kept.
 pub(crate) fn title_from_preview(preview: &str) -> Option<String> {
     let preview = marker::from_preview(preview).1;
-    let end = [FILE_PREFIX, WORKFLOW_OPEN].iter().filter_map(|marker| preview.find(marker)).min().unwrap_or(preview.len());
+    let end = [marker::REF_OPEN, FILE_PREFIX, WORKFLOW_OPEN].iter().filter_map(|marker| preview.find(marker)).min().unwrap_or(preview.len());
     Some(preview[..end].trim().to_string()).filter(|t| !t.is_empty())
 }
 
@@ -52,6 +54,7 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
     let mut texts = Vec::new();
     let mut attachments = Vec::new();
     let mut workflow = None;
+    let mut threads = Vec::new();
     let from = match content.first() {
         Some(p::InputInfo::Text { text }) => marker::part(text),
         _ => None,
@@ -70,6 +73,7 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
                     .find_map(|l| l.strip_prefix("<path>").and_then(|l| l.strip_suffix("</path>")))
                     .map(|path| WorkflowId(path.to_string()));
             }
+            p::InputInfo::Text { text } if marker::thread_ref(text).is_some() => threads.extend(marker::thread_ref(text)),
             p::InputInfo::Text { text } => match text.strip_prefix(FILE_PREFIX) {
                 Some(path) if !path.contains('\n') => attachments.push(Attachment::File { path: path.into() }),
                 _ => texts.push(text.as_str()),
@@ -78,7 +82,7 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
             p::InputInfo::Image | p::InputInfo::Other => {}
         }
     }
-    ItemBody::UserMessage { text: texts.join("\n"), attachments, workflow, from: from.as_ref().map(Marker::from) }
+    ItemBody::UserMessage { text: texts.join("\n"), attachments, workflow, threads, from: from.as_ref().map(Marker::from) }
 }
 
 // ---------- items, turns, threads ----------
@@ -377,26 +381,44 @@ mod tests {
             text: "Go".into(),
             attachments: vec![Attachment::File { path: "/p/a.md".into() }, Attachment::Image { path: "/p/i.png".into() }],
             workflow: Some(WorkflowId("/lib/w/WORKFLOW.md".into())),
+            threads: vec![],
         };
         let picked = PickedWorkflow { id: WorkflowId("/lib/w/WORKFLOW.md".into()), name: "w".into(), body: "# W\nDo it.\n".into() };
-        let input = message_input(&message, Some(&picked), None);
+        let input = message_input(&message, Some(&picked), None, &[]);
         let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
-        assert_eq!(user_message(&content), ItemBody::UserMessage { text: "Go".into(), attachments: message.attachments.clone(), workflow: message.workflow.clone(), from: None });
+        assert_eq!(user_message(&content), ItemBody::UserMessage { text: "Go".into(), attachments: message.attachments.clone(), workflow: message.workflow.clone(), threads: vec![], from: None });
         // From another thread: its mark first, which is not part of the text, nor of the title.
         let mark = Marker { from: ThreadId("lead".into()), title: Some("Lead".into()), report: Some(TurnEnd::Completed) };
-        let input = message_input(&message, Some(&picked), Some(&mark));
+        let input = message_input(&message, Some(&picked), Some(&mark), &[]);
         let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
         let ItemBody::UserMessage { text, from, workflow, .. } = user_message(&content) else { panic!() };
         assert_eq!((text.as_str(), from, workflow), ("Go", Some(mark.from()), message.workflow.clone()));
         assert_eq!(title_from_preview(&format!("{}Check the piles{FILE_PREFIX}/p/a.md", marker::render(&mark))).as_deref(), Some("Check the piles"));
         // A report whose reply reads like an attachment line is that reply, whole.
-        let reply = Message { text: format!("{FILE_PREFIX}quantities.csv"), attachments: vec![], workflow: None };
-        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&reply, None, Some(&mark))).unwrap()).unwrap();
+        let reply = Message { text: format!("{FILE_PREFIX}quantities.csv"), attachments: vec![], workflow: None, threads: vec![] };
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&reply, None, Some(&mark), &[])).unwrap()).unwrap();
         let ItemBody::UserMessage { text, attachments, .. } = user_message(&content) else { panic!() };
         assert_eq!((text.as_str(), attachments.len()), ("Attached file: quantities.csv", 0));
-        let mine = Message { text: "<workflow>\n<path>/x</path>".into(), attachments: vec![], workflow: None };
-        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&mine, None, None)).unwrap()).unwrap();
+        let mine = Message { text: "<workflow>\n<path>/x</path>".into(), attachments: vec![], workflow: None, threads: vec![] };
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&mine, None, None, &[])).unwrap()).unwrap();
         assert!(matches!(user_message(&content), ItemBody::UserMessage { workflow: None, .. }), "the person's own text is never a workflow");
+    }
+
+    #[test]
+    fn a_mentioned_thread_reads_back_and_stays_out_of_the_title() {
+        let piles = ThreadRef { thread: ThreadId("t2".into()), title: Some("Piles".into()) };
+        let message = Message { text: "Ask @Piles".into(), attachments: vec![Attachment::File { path: "/p/a.md".into() }], workflow: None, threads: vec![piles.clone()] };
+        let mentions = [Mention { thread: piles.clone(), project: Some("Bridge".into()) }];
+        let input = message_input(&message, None, None, &mentions);
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
+        let ItemBody::UserMessage { text, threads, attachments, .. } = user_message(&content) else { panic!() };
+        assert_eq!((text.as_str(), threads, attachments), ("Ask @Piles", vec![piles], message.attachments.clone()));
+        let preview = format!("Ask @Piles{}{FILE_PREFIX}/p/a.md", marker::render_ref(&mentions[0]));
+        assert_eq!(title_from_preview(&preview).as_deref(), Some("Ask @Piles"));
+        // The person's own text is the text, whatever it says.
+        let mine = Message { text: marker::render_ref(&mentions[0]), attachments: vec![], workflow: None, threads: vec![] };
+        let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&mine, None, None, &[])).unwrap()).unwrap();
+        assert!(matches!(user_message(&content), ItemBody::UserMessage { threads, .. } if threads.is_empty()));
     }
 
     #[test]

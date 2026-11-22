@@ -1,11 +1,12 @@
-import type { Item, PlanStep, Workflow } from "../../engine/types";
-import { shortPath } from "../../state/selectors";
-import { useProjectRoot } from "../../state/store";
+import type { Item, PlanStep, ThreadId, Workflow } from "../../engine/types";
+import { nameOf, shortPath } from "../../state/selectors";
+import { useProjectRoot, useStore } from "../../state/store";
 import { Diff, DiffStat } from "../Diff";
 import { Icon } from "../Icon";
 import { usePanel } from "../panel";
 import { workLine, workSummary } from "./group";
 import { Markdown } from "./Markdown";
+import { ThreadChips } from "./ThreadChips";
 import "../styles/base.css";
 
 /** The workflow a message picked. */
@@ -21,13 +22,14 @@ export function WorkflowChip({ workflow, workflows }: { workflow: string; workfl
 export function UserMessage({ item, workflows }: { item: Item; workflows: Workflow[] }) {
   const root = useProjectRoot();
   if (item.body.kind !== "userMessage") return null;
-  const { text, attachments, workflow } = item.body;
+  const { text, attachments, workflow, threads } = item.body;
   const picked = workflow ? workflows.find((w) => w.id === workflow) : undefined;
   return (
     <div className="msg-user">
-      {(picked || attachments.length > 0) && (
+      {(picked || attachments.length > 0 || threads.length > 0) && (
         <div className="chips">
           {workflow && <WorkflowChip workflow={workflow} workflows={workflows} />}
+          <ThreadChips threads={threads} />
           {attachments.map((a) => (
             <span key={a.path} className="chip" title={shortPath(a.path, root)}>
               <Icon name={a.kind === "image" ? "file" : "paperclip"} /> {a.path.split("/").pop()}
@@ -46,22 +48,32 @@ export function AgentMessage({ text }: { text: string }) {
 
 /** Reasoning and tool activity, folded; open while it runs if the person opens it. */
 export function Work({ items, live }: { items: Item[]; live: boolean }) {
+  const name = useThreadNames();
   const last = items[items.length - 1];
   return (
     <details className={`work ${live ? "work--live" : ""} ${live && last.body.kind === "command" ? "work--command" : ""}`}>
       <summary>
-        <span className="work-summary">{live ? workLine(last) : workSummary(items)}</span>
+        <span className="work-summary">{live ? workLine(last, name) : workSummary(items)}</span>
       </summary>
       <ul className="work-list">
         {items.map((item) => (
-          <WorkItem key={item.id} item={item} />
+          <WorkItem key={item.id} item={item} name={name} />
         ))}
       </ul>
     </details>
   );
 }
 
-function WorkItem({ item }: { item: Item }) {
+/** A thread's name from the snapshot, for the work done with it. */
+function useThreadNames(): (id: ThreadId | null) => string {
+  const threads = useStore((s) => s.model!.snapshot.threads);
+  return (id) => {
+    const thread = id ? threads.find((t) => t.id === id) : undefined;
+    return thread ? nameOf(thread) : "a thread";
+  };
+}
+
+function WorkItem({ item, name }: { item: Item; name: (id: ThreadId | null) => string }) {
   const b = item.body;
   switch (b.kind) {
     case "reasoning":
@@ -92,7 +104,7 @@ function WorkItem({ item }: { item: Item }) {
       );
     case "webSearch":
     case "threadTool":
-      return <li className="work-reasoning">{workLine(item)}</li>;
+      return <li className="work-reasoning">{workLine(item, name)}</li>;
     case "subagentTool":
       return (
         <li className="work-reasoning">

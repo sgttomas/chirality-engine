@@ -1,16 +1,20 @@
 //! The adapter against the real engine and the pinned Codex, with no window and
 //! no application: Tauri's mock runtime carries each call through IPC as the
 //! interface would. Codex runs in a scratch home with every outside host
-//! unreachable; no sign-in, no model turn. `CHIRALITY_TEST_CODEX` names the
+//! unreachable; no sign-in, and model turns only against a stub on loopback
+//! (`support`). `CHIRALITY_TEST_CODEX` names the
 //! pinned Codex (skipped without it); `CHIRALITY_TEST_SCRATCH` the folder for
 //! the run (a folder in the system's temporary directory by default).
+
+mod support;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chirality_engine_tauri::chirality_engine::{
-    AppTool, AppTools, CodexStatus, EngineConfig, EngineError, Event, Numbered, Project, Snapshot, ToolCall, ToolNamespace, ToolOutput,
+    AppTool, AppTools, CodexStatus, EngineConfig, EngineError, Event, ItemBody, Numbered, Project, Snapshot, ThreadId, ThreadTool, ThreadView, ToolCall,
+    ToolCallStatus, ToolNamespace, ToolOutput, TurnState,
 };
 use chirality_engine_tauri::{EVENT, commands, engine, plugin, shutdown};
 use serde_json::{Value, json};
@@ -87,10 +91,8 @@ fn the_applications_tools_are_given_to_the_engine() {
 
 #[test]
 fn the_interface_reaches_the_real_engine_without_a_window() {
-    let Some(codex) = std::env::var_os("CHIRALITY_TEST_CODEX").map(PathBuf::from).filter(|p| p.is_file()) else {
-        eprintln!("skipped: set CHIRALITY_TEST_CODEX to the pinned Codex");
-        return;
-    };
+    let Some(codex) = codex_or_skip() else { return };
+    let _one = CODEX_RUNS.lock().unwrap_or_else(|e| e.into_inner());
     let scratch = std::env::var_os("CHIRALITY_TEST_SCRATCH").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("chirality-engine-tests"));
     let root = scratch.join(format!("tauri-headless-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -120,8 +122,6 @@ fn the_interface_reaches_the_real_engine_without_a_window() {
     assert!(ready, "Codex did not become ready with the application's tools");
 
     let project: Project = serde_json::from_value(call(&webview, "engine:add_project", json!({ "path": root.join("project") })).unwrap()).unwrap();
-    let found = call(&webview, "engine:find_files", json!({ "project": project.id, "query": "brief" })).unwrap();
-    assert!(found.to_string().contains("notes/brief.md"), "{found}");
     let text = call(&webview, "engine:read_file", json!({ "project": project.id, "path": "notes/brief.md" })).unwrap();
     assert_eq!(text, json!("# Brief\n"));
     assert!(call(&webview, "engine:read_thread", json!({ "thread": "no-such-thread" })).is_err());
@@ -150,6 +150,96 @@ fn the_interface_reaches_the_real_engine_without_a_window() {
     let starting = self::app(config(codex, &root, None));
     tauri::async_runtime::block_on(shutdown(starting.handle()));
     assert_eq!(codex_children(), "", "the Codex a start in flight spawned is reaped");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The tests that run Codex, one at a time: each counts the Codex processes left.
+static CODEX_RUNS: Mutex<()> = Mutex::new(());
+
+fn codex_or_skip() -> Option<PathBuf> {
+    let codex = std::env::var_os("CHIRALITY_TEST_CODEX").map(PathBuf::from).filter(|p| p.is_file());
+    if codex.is_none() {
+        eprintln!("skipped: set CHIRALITY_TEST_CODEX to the pinned Codex");
+    }
+    codex
+}
+
+/// The engine's tools reach the agent through the adapter: a thread's agent reads another thread
+/// with `chirality.read`, and gets its messages; the read shows in its conversation.
+#[test]
+fn an_agent_reads_another_thread_through_the_adapter() {
+    let Some(codex) = codex_or_skip() else { return };
+    let _one = CODEX_RUNS.lock().unwrap_or_else(|e| e.into_inner());
+    let scratch = std::env::var_os("CHIRALITY_TEST_SCRATCH").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("chirality-engine-tests"));
+    let root = scratch.join(format!("tauri-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for dir in ["home", "state", "project"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    unsafe { std::env::set_var("NO_PROXY", "127.0.0.1,localhost") };
+    for name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
+        unsafe { std::env::set_var(name, "http://127.0.0.1:9") };
+    }
+    let peer = Arc::new(Mutex::new(String::new()));
+    let heard = Arc::new(Mutex::new(None::<String>));
+    let (peer_id, heard_by) = (peer.clone(), heard.clone());
+    let url = support::start(Arc::new(move |request| {
+        if !request["input"].to_string().contains("Read the other thread.") {
+            return vec![support::message("The deck is surveyed.")];
+        }
+        match support::output(request, "call_read") {
+            None => vec![support::call("call_read", "chirality", "read", json!({"thread": *peer_id.lock().unwrap()}))],
+            Some(answer) => {
+                *heard_by.lock().unwrap() = Some(answer.to_string());
+                vec![support::message("Read it.")]
+            }
+        }
+    }));
+    let mut config = config(codex, &root, None);
+    config.codex_settings.extend(["model_provider=\"openai\"".to_string(), format!("openai_base_url=\"{url}\"")]);
+    let app = app(config);
+    let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let seen = events.clone();
+    app.listen_any(EVENT, move |e| seen.lock().unwrap().push(serde_json::from_str(e.payload()).unwrap()));
+    let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+    let project: Project = serde_json::from_value(call(&webview, "engine:add_project", json!({ "path": root.join("project") })).unwrap()).unwrap();
+    let settings = json!({ "model": "gpt-6.2-sol", "effort": "low", "access": "ask" });
+    let ended = |thread: &ThreadId| {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while Instant::now() < deadline {
+            let done = events.lock().unwrap().iter().filter_map(|v| serde_json::from_value::<Numbered>(v.clone()).ok()).any(|n| matches!(&n.event, Event::TurnEnded { thread: t, .. } if t == thread));
+            if done {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("the turn did not end");
+    };
+    let start = |text: &str| -> ThreadId {
+        let message = json!({ "text": text, "attachments": [], "workflow": null, "threads": [] });
+        serde_json::from_value(call(&webview, "engine:start_thread", json!({ "project": project.id, "message": message, "settings": settings })).unwrap()).unwrap()
+    };
+    let surveyed = start("Survey the deck.");
+    ended(&surveyed);
+    *peer.lock().unwrap() = surveyed.0.clone();
+    let reader = start("Read the other thread.");
+    ended(&reader);
+
+    let answer: Value = serde_json::from_str(&heard.lock().unwrap().clone().expect("the agent heard the read")).unwrap();
+    let answer: Value = answer.as_str().map_or(answer.clone(), |text| serde_json::from_str(text).unwrap());
+    assert_eq!((answer["status"].as_str(), answer["project"].as_str()), (Some("idle"), Some("project")), "{answer}");
+    let kinds: Vec<&str> = answer["items"].as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["reply", "person"], "{answer}");
+    assert_eq!(answer["items"][0]["text"], "The deck is surveyed.");
+    let view: ThreadView = serde_json::from_value(call(&webview, "engine:read_thread", json!({ "thread": reader })).unwrap()).unwrap();
+    let read = ItemBody::ThreadTool { tool: ThreadTool::Read, thread: Some(surveyed.clone()), text: None, status: ToolCallStatus::Completed };
+    assert!(view.turns[0].items.iter().any(|i| i.body == read), "{:?}", view.turns[0].items);
+    assert_eq!(view.turns[0].state, TurnState::Completed);
+    let peer_view: ThreadView = serde_json::from_value(call(&webview, "engine:read_thread", json!({ "thread": surveyed })).unwrap()).unwrap();
+    assert_eq!(peer_view.turns.len(), 1, "the thread read was not woken");
+
+    tauri::async_runtime::block_on(shutdown(app.handle()));
+    assert_eq!(codex_children(), "", "Codex is reaped when shutdown returns");
     let _ = std::fs::remove_dir_all(&root);
 }
 

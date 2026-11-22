@@ -104,6 +104,8 @@ async fn capture(name: &str) -> Value {
         "app_tool" => scenarios::app_tool(&mut ctx).await,
         "subagent" => scenarios::subagent(&mut ctx).await,
         "assignment" => scenarios::assignment(&mut ctx).await,
+        "thread_refs" => scenarios::thread_refs(&mut ctx).await,
+        "assignment_read" => scenarios::assignment_read(&mut ctx).await,
         other => panic!("no scenario {other}"),
     }
     let after = ctx.engine.snapshot();
@@ -133,7 +135,7 @@ async fn capture(name: &str) -> Value {
     value
 }
 
-const SCENARIOS: [&str; 10] = ["text_turn", "workflow_turn", "command_approved", "file_change", "question", "interrupt", "fork", "app_tool", "subagent", "assignment"];
+const SCENARIOS: [&str; 12] = ["text_turn", "workflow_turn", "command_approved", "file_change", "question", "interrupt", "fork", "app_tool", "subagent", "assignment", "thread_refs", "assignment_read"];
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interface_data() {

@@ -1,4 +1,4 @@
-//! The engine's tools: `assign`, `message`, `threads` and `close`, as Codex
+//! The engine's tools: `assign`, `message`, `threads`, `read` and `close`, as Codex
 //! takes them, as their calls show in the conversation, and how each call is
 //! answered. A call is answered as soon as its work is done: a turn it starts
 //! in another thread is not waited for.
@@ -19,15 +19,19 @@ const ASSIGN: &str = "assign";
 const MESSAGE: &str = "message";
 const THREADS: &str = "threads";
 const CLOSE: &str = "close";
+const READ: &str = "read";
 
 /// The answer to a subagent's call to any of these tools.
-pub(crate) const SUBAGENT_REFUSED: &str = "A subagent cannot assign threads or message them.";
+pub(crate) const SUBAGENT_REFUSED: &str = "A subagent cannot assign, message or read threads.";
 
 const ABOUT: &str = "Work with the person's other threads. A thread you assign is an ordinary thread the person can open, \
-talk to and stop; its agent works on your brief, and when a turn you gave it (by the brief or a message) ends, its last reply \
-comes back to you as a message. A message from another thread is a user message that begins with \
+talk to and stop; its agent works on your brief. A message from another thread is a user message that begins with \
 <thread-message from=\"<thread id>\" title=\"<title>\"/>, with report=\"completed\", \"stopped\" or \"failed\" when it reports \
-how a turn you gave ended; answer one with `message`. A message to a thread that is running waits for its turn to end.";
+how a turn you started ended. A turn another thread started (by a brief or a message) reports its last reply back to that \
+thread by itself, so do not answer one with `message`; use `message` to start or continue an exchange. A message to a running \
+thread waits for its turn to end. Read a thread to see where it stands or what it did; message it to ask for its judgment or \
+have it act. The person may mention threads: <thread-ref id=\"<thread id>\" title=\"<title>\" \
+project=\"<project>\"/>; reach one by its id.";
 
 fn function(name: &str, description: &str, schema: Value) -> p::NamespaceTool {
     p::NamespaceTool::Function(p::FunctionSpec { name: name.into(), description: description.into(), input_schema: schema })
@@ -54,14 +58,27 @@ pub(crate) fn spec() -> p::DynamicToolSpec {
         ),
         function(
             MESSAGE,
-            "Send text to another thread. It starts a turn there, or waits until the turn running there ends.",
+            "Send text to another thread, to start or continue an exchange. It starts a turn there, or waits until the turn \
+             running there ends; that turn's last reply comes back to you by itself.",
             json!({"type": "object", "properties": {"thread": thread, "text": {"type": "string"}}, "required": ["thread", "text"], "additionalProperties": false}),
         ),
         function(
             THREADS,
-            "The threads you can address, in every project: each with its title, project, whether it is running, idle or \
-             waiting on the person, and whether you assigned it or it assigned you.",
+            "The threads you can address, in every project, most recently active first: each with its title, project, \
+             whether it is running, idle or waiting on the person, and whether you assigned it or it assigned you.",
             json!({"type": "object", "properties": {}, "additionalProperties": false}),
+        ),
+        function(
+            READ,
+            "Read another thread, in any project, a subagent's too, to see where it stands or what it did; it is not woken. \
+             Gives its title, project, status and last error, then its items newest first, each numbered; `before` a number \
+             gives the items before it.",
+            json!({"type": "object", "properties": {
+                "thread": thread,
+                "view": {"type": "string", "enum": ["messages", "activity"], "description": "messages (the default): messages in and the agent's final replies; activity adds commands, file changes and tool calls."},
+                "before": {"type": "integer", "description": "Only the items numbered below this."},
+                "limit": {"type": "integer", "description": "How many items at most (20 unless given)."}
+            }, "required": ["thread"], "additionalProperties": false}),
         ),
         function(
             CLOSE,
@@ -83,6 +100,7 @@ pub(crate) fn item(tool: &str, arguments: &Value, result: Option<&str>, status: 
         MESSAGE => (ThreadTool::Message, text("thread").map(ThreadId), text("text")),
         THREADS => (ThreadTool::Threads, None, None),
         CLOSE => (ThreadTool::Close, text("thread").map(ThreadId), None),
+        READ => (ThreadTool::Read, text("thread").map(ThreadId), None),
         _ => return None,
     };
     Some(ItemBody::ThreadTool { tool, thread, text: sent, status })
@@ -176,6 +194,7 @@ impl Inner {
             MESSAGE => self.message(&caller, args(call.arguments)?).await,
             THREADS => Ok(self.threads(&caller)),
             CLOSE => self.close(&caller, args(call.arguments)?),
+            READ => self.read_for(&caller, args(call.arguments)?).await,
             other => Err(format!("There is no tool {NAMESPACE}.{other}.")),
         }
     }
@@ -221,7 +240,7 @@ impl Inner {
         let access = args.access.map_or(base.access, |asked| lower(asked, base.access));
         let settings = TurnSettings { model: args.model.unwrap_or(base.model), effort: args.effort.map(Effort).or(base.effort), access };
         let from = Marker { from: caller.clone(), title: entry.title.clone(), report: None };
-        let brief = Message { text: args.brief, attachments: Vec::new(), workflow };
+        let brief = Message { text: args.brief, attachments: Vec::new(), workflow, threads: Vec::new() };
         let thread = self.start_assigned(&project.id, brief, settings.clone(), from, args.title).await.map_err(|e| e.to_string())?;
         Ok(json!({ "thread": thread.0, "project": project.name, "model": settings.model, "effort": settings.effort.map(|e| e.0), "access": settings.access }))
     }
@@ -252,10 +271,10 @@ impl Inner {
         let snapshot = self.store.snapshot();
         let assigner = snapshot.threads.iter().find(|t| &t.id == caller).and_then(|t| t.assigned_by.clone());
         let project_name = |id: &ProjectId| snapshot.projects.iter().find(|p| &p.id == id).map(|p| p.name.clone());
-        let threads: Vec<Value> = snapshot
-            .threads
-            .iter()
-            .filter(|t| t.subagent.is_none() && &t.id != caller)
+        let mut listed: Vec<&ThreadSummary> = snapshot.threads.iter().filter(|t| t.subagent.is_none() && &t.id != caller).collect();
+        listed.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
+        let threads: Vec<Value> = listed
+            .into_iter()
             .map(|t| {
                 let relation = if t.assigned_by.as_ref() == Some(caller) {
                     Some("you assigned it")
@@ -269,6 +288,18 @@ impl Inner {
             .collect();
         let projects: Vec<Value> = snapshot.projects.iter().map(|p| json!({ "name": p.name, "path": p.path })).collect();
         json!({ "projects": projects, "threads": threads })
+    }
+
+    /// Another thread, as `caller`'s agent reads it.
+    pub(crate) async fn read_for(&self, caller: &ThreadId, args: super::read::ReadArgs) -> Answer {
+        let target = ThreadId(args.thread.clone());
+        let entry = self.known_thread(&target).map_err(|e| e.to_string())?;
+        if &target == caller {
+            return Err("That is this thread.".into());
+        }
+        let view = self.read_thread(&target).await.map_err(|e| e.to_string())?;
+        let project = self.project(&entry.project).ok().map(|p| p.name);
+        Ok(super::read::answer(&view, project.as_deref(), &args))
     }
 
     fn close(&self, caller: &ThreadId, args: CloseArgs) -> Answer {

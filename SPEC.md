@@ -62,11 +62,11 @@ give it another home.
 - **Projects:** folders the person adds; each thread belongs to one.
 - **Threads:** list (from Codex, which keeps them), start, resume, fork, archive, rename; title as Codex gives it.
 - **Subagents:** a thread an agent starts (Codex's multi-agent tools) is a thread of the snapshot with its parent (the thread that started it, never one it messaged), path (`/root/worker`) and, once Codex lists it, nickname; it is listed under that parent, never at the top. Neither its end nor its approval marks it unread: its parent tells what it did. It is read and followed live like any thread, and Stop works on it; a message to it is refused, as Codex refuses one. Archiving a thread archives its subagents, as Codex does.
-- **Turns:** send a message with text, attachments (images, files) and file references; steer or interrupt a running turn; model, reasoning level and access level per turn. A thread takes one send or Stop at a time, each carried through by the engine even if its caller gives up: a send while a turn runs (or starts) steers it, Stop during a start stops that turn, and after a Stop the thread waits for Codex to answer and end the turn, so the next send starts a new one. If Codex does neither within a while, the Stop is reported as not taken and the thread is let go; the next send goes to Codex as a start, which Codex takes as a steer if the turn still runs.
+- **Turns:** send a message with text, attachments (images, files) and the threads it mentions; steer or interrupt a running turn; model, reasoning level and access level per turn. A thread takes one send or Stop at a time, each carried through by the engine even if its caller gives up: a send while a turn runs (or starts) steers it, Stop during a start stops that turn, and after a Stop the thread waits for Codex to answer and end the turn, so the next send starts a new one. If Codex does neither within a while, the Stop is reported as not taken and the thread is let go; the next send goes to Codex as a start, which Codex takes as a steer if the turn still runs.
 - **Events:** one typed stream of everything a thread does: agent text as it streams, reasoning summaries, plans, commands with output, file changes with diffs, tool calls, a subagent started, messaged, stopped or finished (naming it), waiting for subagents, turn start and end, errors. Each event is numbered; a gap means some were missed.
 - **The person's part:** approvals (commands, file changes, permissions) and questions, each answered through the API; nothing is answered on the person's behalf. A subagent's approval names the subagent, which the snapshot holds under its parent.
 - **Application tools:** the application gives the agent its own tools (in its own namespace: name, description, JSON Schema of the arguments) and its handler answers every call; Codex keeps a thread's tools with it through resume and fork. A subagent has its parent's tools; its call names the subagent's own thread and turn, and shows there.
-- **Assignment between threads:** the engine's own tools (namespace `chirality`) on every thread it starts, with which one thread assigns work to another, ordinary thread and threads message each other; see below.
+- **Assignment between threads:** the engine's own tools (namespace `chirality`) on every thread it starts, with which one thread assigns work to another, ordinary thread, threads message each other, and one reads another; see below.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
 - **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds. A read is Codex's history, numbered from before the read: every event after that number applies to it (an item it has as done stays done; text for an item it lacks begins that item), and when a turn of the thread in view completes, the thread is read again (keeping that turn's plan, which Codex leaves out of history). The engine keeps no copy of the conversation: text Codex did not keep (of a reply a Stop cut short) is in the live view, and not in the thread read again.
@@ -94,11 +94,12 @@ together. An application pins one engine revision for all of them.
   and the interface as parts. Each part works inside an application's own
   layout; the standard layout puts them together:
   - **Left:** projects, each with its threads; new thread; search; a mark on a thread that is running, finished, or waiting on the person.
-  - **Centre:** the conversation. The person's messages, the agent's text rendered as Markdown, reasoning and tool activity folded, a plan when there is one, file changes as diffs. A composer with attachments, file references (`@`), the workflow picker, and one line of controls: model, reasoning level, access level. Send becomes Stop while a turn runs.
+  - **Centre:** the conversation. The person's messages, the agent's text rendered as Markdown, reasoning and tool activity folded, a plan when there is one, file changes as diffs. A composer with attachments, thread mentions (`@`), the workflow picker, and one line of controls: model, reasoning level, access level. Send becomes Stop while a turn runs.
+  - **Mentions:** `@` (typed, or its button, at the caret) lists the person's threads by project, the current project first, then the others by latest activity; in each, those running or needing the person first, then unread, then the rest, most recent first; a few per project until a title is typed, which filters every project's threads by title (spaces and all). Not the current thread, nor subagents. A picked thread is `@<title>` in the text and a removable chip; in the sent message each is a chip that opens it, by its current title (the one it was mentioned with when it is gone). Files are attached, not mentioned.
   - **Approvals and questions:** shown where the person will see them, answered in one or two presses, then out of the way.
   - **Right panel:** the diff of the thread's changes, the workflow in use, and a preview of a file the agent produced; an application adds its own tabs.
   - **Forks:** fork a thread at a message to try another path; the fork is a thread of its own, shown under its parent.
-  - **Assignment:** an assigned thread is an ordinary thread at the top of the list; it shows the thread that assigned it. A message from another thread (a brief, a message, a report) shows as from that thread, by its title, which opens it; in the sender's conversation each `assign`, `message` and `close` names the other thread and opens it.
+  - **Assignment:** an assigned thread is an ordinary thread at the top of the list; it shows the thread that assigned it. A message from another thread (a brief, a message, a report) shows as from that thread, by its title, which opens it; in the sender's conversation each `assign`, `message` and `close` names the other thread and opens it, and a `read` folds into the work as "Read <title>".
   - **Subagents:** listed under the thread that started them, folded unless one runs or waits on the person (one waiting, or open, is always shown), and their parent's mark counts theirs; each opens as a conversation, with a way back to its parent and Stop in place of the composer. In the parent, each start, message, stop and finish names the subagent and opens it, and an approval a subagent waits on is answered there too.
   - **Background:** several threads may run at once; a notice when one finishes or needs the person.
   - **First use:** sign in, add a project folder, start. Nothing else.
@@ -129,11 +130,24 @@ thread the engine starts, beside the application's tools:
   not given by the call: the thread starts at the assigner's level and its
   agent asks the person through Codex's own permission request. Returns the
   new thread's id.
-- `message`: send text to any thread, by id.
+- `message`: send text to any thread, by id, to start or continue an exchange.
 - `threads`: the threads the agent can address: the person's projects' threads,
-  each with its title, project, whether it is running, idle or waiting on the
-  person, and its relation to this one (assigned by it, assigned it, or none);
-  and the projects, by name and path.
+  most recently active first, each with its title, project, whether it is
+  running, idle or waiting on the person, and its relation to this one
+  (assigned by it, assigned it, or none); and the projects, by name and path.
+- `read`: another thread (any the person has, in any project, a subagent's
+  too; not the caller's own), without waking it or queuing anything there:
+  its title, project, status (running, waiting on the person, idle, failed)
+  and its last turn's error, then its items newest first. `view: messages`
+  (the default) gives the person's messages, messages from other threads with
+  their sender, and the agent's final reply of each turn; `view: activity`
+  adds the work: commands, file changes and tool calls, each named, with its
+  status and output cut short. Each item is numbered and cut to a size, the
+  whole answer to about 16 KB; `before` a number pages back, `limit` bounds the
+  items, and the answer says when there are more. Built from the thread as the
+  engine reads it from Codex (`thread/read` and its turns), keeping nothing.
+  Its description: read to see where a thread stands or what it did; message
+  it to ask for its judgment or have it act.
 - `close`: end an assignment this thread made; no more reports come from it.
 
 A call is answered once its work is done (a thread started, a turn started
@@ -147,14 +161,25 @@ subagent, so it could hear no report.
   assigning thread. A `message` is the same: a message in the receiving
   thread, marked with the sender's id and title, which the interface shows as
   from that thread, not from the person.
-- When a turn of the assigned thread that its assigner started (by the brief
-  or a message) ends, its last reply is delivered to the assigner as a
-  message, with how the turn ended (completed, stopped, failed). Turns the
-  person starts in the assigned thread report nothing unless its agent sends a
-  `message`.
+- When a turn that another thread's message started (a brief, or any
+  `message`, whether or not that thread assigned this one) ends, its last
+  reply is delivered back to that thread as a message, with how the turn ended
+  (completed, stopped, failed): a report. A report's own turn reports nothing,
+  so exchanges cannot go on by themselves. A `close` ends reports from a
+  thread the closer assigned. Turns the person starts report nothing unless
+  the agent sends a `message`. A thread without the engine's tools (started
+  before them) is messaged like any, and its reply comes back without it
+  calling anything.
+- A message may mention threads: after its text, one part per thread,
+  `<thread-ref id="<thread id>" title="<title>" project="<project>"/>` (escaped
+  as the mark is), with the title and project as the engine knows them when it
+  sends; read back from history into the message's `threads`, and left out of
+  the title Codex's preview gives a new thread. The engine keeps nothing of it.
 - A message to an idle thread starts a turn in it; to a running one it waits
   until the engine has seen that turn end (it does not steer, nor start on a
-  turn a Stop could not settle). Messages to a thread are delivered in order,
+  turn a Stop could not settle), and, when that turn reports, until the engine
+  has read it for its report (at most 30 seconds from when Codex said the
+  thread was idle, which it says before it announces the turn's end). Messages to a thread are delivered in order,
   each starting a turn of its own; reports in the order their turns ended.
 - A delivered turn runs with the receiving thread's settings as they are when
   it starts (a report's, the assigner's). The engine knows a thread's access
@@ -163,8 +188,9 @@ subagent, so it could hear no report.
   forked the thread with, and is read only where Codex did not say. A sender
   or reporter whose access the engine does not know counts as read only. The
   person's own sends are unchanged.
-- A delivery is made only while its sender is there and, for a report, the
-  assignment is open: archiving either thread drops what waits. A delivery
+- A delivery is made only while its sender is there and, for a report from a
+  thread the receiver assigned, the assignment is open: archiving either
+  thread drops what waits. A delivery
   Codex refuses after it waited is told on the receiving thread; one whose
   `turn/start` was sent and not answered before Codex stopped is looked for
   among that thread's turns after the latest it had then, before it is tried
@@ -228,11 +254,19 @@ by deliveries: the person sees every running thread and can stop any; one is
 added only if exchanges that do not end are seen.
 
 **Decided by the owner (2026-11-22).** Subagents get the application's tools,
-never the engine's: the engine refuses those to them.
+never the engine's: the engine refuses those to them. A turn another thread's
+message started reports back to that thread whether or not it assigned this
+one (replacing, for those turns, the 2026-11-21 rule that only the assigner's
+turns report); turns the person starts still report nothing. The composer's
+`@` mentions threads only (files are attached), and a message carries the
+threads it mentions to the agent. `threads` lists by most recent activity, as
+`@` does. `read` is included, for effective orchestration: an orchestrating
+thread sees where a worker or subagent stands without waking it; `message` is
+still how threads ask for judgment or action.
 
 ## Known limits
 
-- Assignment: a thread started before the engine had its tools (or by another client) cannot assign or message; Codex tells its agent the call is unsupported. A delivery waiting when the engine stops is not made, and a turn that ends because Codex stopped reports nothing. The sender's title in a mark is the one the engine knew when it sent it (none for a thread Codex has not yet titled); the interface shows the sender's current title. A message the person writes that begins with a mark is read as from that thread. After a restart, a close is found by reading the assigner's history, once per report.
+- Assignment: a thread started before the engine had its tools (or by another client) cannot assign, message or read; Codex tells its agent the call is unsupported. A turn whose start the engine did not see (another client's) reports only if its thread is assigned. A subagent's task is not in its history, so a read of one starts at its work. A mentioned thread's title and project are those the engine knew when the message was sent. A delivery waiting when the engine stops is not made, and a turn that ends because Codex stopped reports nothing. The sender's title in a mark is the one the engine knew when it sent it (none for a thread Codex has not yet titled); the interface shows the sender's current title. A message the person writes that begins with a mark is read as from that thread. After a restart, a close is found by reading the assigner's history, once per report.
 - A legacy-history exchange can stay doubled in a view the person switches away from while its read is pending, and can show doubled briefly before the completion read returns.
 - Text or a plan that streamed before a successful read whose history does not yet hold it (a thread opened mid-reply, a follow-up sent before a completion read returns) is missing from the view until its item completes, and stays missing if the person stops the turn first.
 - A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.

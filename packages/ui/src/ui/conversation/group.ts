@@ -1,13 +1,13 @@
 // Groups a turn's items for showing: the agent's work folds between what it says.
-import type { Item } from "../../engine/types";
+import type { Item, ThreadId } from "../../engine/types";
 
 export type Block =
   | { kind: "item"; item: Item }
-  /** Consecutive reasoning, commands, tool calls, searches, waits for subagents and listings of threads. */
+  /** Consecutive reasoning, commands, tool calls, searches, waits for subagents, and listings and reads of threads. */
   | { kind: "work"; items: Item[] };
 
 const isWork = (item: Item) =>
-  ["reasoning", "command", "toolCall", "webSearch", "subagentTool"].includes(item.body.kind) || (item.body.kind === "threadTool" && item.body.tool === "threads");
+  ["reasoning", "command", "toolCall", "webSearch", "subagentTool"].includes(item.body.kind) || (item.body.kind === "threadTool" && (item.body.tool === "threads" || item.body.tool === "read"));
 
 export function blocksOf(items: Item[]): Block[] {
   const blocks: Block[] = [];
@@ -20,8 +20,8 @@ export function blocksOf(items: Item[]): Block[] {
   return blocks;
 }
 
-/** One line for a piece of work. */
-export function workLine(item: Item): string {
+/** One line for a piece of work; `name` names a thread it worked with. */
+export function workLine(item: Item, name: (id: ThreadId | null) => string = () => "a thread"): string {
   const b = item.body;
   switch (b.kind) {
     case "reasoning":
@@ -38,6 +38,7 @@ export function workLine(item: Item): string {
       return b.tool;
     case "threadTool":
       if (b.tool === "threads") return b.status === "failed" ? "Could not list the threads" : "Listed the threads";
+      if (b.tool === "read") return b.status === "failed" ? `Could not read ${name(b.thread)}` : b.status === "running" ? `Reading ${name(b.thread)}` : `Read ${name(b.thread)}`;
       return b.status === "failed" ? `Could not ${b.tool}` : b.tool;
     default:
       return "";

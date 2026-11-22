@@ -23,7 +23,7 @@ fn turn(id: &str) -> Value {
 }
 
 fn message(text: &str) -> Message {
-    Message { text: text.into(), attachments: vec![], workflow: None }
+    Message { text: text.into(), attachments: vec![], workflow: None, threads: vec![] }
 }
 
 fn settings(model: &str) -> TurnSettings {

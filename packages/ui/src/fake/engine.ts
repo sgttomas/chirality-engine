@@ -270,12 +270,6 @@ export class FakeEngine implements EngineClient {
     if (!this.waiting.has(request)) return fail({ kind: "notFound", what: `request ${request}` });
     this.resolve(request, answer);
   }
-  async findFiles(project: ProjectId, query: string) {
-    const root = this.snap.projects.find((p) => p.id === project)?.path;
-    if (!root) return fail({ kind: "notFound", what: `project ${project}` });
-    const q = query.toLowerCase();
-    return files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8).map((f) => `${root}/${f}`);
-  }
   async readFile(project: ProjectId, path: string) {
     const root = this.snap.projects.find((p) => p.id === project)?.path;
     if (!root) return fail({ kind: "notFound", what: `project ${project}` });
@@ -302,7 +296,7 @@ export class FakeEngine implements EngineClient {
     this.emit({ type: "turnStarted", thread, turn: turn.id });
     if (message) this.addItem(thread, turn, this.userItem(message));
     this.refresh(thread);
-    const run = this.run(thread, running, message ?? { text: "", attachments: [], workflow: null }, settings);
+    const run = this.run(thread, running, message ?? { text: "", attachments: [], workflow: null, threads: [] }, settings);
     running.done = script(run)
       .then(() => this.answerSteers(run, running))
       .then(

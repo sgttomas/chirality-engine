@@ -42,7 +42,8 @@ export { Approval } from "./ui/composer/Approval";
 export { Question } from "./ui/composer/Question";
 export { WorkflowPicker } from "./ui/composer/WorkflowPicker";
 export { Controls } from "./ui/composer/Controls";
-export { MentionMenu, mentionAt, type Mention } from "./ui/composer/Mentions";
+export { MentionMenu, mentionAt, mentionGroups, type Mention, type MentionGroup } from "./ui/composer/Mentions";
+export { ThreadChips } from "./ui/conversation/ThreadChips";
 
 // The side panel and diffs
 export { RightPanel, standardTabs, type PanelTabSpec, type PanelView } from "./ui/RightPanel";

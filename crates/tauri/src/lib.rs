@@ -36,7 +36,7 @@ pub const EVENT: &str = "engine";
 pub const PREFIX: &str = "engine:";
 
 /// The engine's commands, each named [`PREFIX`] and its name here.
-pub const COMMANDS: [&str; 19] = [
+pub const COMMANDS: [&str; 18] = [
     "snapshot",
     "sign_in",
     "cancel_sign_in",
@@ -55,7 +55,6 @@ pub const COMMANDS: [&str; 19] = [
     "mark_read",
     "answer",
     "read_file",
-    "find_files",
 ];
 
 /// Sent on [`EVENT`] at most [`MARK_EVERY`] after events: the number of the

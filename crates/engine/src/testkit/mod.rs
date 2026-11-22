@@ -18,6 +18,7 @@ mod export;
 mod fake;
 mod history;
 mod history_live;
+mod peers;
 mod unkept;
 mod tool_calls;
 pub(crate) mod harness;
@@ -59,7 +60,7 @@ macro_rules! scenarios {
     };
 }
 
-scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled, unkept_thread, subagent, subagent_stop, subagent_message, subagent_tools, assignment, assignment_waits, assignment_exchange, assignment_projects, assignment_person, assignment_access);
+scenarios!(start_and_models, text_turn, workflow_turn, command_approved, command_declined, file_change, question, interrupt, fork, revert, restart, app_tool, app_tool_kept, app_tool_cancelled, unkept_thread, subagent, subagent_stop, subagent_message, subagent_tools, assignment, assignment_waits, assignment_exchange, assignment_projects, assignment_person, assignment_access, assignment_untooled, assignment_read, thread_refs);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_main_path() {

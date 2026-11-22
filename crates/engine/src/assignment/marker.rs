@@ -3,6 +3,10 @@
 //! receiving thread's history says where it came from. Codex's listing
 //! carries a thread's first message whole as its preview, so the mark on a
 //! brief is where an assignment is read from.
+//!
+//! And a thread a message mentions: a part of its own after the text,
+//! `<thread-ref id="<thread id>" title="<title>" project="<project>"/>`,
+//! escaped as the mark is, read back from history into the message's threads.
 
 use crate::api::*;
 
@@ -39,6 +43,58 @@ fn unescape(text: &str) -> String {
     text.replace("&#13;", "\r").replace("&#10;", "\n").replace("&gt;", ">").replace("&lt;", "<").replace("&quot;", "\"").replace("&amp;", "&")
 }
 
+/// A mentioned thread as the agent reads it: its id, title and project.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Mention {
+    pub thread: ThreadRef,
+    pub project: Option<String>,
+}
+
+pub(crate) const REF_OPEN: &str = "<thread-ref id=\"";
+
+/// `<thread-ref id="<id>" title="<title>" project="<project>"/>`.
+pub(crate) fn render_ref(mention: &Mention) -> String {
+    let mut text = format!("{REF_OPEN}{}\"", escape(&mention.thread.thread.0));
+    for (name, value) in [("title", &mention.thread.title), ("project", &mention.project)] {
+        if let Some(value) = value {
+            text.push_str(&format!(" {name}=\"{}\"", escape(value)));
+        }
+    }
+    text.push_str(CLOSE);
+    text
+}
+
+/// A message part that is a thread reference and nothing else.
+pub(crate) fn thread_ref(text: &str) -> Option<ThreadRef> {
+    let inner = text.strip_prefix("<thread-ref")?.strip_suffix(CLOSE)?;
+    let (mut id, mut title) = (None, None);
+    for (name, value) in attributes(inner)? {
+        match name {
+            "id" => id = Some(ThreadId(value)),
+            "title" => title = Some(value),
+            "project" => {}
+            _ => return None,
+        }
+    }
+    Some(ThreadRef { thread: id.filter(|i| !i.0.is_empty())?, title })
+}
+
+/// `name="value"` pairs, unescaped; none if any is malformed or a value holds an unescaped close.
+fn attributes(mut text: &str) -> Option<Vec<(&str, String)>> {
+    let mut out = Vec::new();
+    text = text.trim();
+    while !text.is_empty() {
+        let (name, rest) = text.split_once("=\"")?;
+        let (value, rest) = rest.split_once('"')?;
+        if value.contains(CLOSE) {
+            return None;
+        }
+        out.push((name.trim(), unescape(value)));
+        text = rest.trim_start();
+    }
+    Some(out)
+}
+
 /// `<thread-message from="<id>" title="<title>" report="completed"/>`.
 pub(crate) fn render(marker: &Marker) -> String {
     let mut text = format!("{OPEN}{}\"", escape(&marker.from.0));
@@ -59,13 +115,9 @@ fn leading(text: &str) -> Option<(Marker, usize)> {
     }
     // Every quote and angle bracket inside is escaped, so the first close ends it.
     let end = text.find(CLOSE)? + CLOSE.len();
-    let mut attributes = text["<thread-message".len()..end - CLOSE.len()].trim();
     let (mut from, mut title, mut report) = (None, None, None);
-    while !attributes.is_empty() {
-        let (name, rest) = attributes.split_once("=\"")?;
-        let (value, rest) = rest.split_once('"')?;
-        let value = unescape(value);
-        match name.trim() {
+    for (name, value) in attributes(&text["<thread-message".len()..end - CLOSE.len()])? {
+        match name {
             "from" => from = Some(ThreadId(value)),
             "title" => title = Some(value),
             "report" => {
@@ -78,7 +130,6 @@ fn leading(text: &str) -> Option<(Marker, usize)> {
             }
             _ => return None,
         }
-        attributes = rest.trim_start();
     }
     let from = from.filter(|f| !f.0.is_empty())?;
     Some((Marker { from, title, report }, end))
@@ -122,5 +173,19 @@ mod tests {
             assert_eq!(from_preview(text).0, None, "{text}");
         }
         assert_eq!(part("<thread-message from=\"a\"/> and text"), None, "a part is the mark alone");
+    }
+
+    #[test]
+    fn a_reference_reads_back_whole_whatever_the_title_holds() {
+        let mention = Mention { thread: ThreadRef { thread: ThreadId("01a2-b".into()), title: Some("Piles \"north\" <A&B>/>\nnext".into()) }, project: Some("Bridge & deck".into()) };
+        let text = render_ref(&mention);
+        assert!(!text.contains('\n'));
+        assert_eq!(thread_ref(&text), Some(mention.thread.clone()));
+        let bare = Mention { thread: ThreadRef { thread: ThreadId("x".into()), title: None }, project: None };
+        assert_eq!(render_ref(&bare), "<thread-ref id=\"x\"/>");
+        assert_eq!(thread_ref(&render_ref(&bare)), Some(bare.thread));
+        for text in ["<thread-ref id=\"\"/>", "<thread-ref id=\"a\" who=\"b\"/>", "<thread-ref id=\"a\"", "see <thread-ref id=\"a\"/>", "<thread-ref id=\"a\"/> and text"] {
+            assert_eq!(thread_ref(text), None, "{text}");
+        }
     }
 }

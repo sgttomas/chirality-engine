@@ -398,6 +398,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[approve] write a file",
+          "threads": [],
           "workflow": null
         },
         "done": false,
@@ -414,6 +415,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[approve] write a file",
+          "threads": [],
           "workflow": null
         },
         "done": true,
@@ -632,6 +634,7 @@
                   "from": null,
                   "kind": "userMessage",
                   "text": "STUB[approve] write a file",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,

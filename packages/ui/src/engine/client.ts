@@ -42,8 +42,6 @@ export interface EngineClient {
   markRead(thread: ThreadId): Promise<void>;
 
   answer(request: RequestId, answer: Answer): Promise<void>;
-  /** Absolute paths. */
-  findFiles(project: ProjectId, query: string): Promise<string[]>;
   /** A file in the project, by absolute path or relative to it. */
   readFile(project: ProjectId, path: string): Promise<string>;
 }
@@ -90,7 +88,6 @@ export function createEngineClient(t: Transport): EngineClient {
     archive: (thread) => t.invoke("archive", { thread }),
     markRead: (thread) => t.invoke("mark_read", { thread }),
     answer: (request, answer) => t.invoke("answer", { request, answer }),
-    findFiles: (project, query) => t.invoke("find_files", { project, query }),
     readFile: (project, path) => t.invoke("read_file", { project, path }),
   };
 }

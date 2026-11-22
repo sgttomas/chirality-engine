@@ -41,6 +41,13 @@ impl Inner {
                     // Idle means no turn runs, even if a note was missed; the
                     // turn's own end (which follows) still says how it ended.
                     p::ThreadStatus::Idle => {
+                        // Codex says so before it announces the turn's end: a look at the turn for its
+                        // report begins now, before anything waiting can start a turn there.
+                        if let Some(entry) = self.store.thread(&thread)
+                            && let Some(turn) = &entry.active_turn
+                        {
+                            self.assignments.look_due(&thread, turn, entry.assigned_by.is_some());
+                        }
                         self.store.update_thread(&thread, |e| {
                             if let Some(turn) = e.active_turn.take() {
                                 e.last_ended = Some(turn);
@@ -89,6 +96,11 @@ impl Inner {
                 self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn.id);
                 let state = mapping::turn_state(&note.turn);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
+                // A turn another thread's message started reports back to it; an assigned thread's
+                // turn is looked at whether or not the engine saw how it began. Decided before the
+                // thread is idle (if Codex has not said so already), so what waits for it starts after the look.
+                let report = self.assignments.look_due(&thread, &turn, self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some()));
+                self.assignments.announced(&thread, &turn);
                 let known = self.store.update_thread(&thread, |e| {
                     if e.active_turn.as_ref() == Some(&turn) {
                         e.active_turn = None;
@@ -104,16 +116,27 @@ impl Inner {
                 });
                 if known.is_some() {
                     self.store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: state.clone() });
-                    // An assigned thread's turn its assigner started reports back.
-                    if self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some()) {
+                    if report {
                         self.report_in_order(thread, turn, state);
                     }
+                } else if report {
+                    self.assignments.end_look(&thread);
                 }
             }
             "item/started" | "item/completed" => {
                 let Some(note) = decode::<p::ItemNote>(params) else { return };
                 match &note.item {
                     p::ThreadItem::FileChange { id, changes } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
+                    // A message from another thread (not a report) began the turn: its end reports back.
+                    p::ThreadItem::UserMessage { content, .. } if method == "item/started" => {
+                        let mark = match content.first() {
+                            Some(p::InputInfo::Text { text }) => marker::part(text),
+                            _ => None,
+                        };
+                        if mark.is_some_and(|m| m.report.is_none() && m.from.0 != note.thread_id) {
+                            self.assignments.opened_by_message(&ThreadId(note.thread_id.clone()), &TurnId(note.turn_id.clone()));
+                        }
+                    }
                     // A call that ends unanswered was cancelled by Codex.
                     p::ThreadItem::DynamicToolCall { id, .. } if method == "item/completed" => {
                         self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn_id && &place.item == id);

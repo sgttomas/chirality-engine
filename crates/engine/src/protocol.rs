@@ -537,24 +537,3 @@ pub enum ToolContentItem {
     #[serde(rename_all = "camelCase")]
     InputImage { image_url: String },
 }
-
-// ---------- files ----------
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FuzzyParams {
-    pub query: String,
-    pub roots: Vec<String>,
-    pub cancellation_token: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct FuzzyResponse {
-    pub files: Vec<FuzzyFile>,
-}
-
-#[derive(Deserialize)]
-pub struct FuzzyFile {
-    pub root: String,
-    pub path: String,
-}

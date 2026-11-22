@@ -416,6 +416,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[lead] Assign the piles.",
+          "threads": [],
           "workflow": null
         },
         "done": false,
@@ -432,6 +433,7 @@
           "from": null,
           "kind": "userMessage",
           "text": "STUB[lead] Assign the piles.",
+          "threads": [],
           "workflow": null
         },
         "done": true,
@@ -605,6 +607,7 @@
           },
           "kind": "userMessage",
           "text": "STUB[worker] Check the pile lengths.",
+          "threads": [],
           "workflow": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md"
         },
         "done": false,
@@ -625,6 +628,7 @@
           },
           "kind": "userMessage",
           "text": "STUB[worker] Check the pile lengths.",
+          "threads": [],
           "workflow": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md"
         },
         "done": true,
@@ -734,6 +738,7 @@
           },
           "kind": "userMessage",
           "text": "The piles are within tolerance. STUB[heard]",
+          "threads": [],
           "workflow": null
         },
         "done": false,
@@ -754,6 +759,7 @@
           },
           "kind": "userMessage",
           "text": "The piles are within tolerance. STUB[heard]",
+          "threads": [],
           "workflow": null
         },
         "done": true,
@@ -856,6 +862,48 @@
     {
       "item": {
         "body": {
+          "attachments": [],
+          "from": {
+            "report": null,
+            "thread": "00000000-0000-0000-0000-000000000002",
+            "title": null
+          },
+          "kind": "userMessage",
+          "text": "STUB[more] One more look at pile 4.",
+          "threads": [],
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000013"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": {
+            "report": null,
+            "thread": "00000000-0000-0000-0000-000000000002",
+            "title": null
+          },
+          "kind": "userMessage",
+          "text": "STUB[more] One more look at pile 4.",
+          "threads": [],
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000013"
+      },
+      "thread": "00000000-0000-0000-0000-000000000005",
+      "turn": "00000000-0000-0000-0000-000000000012",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
           "kind": "agentMessage",
           "text": ""
         },
@@ -877,26 +925,6 @@
     {
       "item": {
         "body": {
-          "attachments": [],
-          "from": {
-            "report": null,
-            "thread": "00000000-0000-0000-0000-000000000002",
-            "title": null
-          },
-          "kind": "userMessage",
-          "text": "STUB[more] One more look at pile 4.",
-          "workflow": null
-        },
-        "done": false,
-        "id": "00000000-0000-0000-0000-000000000013"
-      },
-      "thread": "00000000-0000-0000-0000-000000000005",
-      "turn": "00000000-0000-0000-0000-000000000012",
-      "type": "item"
-    },
-    {
-      "item": {
-        "body": {
           "kind": "agentMessage",
           "text": "Closed."
         },
@@ -906,55 +934,6 @@
       "thread": "00000000-0000-0000-0000-000000000002",
       "turn": "00000000-0000-0000-0000-000000000010",
       "type": "item"
-    },
-    {
-      "item": {
-        "body": {
-          "attachments": [],
-          "from": {
-            "report": null,
-            "thread": "00000000-0000-0000-0000-000000000002",
-            "title": null
-          },
-          "kind": "userMessage",
-          "text": "STUB[more] One more look at pile 4.",
-          "workflow": null
-        },
-        "done": true,
-        "id": "00000000-0000-0000-0000-000000000013"
-      },
-      "thread": "00000000-0000-0000-0000-000000000005",
-      "turn": "00000000-0000-0000-0000-000000000012",
-      "type": "item"
-    },
-    {
-      "thread": {
-        "assignedBy": null,
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
-          "effort": "low",
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "idle"
-        },
-        "subagent": null,
-        "title": null,
-        "unread": true,
-        "updatedAt": 1795000000
-      },
-      "type": "thread"
-    },
-    {
-      "state": {
-        "state": "completed"
-      },
-      "thread": "00000000-0000-0000-0000-000000000002",
-      "turn": "00000000-0000-0000-0000-000000000010",
-      "type": "turnEnded"
     },
     {
       "item": {
@@ -989,6 +968,35 @@
       "thread": "00000000-0000-0000-0000-000000000005",
       "turn": "00000000-0000-0000-0000-000000000012",
       "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000002",
+      "turn": "00000000-0000-0000-0000-000000000010",
+      "type": "turnEnded"
     },
     {
       "thread": {
@@ -1138,6 +1146,7 @@
                   "from": null,
                   "kind": "userMessage",
                   "text": "STUB[lead] Assign the piles.",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,
@@ -1191,6 +1200,7 @@
                   },
                   "kind": "userMessage",
                   "text": "The piles are within tolerance. STUB[heard]",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,
@@ -1270,6 +1280,7 @@
                   },
                   "kind": "userMessage",
                   "text": "STUB[worker] Check the pile lengths.",
+                  "threads": [],
                   "workflow": "/work/run/project/.chirality/workflows/survey/WORKFLOW.md"
                 },
                 "done": true,
@@ -1301,6 +1312,7 @@
                   },
                   "kind": "userMessage",
                   "text": "STUB[more] One more look at pile 4.",
+                  "threads": [],
                   "workflow": null
                 },
                 "done": true,

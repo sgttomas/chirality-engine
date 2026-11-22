@@ -1,8 +1,9 @@
 //! Messages from one thread to another, delivered in order: to an idle thread
 //! at once, starting a turn; to a running one once the engine has seen its
-//! turn end (never steering it). And the report of an assigned thread's turn
-//! that its assigner started: that turn's last reply and how it ended,
-//! delivered to the assigner the same way.
+//! turn end (never steering it). And the report of a turn another thread's
+//! message started (an assignment's brief, or any message): that turn's last
+//! reply and how it ended, delivered back to that thread the same way. A report
+//! starts a turn that reports nothing.
 //!
 //! A delivery's settings are the receiving thread's, read under its
 //! admission just before its turn starts; where the engine does not know that
@@ -256,10 +257,10 @@ impl Inner {
     }
 
     /// Whether a delivery from `from` still has a place: its sender is still there, and a
-    /// report goes to the thread that assigned its sender, whose assignment is open.
+    /// report from a thread this one assigned comes while the assignment is open.
     pub(crate) fn still_holds(&self, thread: &ThreadId, from: &Marker) -> bool {
         let Some(sender) = self.store.thread(&from.from) else { return false };
-        from.report.is_none() || (sender.assigned_by.as_ref() == Some(thread) && !self.assignments.is_closed(thread, &from.from))
+        from.report.is_none() || sender.assigned_by.as_ref() != Some(thread) || !self.assignments.is_closed(thread, &from.from)
     }
 
     /// One step, and the id of the delivery it took, if it took one.
@@ -284,7 +285,8 @@ impl Inner {
             deliveries.remove(thread, next.id);
             return Step::Dropped;
         }
-        if !is_idle(&entry) {
+        // A turn running, or one that ended still being looked at for its report.
+        if !is_idle(&entry) || self.assignments.is_looking(thread) {
             return Step::Wait;
         }
         if let Some(sent) = &next.uncertain {
@@ -332,22 +334,25 @@ impl Inner {
         Some(newer.filter_map(opened_with).any(|(mark, text)| mark == delivery.from && text == delivery.text))
     }
 
-    /// A turn of an assigned thread ended: its report is looked at after
-    /// those of the thread's earlier turns, in the order the turns ended.
+    /// A turn that may have begun with another thread's message ended: its
+    /// report is looked at after those of the thread's earlier turns, in the
+    /// order the turns ended. The look began when the turn's end was heard.
     pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
         let (before, done) = self.assignments.reserve_report(&thread);
-        let inner = self.clone();
+        let looked = Looked(self.clone(), thread.clone());
         tokio::spawn(async move {
             if let Some(before) = before {
                 let _ = before.await;
             }
-            inner.report(thread, turn, state).await;
+            looked.0.report(thread, turn, state).await;
+            drop(looked);
             let _ = done.send(());
         });
     }
 
-    /// If the assigner started the turn, its last reply and how it ended go
-    /// to the assigner, unless the assigner has closed the assignment.
+    /// If another thread's message started the turn, its last reply and how it
+    /// ended go back to that thread, unless it assigned this one and has closed
+    /// the assignment.
     async fn report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
         self.check_report(thread, turn, state).await;
         #[cfg(test)]
@@ -356,19 +361,22 @@ impl Inner {
 
     async fn check_report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
         let (Some(entry), Some(end)) = (self.store.thread(&thread), end_of(&state)) else { return };
-        let Some(assigner) = entry.assigned_by.clone() else { return };
+        if entry.subagent.is_some() {
+            return;
+        }
         let Ok(session) = self.session() else { return };
         // The turn as Codex keeps it: its first message and its last reply.
         let Some(kept) = find_turn(&session, &thread, &turn).await else { return };
-        let opener = opened_with(&kept).map(|(mark, _)| mark);
-        if !opener.is_some_and(|m| m.from == assigner && m.report.is_none()) || self.closed(&session, &assigner, &thread).await {
+        // A report's turn reports nothing, so exchanges of reports cannot go on.
+        let Some(sender) = opened_with(&kept).map(|(mark, _)| mark).filter(|m| m.report.is_none() && m.from != thread).map(|m| m.from) else { return };
+        if entry.assigned_by.as_ref() == Some(&sender) && self.closed(&session, &sender, &thread).await {
             return;
         }
         let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::ReadOnly, |s| s.access) } else { Access::ReadOnly };
-        let Some(fallback) = self.settings_of(&assigner).or(entry.settings.clone()) else { return };
+        let Some(fallback) = self.settings_of(&sender).or(entry.settings.clone()) else { return };
         let from = Marker { from: thread, title: entry.title, report: Some(end) };
-        if let Posted::Refused(message) = self.post(assigner.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
-            self.not_delivered(&assigner, &message);
+        if let Posted::Refused(message) = self.post(sender.clone(), Delivery::new(from, last_reply(&kept), bound, fallback)).await {
+            self.not_delivered(&sender, &message);
         }
     }
 
@@ -385,6 +393,15 @@ impl Inner {
             self.assignments.close(assigner, assigned);
         }
         closed
+    }
+}
+
+/// A look at a thread's ended turn, over when this is dropped, whatever became of it.
+struct Looked(Arc<Inner>, ThreadId);
+
+impl Drop for Looked {
+    fn drop(&mut self) {
+        self.0.assignments.end_look(&self.1);
     }
 }
 

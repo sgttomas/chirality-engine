@@ -84,7 +84,7 @@ describe("subagents", () => {
     const held = engine.stopAtMark("checking");
     const { store } = await mount(engine);
     const settings: TurnSettings = { model: "gpt-5.5", effort: "high", access: "ask" };
-    const lead = await act(() => engine.startThread(bridge.id, { text: "Check the piles and the deck with a subagent each.", attachments: [], workflow: null }, settings));
+    const lead = await act(() => engine.startThread(bridge.id, { text: "Check the piles and the deck with a subagent each.", attachments: [], workflow: null, threads: [] }, settings));
     await act(() => held);
     await settle();
     await act(() => store.selectThread(lead));

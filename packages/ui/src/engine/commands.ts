@@ -19,7 +19,6 @@ export const engineCommands = [
   "mark_read",
   "answer",
   "read_file",
-  "find_files",
 ] as const;
 
 export type EngineCommand = (typeof engineCommands)[number];

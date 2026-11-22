@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { Attachment, TurnSettings, Workflow } from "../../engine/types";
+import type { Attachment, ThreadSummary, TurnSettings, Workflow } from "../../engine/types";
 import { draftKey, emptyDraft, type Draft } from "../../state/drafts";
-import { isRunning, pendingFor, shortPath } from "../../state/selectors";
+import { isRunning, nameOf, pendingFor, shortPath } from "../../state/selectors";
 import { remember, remembered, resolveSettings } from "../../state/settings";
 import { useProjectRoot, useStore, useStoreHandle } from "../../state/store";
 import { SubagentControls } from "../Subagents";
 import { Icon } from "../Icon";
 import { Approval } from "./Approval";
 import { Controls } from "./Controls";
-import { mentionAt, MentionMenu, type Mention } from "./Mentions";
+import { mentionAt, mentionGroups, MentionMenu, type Mention } from "./Mentions";
 import { Question } from "./Question";
 import { WorkflowPicker } from "./WorkflowPicker";
 import "../styles/base.css";
@@ -18,7 +18,7 @@ import "../styles/composer.css";
 const imageExt = /\.(png|jpe?g|gif|webp|heic|tiff?)$/i;
 
 /** The message box for the selected thread, or for a new thread in the selected project:
- * attachments, `@` references, the workflow picker, model, reasoning and access, and the
+ * attachments, threads mentioned with `@`, the workflow picker, model, reasoning and access, and the
  * approval or question waiting on the person. */
 export function Composer() {
   const key = useStore((s) => s.thread ?? s.project);
@@ -40,12 +40,25 @@ function ThreadComposer() {
   const root = useProjectRoot();
   // The draft lives in the store, with its thread (or the project's new thread).
   const key = draftKey(thread, project);
-  const { text, attachments, workflow, keep } = useStore((s) => s.drafts[key] ?? emptyDraft);
+  const { text, attachments, threads: mentioned, workflow, keep } = useStore((s) => s.drafts[key] ?? emptyDraft);
+  const snapshot = useStore((s) => s.model!.snapshot);
   const edit = (change: Partial<Draft> | ((d: Draft) => Partial<Draft>)) => store.editDraft(key, change);
 
   const [settings, setSettings] = useState<TurnSettings>(() => resolveSettings(models, summary?.settings ?? remembered()));
   const [mention, setMention] = useState<Mention | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Where the caret goes once the text it follows is in the box.
+  const caret = useRef<number | null>(null);
+  const groups = mention ? mentionGroups(snapshot, project, thread, mention.query) : [];
+  const mentioning = groups.length > 0;
+
+  useLayoutEffect(() => {
+    const at = caret.current;
+    if (at === null || !input.current) return;
+    caret.current = null;
+    input.current.focus();
+    input.current.setSelectionRange(at, at);
+  }, [text]);
 
   useEffect(() => {
     if (!pending) input.current?.focus();
@@ -76,16 +89,32 @@ function ThreadComposer() {
     setMention(mentionAt(value, caret));
   };
 
-  const pickMention = (path: string) => {
+  const pickMention = (picked: ThreadSummary) => {
     if (!mention) return;
-    const before = text.slice(0, mention.start);
-    const after = text.slice(mention.end);
+    const name = nameOf(picked);
+    const before = `${text.slice(0, mention.start)}@${name} `;
+    caret.current = before.length;
     edit((d) => ({
-      text: `${before}@${shortPath(path, root)} ${after.replace(/^\s/, "")}`,
-      attachments: d.attachments.some((x) => x.path === path) ? d.attachments : [...d.attachments, { kind: "file", path }],
+      text: before + text.slice(mention.end).replace(/^\s/, ""),
+      threads: d.threads.some((r) => r.thread === picked.id) ? d.threads : [...d.threads, { thread: picked.id, title: name }],
     }));
     setMention(null);
+  };
+
+  /** Starts a mention at the caret, after a space unless one is there. */
+  const startMention = () => {
+    const box = input.current;
+    const [from, to] = box ? [box.selectionStart, box.selectionEnd] : [text.length, text.length];
+    const before = text.slice(0, from);
+    const opened = `${before}${before && !/\s$/.test(before) ? " " : ""}@`;
+    caret.current = opened.length;
+    onChange(opened + text.slice(to), opened.length);
     input.current?.focus();
+  };
+
+  const nameOfRef = (id: string, title: string | null) => {
+    const known = snapshot.threads.find((t) => t.id === id);
+    return known ? nameOf(known) : (title ?? "A thread");
   };
 
   return (
@@ -96,8 +125,8 @@ function ThreadComposer() {
         <Approval key={pending.id} pending={pending} />
       ) : null}
       <div className={`composer ${pending ? "composer--behind" : ""}`}>
-        {mention && <MentionMenu project={project} mention={mention} onPick={pickMention} onClose={() => setMention(null)} />}
-        {(workflow || attachments.length > 0) && (
+        {mentioning && <MentionMenu groups={groups} onPick={pickMention} onClose={() => setMention(null)} />}
+        {(workflow || attachments.length > 0 || mentioned.length > 0) && (
           <div className="chips composer-chips">
             {workflow && (
               <span className="chip chip--workflow">
@@ -110,6 +139,14 @@ function ThreadComposer() {
                 </button>
               </span>
             )}
+            {mentioned.map((r) => (
+              <span key={r.thread} className="chip chip--thread">
+                <Icon name="at" /> {nameOfRef(r.thread, r.title)}
+                <button className="chip-x" aria-label={`Remove ${nameOfRef(r.thread, r.title)}`} onClick={() => edit((d) => ({ threads: d.threads.filter((x) => x.thread !== r.thread) }))}>
+                  <Icon name="x" />
+                </button>
+              </span>
+            ))}
             {attachments.map((a) => (
               <span key={a.path} className="chip" title={shortPath(a.path, root)}>
                 <Icon name={a.kind === "image" ? "file" : "paperclip"} /> {a.path.split("/").pop()}
@@ -128,7 +165,7 @@ function ThreadComposer() {
           value={text}
           onChange={(e) => onChange(e.target.value, e.target.selectionStart)}
           onKeyDown={(e) => {
-            if (mention && ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(e.key)) return;
+            if (mentioning && ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(e.key)) return;
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send();
@@ -139,7 +176,7 @@ function ThreadComposer() {
           <button className="quiet" aria-label="Attach files" title="Attach files" onClick={attach}>
             <Icon name="paperclip" />
           </button>
-          <button className="quiet" aria-label="Reference a file" title="Reference a file" onClick={() => onChange(`${text}@`, text.length + 1)}>
+          <button className="quiet" aria-label="Mention a thread" title="Mention a thread" onMouseDown={(e) => e.preventDefault()} onClick={startMention}>
             <Icon name="at" />
           </button>
           <WorkflowPicker workflows={workflows} picked={workflow} onPick={(w) => select(w, keep)} />
