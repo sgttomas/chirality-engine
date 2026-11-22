@@ -44,9 +44,22 @@ impl Ended {
 /// engine refuses its own to a subagent (`assignment::tools`).
 pub(crate) const SUBAGENT_TOOLS: &str = "features.multi_agent_v2_dynamic_tools=true";
 
-/// The application's `-c` settings, then [`SUBAGENT_TOOLS`].
+/// Subagents run at most eight threads at once to a session, the parent's included, and are
+/// told not to start their own. Codex 0.171.0's multi-agent v2 has no depth limit
+/// (`agent_max_depth` is multi-agent v1's): a subagent has the tools to start subagents
+/// whenever its model declares v2, as every current model does. The text is the subagent's
+/// usage hint, in place of the model's own.
+pub(crate) const SUBAGENT_LIMITS: [&str; 3] = [
+    "features.multi_agent_v2.enabled=true",
+    "features.multi_agent_v2.max_concurrent_threads_per_session=8",
+    "features.multi_agent_v2.subagent_usage_hint_text=\"You are a subagent: do the task you were given and report your result to your parent. Do not start subagents of your own.\"",
+];
+
+/// [`SUBAGENT_LIMITS`], then the application's `-c` settings (a later one wins, so the
+/// application can set its own), then [`SUBAGENT_TOOLS`].
 pub(crate) fn settings(config: &crate::api::EngineConfig) -> Vec<String> {
-    let mut settings = config.codex_settings.clone();
+    let mut settings: Vec<String> = SUBAGENT_LIMITS.iter().map(|s| s.to_string()).collect();
+    settings.extend(config.codex_settings.iter().cloned());
     settings.push(SUBAGENT_TOOLS.into());
     settings
 }
@@ -243,6 +256,25 @@ impl Stopper for ProcessStopper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The subagent limits come before the application's settings, so a setting of its own
+    /// wins; the subagent tools come last.
+    #[test]
+    fn the_application_can_set_its_own_subagent_limits() {
+        let config = crate::api::EngineConfig {
+            codex_bin: "codex".into(),
+            codex_home: None,
+            state_dir: "state".into(),
+            workflow_roots: Vec::new(),
+            codex_settings: vec!["features.multi_agent_v2.max_concurrent_threads_per_session=4".into()],
+            tools: None,
+        };
+        let settings = settings(&config);
+        let at = |s: &str| settings.iter().position(|x| x == s).unwrap();
+        assert!(at("features.multi_agent_v2.max_concurrent_threads_per_session=8") < at("features.multi_agent_v2.max_concurrent_threads_per_session=4"));
+        assert_eq!(settings.last().map(String::as_str), Some(SUBAGENT_TOOLS));
+        assert!(settings.contains(&"features.multi_agent_v2.enabled=true".to_string()));
+    }
 
     /// A process that writes many lines and ends: the end is marked while the
     /// lines are still waiting to be read, so nothing read after can be acted on.
