@@ -52,7 +52,8 @@ regenerated.
 
 The engine uses the person's own Codex home by default, as T3 Code does, so
 sign-in, models and settings are shared with their Codex. An application may
-give it another home.
+give it another home, or run Codex itself and give the engine its transport
+(an embedded engine, below).
 
 ## The engine
 
@@ -69,6 +70,7 @@ give it another home.
 - **Assignment between threads:** the engine's own tools (namespace `chirality`) on every thread it starts, with which one thread assigns work to another, ordinary thread, threads message each other, and one reads another; see below.
 - **Access:** Codex's own access levels (read only, ask, full access), nothing added.
 - **Workflows:** discovered in the folders the application names (the Chirality Library, the project's own); listed with name, summary and source; picked into a message so the agent follows it in that conversation.
+- **Embedding:** for an application that runs Codex itself, a separate, small embedded engine over the application's transport: one thread, the application's tools only, calls answered through its event stream, and bounded memory; see below.
 - **State:** a snapshot of everything the application shows (projects, threads, their status, what waits on the person), plus the event stream to keep it current. The snapshot, and each thread read, carries the number of the last event it holds. A read is Codex's history, numbered from before the read: every event after that number applies to it (an item it has as done stays done; text for an item it lacks begins that item), and when a turn of the thread in view completes, the thread is read again (keeping that turn's plan, which Codex leaves out of history). The engine keeps no copy of the conversation: text Codex did not keep (of a reply a Stop cut short) is in the live view, and not in the thread read again.
 
 The API is Rust types. Bindings for an application's interface are generated
@@ -102,6 +104,7 @@ together. An application pins one engine revision for all of them.
   - **Assignment:** an assigned thread is an ordinary thread at the top of the list; it shows the thread that assigned it. A message from another thread (a brief, a message, a report) shows as from that thread, by its title, which opens it; in the sender's conversation each `assign`, `message` and `close` names the other thread and opens it, and a `read` folds into the work as "Read <title>".
   - **Subagents:** listed under the thread that started them, folded unless one runs or waits on the person (one waiting, or open, is always shown), and their parent's mark counts theirs; each opens as a conversation, with a way back to its parent and Stop in place of the composer. In the parent, each start, message, stop and finish names the subagent and opens it, and an approval a subagent waits on is answered there too.
   - **Background:** several threads may run at once; a notice when one finishes or needs the person.
+  - **Item views:** an application may show an item its own way: `ItemView`, a context exported from the package root, or `StandardLayout`'s `itemView` prop (its provider only when given), maps an item to a node or `null`. `TurnView` calls it once per item per render; an item with a node is a block of its own (keyed `item:${id}`), the work on either side still folded (`work:${id}`), and the split follows the answer as it changes. Items with no node and no standard view are dropped before grouping, and Working follows the last visible block. Designed for EPC (2026-11-22); not yet built.
   - **First use:** sign in, add a project folder, start. Nothing else.
 
 An application consumes both from this repository at a pinned revision (a git
@@ -290,6 +293,11 @@ threads it mentions to the agent. `threads` lists by most recent activity, as
 thread sees where a worker or subagent stands without waking it; `message` is
 still how threads ask for judgment or action.
 
+## Embedding under containment
+
+An application that runs Codex itself, as SWBPIPE does, uses the separate
+embedded engine designed in [`docs/embedding.md`](docs/embedding.md).
+
 ## Known limits
 
 - Assignment: a thread started before the engine had its tools (or by another client) cannot assign, message or read; Codex tells its agent the call is unsupported. A turn whose start the engine did not see (another client's) reports only if its thread is assigned. A subagent's task is not in its history, so a read of one starts at its work. A `read` cursor whose turn is gone (the thread reverted under it) is refused. A report not made is said in the turn only until the thread is read again (Codex does not keep it). A project removed and added back while a report's recipient is being resumed for it can still receive that report. A mentioned thread's title and project are those the engine knew when the message was sent. A delivery waiting when the engine stops is not made, and a turn that ends because Codex stopped reports nothing. The sender's title in a mark is the one the engine knew when it sent it (none for a thread Codex has not yet titled); the interface shows the sender's current title. A message the person writes that begins with a mark is shown as from that thread; its turn reports only if that thread assigned this one. After a restart, a close is found by reading the assigner's history, once per report.
@@ -297,6 +305,7 @@ still how threads ask for judgment or action.
 - Text or a plan that streamed before a successful read whose history does not yet hold it (a thread opened mid-reply, a follow-up sent before a completion read returns) is missing from the view until its item completes, and stays missing if the person stops the turn first.
 - A Stop sent after a Stop that timed out and a send that went to Codex as `turn/start` can name the old turn.
 - Threads in Codex's older (legacy) history format are not supported.
+- The engine ends only the Codex process it started: what Codex starts (a plugins fetch; `codex-code-mode-host`, which Codex puts in a process group of its own) can outlive it. A later change starts Codex in a group of its own and kills the group while Codex is still unreaped (so its id cannot have been reused), on shutdown and when Codex dies; a child in a group of its own still outlives it.
 - Codex's refusals (of a thread it no longer has, or a turn it does not know) reach the person in Codex's words.
 - A draft edited in a just-created thread while its first send is still being accepted can be replaced by the moved draft, and an attachment picked across that moment can land in the project's next new thread.
 - A project's thread listing in flight when a thread is archived can list it again until the next listing.
