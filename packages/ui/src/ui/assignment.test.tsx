@@ -56,6 +56,21 @@ describe("assignment", () => {
     expect(store.get().thread).toBe(lead.id);
   });
 
+  it("shows a report as the Markdown its agent wrote", async () => {
+    const recorded = JSON.stringify(engineData("assignment")).replaceAll("The piles are within tolerance. STUB[heard]", "**The piles** are within `tolerance`. STUB[heard]");
+    const engine = new ReplayTransport(JSON.parse(recorded), (s) => ({ ...s, account: { state: "signedIn", email: "person@example.com", plan: null } }));
+    const { store } = await mount(engine.client);
+    await act(async () => void engine.play());
+    await settle();
+    const worker = store.get().model!.snapshot.threads.find((t) => t.assignedBy)!;
+    await act(() => store.selectThread(worker.assignedBy!));
+    await settle();
+    const report = main().querySelector(".msg-from .msg-from-text")!;
+    expect(within(report as HTMLElement).getByText("The piles").tagName).toBe("STRONG");
+    expect(within(report as HTMLElement).getByText("tolerance").tagName).toBe("CODE");
+    expect(report.textContent).not.toContain("**");
+  });
+
   it("is a scene from the engine's own data", async () => {
     const scene = await buildScene("assignment");
     const { store } = await mount(scene.engine);
