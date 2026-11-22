@@ -5,6 +5,7 @@ import type { Item, ThreadId, ThreadSummary, Workflow } from "../engine/types";
 import { nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { WorkflowChip } from "./conversation/Items";
+import { Markdown } from "./conversation/Markdown";
 import { Icon } from "./Icon";
 
 /** The other thread, when the snapshot has it. */
@@ -14,7 +15,8 @@ function useThread(id: ThreadId | null | undefined): ThreadSummary | undefined {
 
 const ended = { completed: null, stopped: "Stopped", failed: "Failed" } as const;
 
-/** A message from another thread: its title, which opens it, the workflow it picked, then the text. */
+/** A message from another thread: its title, which opens it, the workflow it picked, then the text, as
+ * Markdown: an agent wrote it. */
 export function FromThread({ item, workflows }: { item: Item; workflows: Workflow[] }) {
   const store = useStoreHandle();
   const from = item.body.kind === "userMessage" ? item.body.from : null;
@@ -33,7 +35,11 @@ export function FromThread({ item, workflows }: { item: Item; workflows: Workflo
           <WorkflowChip workflow={item.body.workflow} workflows={workflows} />
         </div>
       )}
-      {item.body.text && <div className="msg-from-text">{item.body.text}</div>}
+      {item.body.text && (
+        <div className="msg-from-text">
+          <Markdown text={item.body.text} />
+        </div>
+      )}
     </div>
   );
 }
