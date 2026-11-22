@@ -79,6 +79,21 @@ pub(crate) fn thread_ref(text: &str) -> Option<ThreadRef> {
     Some(ThreadRef { thread: id.filter(|i| !i.0.is_empty())?, title })
 }
 
+/// Whether `text` is one or more thread references and nothing else.
+pub(crate) fn only_refs(mut text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    while !text.is_empty() {
+        let Some(end) = text.find(CLOSE).map(|at| at + CLOSE.len()) else { return false };
+        if thread_ref(&text[..end]).is_none() {
+            return false;
+        }
+        text = &text[end..];
+    }
+    true
+}
+
 /// `name="value"` pairs, unescaped; none if any is malformed or a value holds an unescaped close.
 fn attributes(mut text: &str) -> Option<Vec<(&str, String)>> {
     let mut out = Vec::new();

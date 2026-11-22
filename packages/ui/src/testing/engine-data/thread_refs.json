@@ -168,11 +168,16 @@
       },
       {
         "id": "project-2",
+        "name": "yard",
+        "path": "/work/run/yard"
+      },
+      {
+        "id": "project-3",
         "name": "project",
         "path": "/work/run/project"
       }
     ],
-    "seq": 55,
+    "seq": 78,
     "threads": [
       {
         "assignedBy": null,
@@ -206,6 +211,24 @@
           "state": "idle"
         },
         "subagent": null,
+        "title": "Yard layout",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000022",
+        "project": "project-3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
         "title": "Deck survey",
         "unread": true,
         "updatedAt": 1795000000
@@ -214,7 +237,7 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -232,7 +255,25 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000010",
-        "project": "project-2",
+        "project": "project-3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Bearing check",
+        "unread": false,
+        "updatedAt": 0
+      },
+      {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000018",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -417,7 +458,7 @@
     {
       "projects": [
         {
-          "id": "project-2",
+          "id": "project-3",
           "name": "project",
           "path": "/work/run/project"
         }
@@ -427,7 +468,7 @@
     {
       "projects": [
         {
-          "id": "project-2",
+          "id": "project-3",
           "name": "project",
           "path": "/work/run/project"
         },
@@ -444,7 +485,7 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -538,7 +579,7 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -567,7 +608,7 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -732,7 +773,7 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000010",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -759,13 +800,8 @@
           "attachments": [],
           "from": null,
           "kind": "userMessage",
-          "text": "STUB[compare] Check @Pile plan",
-          "threads": [
-            {
-              "thread": "00000000-0000-0000-0000-000000000002",
-              "title": "Pile plan"
-            }
-          ],
+          "text": "STUB[bearing] Start.",
+          "threads": [],
           "workflow": null
         },
         "done": false,
@@ -781,13 +817,8 @@
           "attachments": [],
           "from": null,
           "kind": "userMessage",
-          "text": "STUB[compare] Check @Pile plan",
-          "threads": [
-            {
-              "thread": "00000000-0000-0000-0000-000000000002",
-              "title": "Pile plan"
-            }
-          ],
+          "text": "STUB[bearing] Start.",
+          "threads": [],
           "workflow": null
         },
         "done": true,
@@ -804,16 +835,16 @@
           "text": ""
         },
         "done": false,
-        "id": "msg_compare"
+        "id": "msg_bearing"
       },
       "thread": "00000000-0000-0000-0000-000000000010",
       "turn": "00000000-0000-0000-0000-000000000011",
       "type": "item"
     },
     {
-      "item": "msg_compare",
+      "item": "msg_bearing",
       "kind": "agentMessage",
-      "text": "Compared.",
+      "text": "Ready.",
       "thread": "00000000-0000-0000-0000-000000000010",
       "turn": "00000000-0000-0000-0000-000000000011",
       "type": "itemDelta"
@@ -822,10 +853,10 @@
       "item": {
         "body": {
           "kind": "agentMessage",
-          "text": "Compared."
+          "text": "Ready."
         },
         "done": true,
-        "id": "msg_compare"
+        "id": "msg_bearing"
       },
       "thread": "00000000-0000-0000-0000-000000000010",
       "turn": "00000000-0000-0000-0000-000000000011",
@@ -836,7 +867,7 @@
         "assignedBy": null,
         "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000010",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -861,11 +892,334 @@
       "type": "turnEnded"
     },
     {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000010",
+        "project": "project-3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Bearing check",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "projects": [
+        {
+          "id": "project-3",
+          "name": "project",
+          "path": "/work/run/project"
+        },
+        {
+          "id": "project-1",
+          "name": "other",
+          "path": "/work/run/other"
+        },
+        {
+          "id": "project-2",
+          "name": "yard",
+          "path": "/work/run/yard"
+        }
+      ],
+      "type": "projects"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000014",
+        "project": "project-2",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": null,
+          "kind": "userMessage",
+          "text": "STUB[yard] Start.",
+          "threads": [],
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000016"
+      },
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": null,
+          "kind": "userMessage",
+          "text": "STUB[yard] Start.",
+          "threads": [],
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000016"
+      },
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_yard"
+      },
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "item"
+    },
+    {
+      "item": "msg_yard",
+      "kind": "agentMessage",
+      "text": "Ready.",
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Ready."
+        },
+        "done": true,
+        "id": "msg_yard"
+      },
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000014",
+        "project": "project-2",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000014",
+      "turn": "00000000-0000-0000-0000-000000000015",
+      "type": "turnEnded"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000014",
+        "project": "project-2",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Yard layout",
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000018",
+        "project": "project-3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "working"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "turnStarted"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": null,
+          "kind": "userMessage",
+          "text": "STUB[compare] Check @Pile plan",
+          "threads": [
+            {
+              "thread": "00000000-0000-0000-0000-000000000002",
+              "title": "Pile plan"
+            }
+          ],
+          "workflow": null
+        },
+        "done": false,
+        "id": "00000000-0000-0000-0000-000000000020"
+      },
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "attachments": [],
+          "from": null,
+          "kind": "userMessage",
+          "text": "STUB[compare] Check @Pile plan",
+          "threads": [
+            {
+              "thread": "00000000-0000-0000-0000-000000000002",
+              "title": "Pile plan"
+            }
+          ],
+          "workflow": null
+        },
+        "done": true,
+        "id": "00000000-0000-0000-0000-000000000020"
+      },
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "item"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": ""
+        },
+        "done": false,
+        "id": "msg_compare"
+      },
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "item"
+    },
+    {
+      "item": "msg_compare",
+      "kind": "agentMessage",
+      "text": "Compared.",
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "itemDelta"
+    },
+    {
+      "item": {
+        "body": {
+          "kind": "agentMessage",
+          "text": "Compared."
+        },
+        "done": true,
+        "id": "msg_compare"
+      },
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "item"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000018",
+        "project": "project-3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": null,
+        "unread": true,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "state": {
+        "state": "completed"
+      },
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "turn": "00000000-0000-0000-0000-000000000019",
+      "type": "turnEnded"
+    },
+    {
       "projects": [
         {
           "id": "project-1",
           "name": "other",
           "path": "/work/run/other"
+        },
+        {
+          "id": "project-2",
+          "name": "yard",
+          "path": "/work/run/yard"
         }
       ],
       "type": "projects"
@@ -879,6 +1233,10 @@
       "type": "threadRemoved"
     },
     {
+      "thread": "00000000-0000-0000-0000-000000000018",
+      "type": "threadRemoved"
+    },
+    {
       "projects": [
         {
           "id": "project-1",
@@ -887,6 +1245,11 @@
         },
         {
           "id": "project-2",
+          "name": "yard",
+          "path": "/work/run/yard"
+        },
+        {
+          "id": "project-3",
           "name": "project",
           "path": "/work/run/project"
         }
@@ -897,8 +1260,8 @@
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000010",
-        "project": "project-2",
+        "id": "00000000-0000-0000-0000-000000000018",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -918,8 +1281,29 @@
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000010",
+        "project": "project-3",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "Bearing check",
+        "unread": false,
+        "updatedAt": 0
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
         "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-2",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -939,8 +1323,8 @@
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000014",
-        "project": "project-2",
+        "id": "00000000-0000-0000-0000-000000000022",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -957,8 +1341,8 @@
       "type": "thread"
     },
     {
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "turnStarted"
     },
     {
@@ -972,10 +1356,10 @@
           "workflow": null
         },
         "done": false,
-        "id": "00000000-0000-0000-0000-000000000016"
+        "id": "00000000-0000-0000-0000-000000000024"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "item"
     },
     {
@@ -989,10 +1373,10 @@
           "workflow": null
         },
         "done": true,
-        "id": "00000000-0000-0000-0000-000000000016"
+        "id": "00000000-0000-0000-0000-000000000024"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "item"
     },
     {
@@ -1004,16 +1388,16 @@
         "done": false,
         "id": "msg_deck"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "item"
     },
     {
       "item": "msg_deck",
       "kind": "agentMessage",
       "text": "Ready.",
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "itemDelta"
     },
     {
@@ -1025,16 +1409,16 @@
         "done": true,
         "id": "msg_deck"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "item"
     },
     {
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000014",
-        "project": "project-2",
+        "id": "00000000-0000-0000-0000-000000000022",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -1054,16 +1438,16 @@
       "state": {
         "state": "completed"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000015",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000023",
       "type": "turnEnded"
     },
     {
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000014",
-        "project": "project-2",
+        "id": "00000000-0000-0000-0000-000000000022",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -1080,8 +1464,8 @@
       "type": "thread"
     },
     {
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "turnStarted"
     },
     {
@@ -1104,10 +1488,10 @@
           "workflow": null
         },
         "done": false,
-        "id": "00000000-0000-0000-0000-000000000019"
+        "id": "00000000-0000-0000-0000-000000000027"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "item"
     },
     {
@@ -1130,10 +1514,10 @@
           "workflow": null
         },
         "done": true,
-        "id": "00000000-0000-0000-0000-000000000019"
+        "id": "00000000-0000-0000-0000-000000000027"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "item"
     },
     {
@@ -1145,16 +1529,16 @@
         "done": false,
         "id": "msg_refs"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "item"
     },
     {
       "item": "msg_refs",
       "kind": "agentMessage",
       "text": "Both threads are referenced.",
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "itemDelta"
     },
     {
@@ -1166,16 +1550,16 @@
         "done": true,
         "id": "msg_refs"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "item"
     },
     {
       "thread": {
         "assignedBy": null,
         "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000014",
-        "project": "project-2",
+        "id": "00000000-0000-0000-0000-000000000022",
+        "project": "project-3",
         "settings": {
           "access": "ask",
           "effort": "low",
@@ -1195,21 +1579,21 @@
       "state": {
         "state": "completed"
       },
-      "thread": "00000000-0000-0000-0000-000000000014",
-      "turn": "00000000-0000-0000-0000-000000000018",
+      "thread": "00000000-0000-0000-0000-000000000022",
+      "turn": "00000000-0000-0000-0000-000000000026",
       "type": "turnEnded"
     }
   ],
   "reads": [
     {
-      "afterEvents": 55,
+      "afterEvents": 78,
       "view": {
-        "seq": 55,
+        "seq": 78,
         "summary": {
           "assignedBy": null,
           "forkedFrom": null,
-          "id": "00000000-0000-0000-0000-000000000014",
-          "project": "project-2",
+          "id": "00000000-0000-0000-0000-000000000022",
+          "project": "project-3",
           "settings": {
             "access": "ask",
             "effort": "low",
@@ -1225,7 +1609,7 @@
         },
         "turns": [
           {
-            "id": "00000000-0000-0000-0000-000000000015",
+            "id": "00000000-0000-0000-0000-000000000023",
             "items": [
               {
                 "body": {
@@ -1237,7 +1621,7 @@
                   "workflow": null
                 },
                 "done": true,
-                "id": "00000000-0000-0000-0000-000000000016"
+                "id": "00000000-0000-0000-0000-000000000024"
               },
               {
                 "body": {
@@ -1253,7 +1637,7 @@
             }
           },
           {
-            "id": "00000000-0000-0000-0000-000000000018",
+            "id": "00000000-0000-0000-0000-000000000026",
             "items": [
               {
                 "body": {
@@ -1274,7 +1658,7 @@
                   "workflow": null
                 },
                 "done": true,
-                "id": "00000000-0000-0000-0000-000000000019"
+                "id": "00000000-0000-0000-0000-000000000027"
               },
               {
                 "body": {

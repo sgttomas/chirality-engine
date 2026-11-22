@@ -105,7 +105,8 @@ impl Inner {
     async fn start_admitted(&self, thread: &ThreadId, delivery: &Delivery) -> std::result::Result<Start, NotStarted> {
         let unsent = |error| NotStarted { error, sent: None };
         let entry = self.known_thread(thread).map_err(unsent)?;
-        if !crate::store::is_idle(&entry) {
+        // A turn running there, or one that ended still being looked at for its report.
+        if !crate::store::is_idle(&entry) || self.assignments.is_looking(thread) {
             return Ok(Start::Busy);
         }
         // Its sender, or the assignment it reports on, may have gone while it waited for the thread.
@@ -176,14 +177,25 @@ impl Inner {
         // has taken the turn.
         self.store.update_thread(thread, |e| e.starting = Some(settings));
         *sent = true;
+        // A turn started with another thread's message (not a report) reports back to it.
+        let reports = from.is_some_and(|m| m.report.is_none());
+        if reports {
+            self.assignments.starting(thread);
+        }
         let started: p::TurnResponse = match session.call("turn/start", params).await {
             Ok(started) => started,
             Err(e) => {
+                if reports {
+                    self.assignments.started(thread, None);
+                }
                 self.store.update_thread(thread, |entry| entry.starting = None);
                 return Err(e);
             }
         };
         let turn = TurnId(started.turn.id);
+        if reports {
+            self.assignments.started(thread, Some(&turn));
+        }
         self.store.update_thread(thread, |e| {
             if let Some(settings) = e.starting.take() {
                 e.settings = Some(settings);

@@ -95,7 +95,7 @@ pub async fn assignment_read(ctx: &mut Ctx) {
     assert!(!summary(ctx, &peer).unread && summary(ctx, &peer).status == ThreadStatus::Idle);
     assert_eq!(ctx.engine.inner().assignments.deliveries.waiting_anywhere(), 0);
 
-    // What a read gives: the messages newest first, the long reply cut, numbered to page back.
+    // What a read gives: the messages newest first, the long reply cut, and a cursor to page back.
     let args = |view, before, limit| ReadArgs { thread: peer.0.clone(), view, before, limit };
     let messages = ctx.engine.inner().read_for(&lead, args(View::Messages, None, Some(3))).await.unwrap();
     assert_eq!((messages["title"].as_str(), messages["status"].as_str(), &messages["error"]), (Some("STUB[peer] Survey."), Some("idle"), &json!(null)));
@@ -103,13 +103,14 @@ pub async fn assignment_read(ctx: &mut Ctx) {
     assert_eq!(kinds, ["reply", "person", "reply"]);
     assert!(messages["items"][0]["text"].as_str().unwrap().ends_with("[cut: 18010 more characters]"), "{}", messages["items"][0]["text"]);
     assert_eq!(messages["items"][2]["text"], "Survey done.");
-    assert_eq!((&messages["more"], &messages["before"]), (&json!(true), &json!(2)));
-    let earlier = ctx.engine.inner().read_for(&lead, args(View::Messages, Some(2), None)).await.unwrap();
+    assert_eq!(messages["more"], true);
+    let before = messages["before"].as_str().map(str::to_string);
+    let earlier = ctx.engine.inner().read_for(&lead, args(View::Messages, before, None)).await.unwrap();
     assert_eq!((earlier["items"][0]["text"].as_str(), &earlier["more"]), (Some("STUB[peer] Survey."), &json!(false)));
     let activity = ctx.engine.inner().read_for(&lead, args(View::Activity, None, None)).await.unwrap();
     assert!(activity.to_string().len() <= ANSWER_LIMIT);
     let command = activity["items"].as_array().unwrap().iter().find(|i| i["kind"] == "command").expect("the peer's command");
-    assert!(command["command"].as_str().unwrap().contains("printf ok") && command["output"] == "ok", "{command}");
+    assert!(command["command"].as_str().unwrap().contains("printf ok") && command["output"] == "ok" && command["status"] == "completed", "{command}");
     let own = ctx.engine.inner().read_for(&lead, ReadArgs { thread: lead.0.clone(), view: View::Messages, before: None, limit: None }).await;
     assert!(own.is_err(), "{own:?}");
 }
@@ -123,7 +124,7 @@ async fn named(ctx: &mut Ctx, project: &ProjectId, key: &str, title: &str) -> Th
     thread
 }
 
-/// A message mentioning threads, in this project and another: the agent gets a reference to each, its
+/// A message mentioning threads, in this project and another (of three): the agent gets a reference to each, its
 /// history names them again, and a new thread's title leaves them out.
 pub async fn thread_refs(ctx: &mut Ctx) {
     let here = ctx.engine.add_project(ctx.run.project()).await.unwrap();
@@ -132,6 +133,12 @@ pub async fn thread_refs(ctx: &mut Ctx) {
     let other = ctx.engine.add_project(other_path).await.unwrap();
     let piles = named(ctx, &here.id, "piles", "Pile plan").await;
     let steel = named(ctx, &other.id, "steel", "Steel estimate").await;
+    // More threads, and a third project, for the interface's list of them.
+    named(ctx, &here.id, "bearing", "Bearing check").await;
+    let yard_path = ctx.run.root.join("yard");
+    std::fs::create_dir_all(&yard_path).unwrap();
+    let yard = ctx.engine.add_project(yard_path).await.unwrap();
+    named(ctx, &yard.id, "yard", "Yard layout").await;
     let refs = vec![ThreadRef { thread: piles.clone(), title: Some("Pile plan".into()) }, ThreadRef { thread: steel.clone(), title: Some("Steel estimate".into()) }];
 
     // A new thread whose first message mentions one: its title, read from Codex's listing, is the text alone.

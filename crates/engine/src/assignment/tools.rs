@@ -71,12 +71,12 @@ pub(crate) fn spec() -> p::DynamicToolSpec {
         function(
             READ,
             "Read another thread, in any project, a subagent's too, to see where it stands or what it did; it is not woken. \
-             Gives its title, project, status and last error, then its items newest first, each numbered; `before` a number \
-             gives the items before it.",
+             Gives its title, project, status and last error, then its items newest first; when there are more, `before` \
+             in the answer gives the ones before.",
             json!({"type": "object", "properties": {
                 "thread": thread,
                 "view": {"type": "string", "enum": ["messages", "activity"], "description": "messages (the default): messages in and the agent's final replies; activity adds commands, file changes and tool calls."},
-                "before": {"type": "integer", "description": "Only the items numbered below this."},
+                "before": {"type": "string", "description": "The `before` an earlier answer gave."},
                 "limit": {"type": "integer", "description": "How many items at most (20 unless given)."}
             }, "required": ["thread"], "additionalProperties": false}),
         ),
@@ -297,9 +297,20 @@ impl Inner {
         if &target == caller {
             return Err("That is this thread.".into());
         }
-        let view = self.read_thread(&target).await.map_err(|e| e.to_string())?;
+        let status = self.store.summary(&target).map_or(ThreadStatus::Idle, |s| s.status);
         let project = self.project(&entry.project).ok().map(|p| p.name);
-        Ok(super::read::answer(&view, project.as_deref(), &args))
+        let header = super::read::Header { thread: target.clone(), title: entry.title, project, status, error: entry.failed };
+        let session = self.session().map_err(|e| e.to_string())?;
+        // Codex's turns, a few at a time, newest first, with their items whole.
+        let fetch = |cursor: Option<String>| {
+            let (session, thread) = (session.clone(), target.0.clone());
+            async move {
+                let params = json!({ "threadId": thread, "cursor": cursor, "limit": super::read::PAGE_TURNS, "sortDirection": "desc", "itemsView": "full" });
+                let page = session.call::<p::TurnsListResponse>("thread/turns/list", params).await.ok()?;
+                Some((page.data, page.next_cursor))
+            }
+        };
+        super::read::answer(header, &args, fetch).await
     }
 
     fn close(&self, caller: &ThreadId, args: CloseArgs) -> Answer {

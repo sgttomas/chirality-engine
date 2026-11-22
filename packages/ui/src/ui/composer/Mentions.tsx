@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 import type { Project, ProjectId, Snapshot, ThreadId, ThreadSummary } from "../../engine/types";
 import { markLabel, markOf, nameOf } from "../../state/selectors";
 import { Icon } from "../Icon";
@@ -12,13 +10,20 @@ export interface Mention {
   query: string;
 }
 
-/** The `@` mention being typed at the caret, if any: from an `@` at the start or after a space, to the
- * caret, on one line. A title has spaces, so the name typed can too. */
-export function mentionAt(text: string, caret: number): Mention | null {
-  const before = text.slice(0, caret);
-  const start = before.lastIndexOf("@");
-  if (start < 0 || (start > 0 && !/\s/.test(before[start - 1]))) return null;
-  const query = before.slice(start + 1);
+/** The mention just opened by typing `@` at the caret, at the start or after a space: only an `@`
+ * typed fresh opens one, never one already in the text. */
+export function typedMention(before: string, after: string, caret: number): Mention | null {
+  const start = caret - 1;
+  if (after.length !== before.length + 1 || after[start] !== "@" || after.slice(0, start) !== before.slice(0, start)) return null;
+  if (start > 0 && !/\s/.test(after[start - 1])) return null;
+  return { start, end: caret, query: "" };
+}
+
+/** An open mention as the text now is: the name typed from its `@` to the caret, across spaces, on
+ * one line; none once the `@` is gone, the caret is before it, or the name starts with a space. */
+export function mentionFrom(text: string, start: number, caret: number): Mention | null {
+  if (text[start] !== "@" || caret <= start) return null;
+  const query = text.slice(start + 1, caret);
   if (/^\s/.test(query) || query.includes("\n")) return null;
   return { start, end: caret, query };
 }
@@ -32,10 +37,10 @@ export interface MentionGroup {
 const SHOWN = 5;
 const SHOWN_FOUND = 20;
 
-/** Running or needing the person first, then finished and unread, then the rest. */
+/** Running or needing the person first, then unread (finished or failed), then the rest. */
 const rank = (t: ThreadSummary) => {
   const mark = markOf(t);
-  return mark === "waiting" || mark === "running" ? 0 : mark === "finished" ? 1 : 2;
+  return mark === "waiting" || mark === "running" ? 0 : t.unread ? 1 : 2;
 };
 
 /** The threads `@` can mention, by project: the current project first, then the others by their latest
@@ -56,26 +61,10 @@ export function mentionGroups(snapshot: Snapshot, project: ProjectId | null, cur
     .filter((g) => g.threads.length > 0);
 }
 
-/** The threads to mention, grouped by project, chosen with the arrows and Enter. */
-export function MentionMenu({ groups, onPick, onClose }: { groups: MentionGroup[]; onPick(thread: ThreadSummary): void; onClose(): void }) {
+/** The threads to mention, grouped by project; `active` is the one Enter picks. The composer handles
+ * the keys. */
+export function MentionMenu({ groups, active, onActive, onPick }: { groups: MentionGroup[]; active: number; onActive(i: number): void; onPick(thread: ThreadSummary): void }) {
   const threads = groups.flatMap((g) => g.threads);
-  const [active, setActive] = useState(0);
-  const key = threads.map((t) => t.id).join(" ");
-  useEffect(() => setActive(0), [key]);
-
-  useEffect(() => {
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, threads.length - 1));
-      else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0));
-      else if ((e.key === "Enter" || e.key === "Tab") && threads[active]) onPick(threads[active]);
-      else if (e.key === "Escape") onClose();
-      else return;
-      e.preventDefault();
-    };
-    document.addEventListener("keydown", keys, true);
-    return () => document.removeEventListener("keydown", keys, true);
-  }, [threads, active, onPick, onClose]);
-
   if (threads.length === 0) return null;
   return (
     <div className="menu mention-menu" role="listbox" aria-label="Threads">
@@ -93,7 +82,7 @@ export function MentionMenu({ groups, onPick, onClose }: { groups: MentionGroup[
                 role="option"
                 aria-selected={i === active}
                 className="menu-item"
-                onMouseEnter={() => setActive(i)}
+                onMouseEnter={() => onActive(i)}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onPick(thread)}
               >

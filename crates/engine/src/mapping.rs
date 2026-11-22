@@ -46,7 +46,10 @@ pub(crate) fn message_input(message: &Message, workflow: Option<&PickedWorkflow>
 /// parts: the text comes first (after another thread's mark), so it is what is kept.
 pub(crate) fn title_from_preview(preview: &str) -> Option<String> {
     let preview = marker::from_preview(preview).1;
-    let end = [marker::REF_OPEN, FILE_PREFIX, WORKFLOW_OPEN].iter().filter_map(|marker| preview.find(marker)).min().unwrap_or(preview.len());
+    let parts = [FILE_PREFIX, WORKFLOW_OPEN].iter().filter_map(|marker| preview.find(marker)).min().unwrap_or(preview.len());
+    // A mention is a part of its own after the text: only references that run to the next part end it.
+    let mentions = preview[..parts].match_indices(marker::REF_OPEN).map(|(at, _)| at).find(|&at| marker::only_refs(&preview[at..parts]));
+    let end = mentions.unwrap_or(parts);
     Some(preview[..end].trim().to_string()).filter(|t| !t.is_empty())
 }
 
@@ -90,13 +93,13 @@ fn user_message(content: &[p::InputInfo]) -> ItemBody {
 pub(crate) fn item(item: &ThreadItem, done: bool) -> Option<Item> {
     let (id, body) = match item {
         ThreadItem::UserMessage { id, content } => (id, user_message(content)),
-        ThreadItem::AgentMessage { id, text } | ThreadItem::Plan { id, text } => (id, ItemBody::AgentMessage { text: text.clone() }),
+        ThreadItem::AgentMessage { id, text, .. } | ThreadItem::Plan { id, text } => (id, ItemBody::AgentMessage { text: text.clone() }),
         ThreadItem::Reasoning { id, summary } => (id, ItemBody::Reasoning { summary: summary.join("\n\n") }),
-        ThreadItem::CommandExecution { id, command, cwd, aggregated_output, exit_code } => (
+        ThreadItem::CommandExecution { id, command, cwd, aggregated_output, exit_code, .. } => (
             id,
             ItemBody::Command { command: command.clone(), cwd: cwd.into(), output: aggregated_output.clone().unwrap_or_default(), exit_code: *exit_code },
         ),
-        ThreadItem::FileChange { id, changes } => (id, ItemBody::FileChange { files: file_diffs(changes) }),
+        ThreadItem::FileChange { id, changes, .. } => (id, ItemBody::FileChange { files: file_diffs(changes) }),
         ThreadItem::McpToolCall { id, server, tool, arguments, result, error, status } => {
             let (text, images) = result.as_ref().map(mcp_result).unwrap_or_default();
             let body = ItemBody::ToolCall {
@@ -415,6 +418,11 @@ mod tests {
         assert_eq!((text.as_str(), threads, attachments), ("Ask @Piles", vec![piles], message.attachments.clone()));
         let preview = format!("Ask @Piles{}{FILE_PREFIX}/p/a.md", marker::render_ref(&mentions[0]));
         assert_eq!(title_from_preview(&preview).as_deref(), Some("Ask @Piles"));
+        // Text that only holds the start of one is the text.
+        let quoted = "Why does <thread-ref id=\"x\" stop here?";
+        assert_eq!(title_from_preview(quoted).as_deref(), Some(quoted));
+        let both = format!("{quoted}{}", marker::render_ref(&mentions[0]));
+        assert_eq!(title_from_preview(&both).as_deref(), Some(quoted));
         // The person's own text is the text, whatever it says.
         let mine = Message { text: marker::render_ref(&mentions[0]), attachments: vec![], workflow: None, threads: vec![] };
         let content: Vec<p::InputInfo> = serde_json::from_value(serde_json::to_value(message_input(&mine, None, None, &[])).unwrap()).unwrap();

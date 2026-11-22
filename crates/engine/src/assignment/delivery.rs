@@ -241,12 +241,20 @@ impl Inner {
     async fn deliver(self: Arc<Self>, thread: ThreadId) {
         let mut events = self.store.subscribe();
         loop {
+            // Listening before the step, so a look that ends during it is heard.
+            let looked = self.assignments.looked.notified();
+            tokio::pin!(looked);
+            looked.as_mut().enable();
             match self.step(&thread).await.0 {
                 Step::Empty | Step::Gone => return,
                 Step::Started | Step::Dropped => {}
                 Step::Refused(message) => self.not_delivered(&thread, &message),
                 Step::Wait => {
-                    let _ = tokio::time::timeout(RECHECK, events.recv()).await;
+                    tokio::select! {
+                        _ = events.recv() => {}
+                        _ = &mut looked => {}
+                        _ = tokio::time::sleep(RECHECK) => {}
+                    }
                 }
             }
         }
@@ -334,32 +342,32 @@ impl Inner {
         Some(newer.filter_map(opened_with).any(|(mark, text)| mark == delivery.from && text == delivery.text))
     }
 
-    /// A turn that may have begun with another thread's message ended: its
-    /// report is looked at after those of the thread's earlier turns, in the
-    /// order the turns ended. The look began when the turn's end was heard.
-    pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
-        let (before, done) = self.assignments.reserve_report(&thread);
-        let looked = Looked(self.clone(), thread.clone());
+    /// A turn that may report ended: its report is looked at after every
+    /// earlier one, from any thread, so reports are made in the order their
+    /// turns ended. `opened`: the engine started it with another thread's message.
+    pub(crate) fn report_in_order(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, opened: bool) {
+        let (before, done) = self.assignments.reserve_report();
+        let looked = Looked(self.clone(), thread.clone(), turn.clone());
         tokio::spawn(async move {
             if let Some(before) = before {
                 let _ = before.await;
             }
-            looked.0.report(thread, turn, state).await;
+            looked.0.report(thread, turn, state, opened).await;
             drop(looked);
             let _ = done.send(());
         });
     }
 
-    /// If another thread's message started the turn, its last reply and how it
-    /// ended go back to that thread, unless it assigned this one and has closed
-    /// the assignment.
-    async fn report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
-        self.check_report(thread, turn, state).await;
+    /// If the engine started the turn with another thread's message, or the thread that
+    /// assigned this one did, its last reply and how it ended go back to that thread, unless
+    /// it assigned this one and has closed the assignment.
+    async fn report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, opened: bool) {
+        self.check_report(thread, turn, state, opened).await;
         #[cfg(test)]
         self.assignments.reports.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    async fn check_report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState) {
+    async fn check_report(self: &Arc<Self>, thread: ThreadId, turn: TurnId, state: TurnState, opened: bool) {
         let (Some(entry), Some(end)) = (self.store.thread(&thread), end_of(&state)) else { return };
         if entry.subagent.is_some() {
             return;
@@ -369,7 +377,10 @@ impl Inner {
         let Some(kept) = find_turn(&session, &thread, &turn).await else { return };
         // A report's turn reports nothing, so exchanges of reports cannot go on.
         let Some(sender) = opened_with(&kept).map(|(mark, _)| mark).filter(|m| m.report.is_none() && m.from != thread).map(|m| m.from) else { return };
-        if entry.assigned_by.as_ref() == Some(&sender) && self.closed(&session, &sender, &thread).await {
+        // A mark the person wrote is not a message the engine delivered; only the assigner's is
+        // taken at its word (after a restart the engine has not seen how the turn began).
+        let assigner = entry.assigned_by.as_ref() == Some(&sender);
+        if !opened && !assigner || assigner && self.closed(&session, &sender, &thread).await {
             return;
         }
         let bound = if entry.access_known { entry.settings.as_ref().map_or(Access::ReadOnly, |s| s.access) } else { Access::ReadOnly };
@@ -397,11 +408,11 @@ impl Inner {
 }
 
 /// A look at a thread's ended turn, over when this is dropped, whatever became of it.
-struct Looked(Arc<Inner>, ThreadId);
+struct Looked(Arc<Inner>, ThreadId, TurnId);
 
 impl Drop for Looked {
     fn drop(&mut self) {
-        self.0.assignments.end_look(&self.1);
+        self.0.assignments.end_look(&self.1, &self.2);
     }
 }
 

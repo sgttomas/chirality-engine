@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import type { Attachment, ThreadSummary, TurnSettings, Workflow } from "../../engine/types";
 import { draftKey, emptyDraft, type Draft } from "../../state/drafts";
@@ -9,7 +9,7 @@ import { SubagentControls } from "../Subagents";
 import { Icon } from "../Icon";
 import { Approval } from "./Approval";
 import { Controls } from "./Controls";
-import { mentionAt, mentionGroups, MentionMenu, type Mention } from "./Mentions";
+import { mentionFrom, mentionGroups, MentionMenu, typedMention, type Mention } from "./Mentions";
 import { Question } from "./Question";
 import { WorkflowPicker } from "./WorkflowPicker";
 import "../styles/base.css";
@@ -45,12 +45,22 @@ function ThreadComposer() {
   const edit = (change: Partial<Draft> | ((d: Draft) => Partial<Draft>)) => store.editDraft(key, change);
 
   const [settings, setSettings] = useState<TurnSettings>(() => resolveSettings(models, summary?.settings ?? remembered()));
-  const [mention, setMention] = useState<Mention | null>(null);
+  // The mention being typed, kept in a ref too so a caret move heard before the next render sees it.
+  const [mention, setMentionState] = useState<Mention | null>(null);
+  const open = useRef<Mention | null>(null);
+  const setMention = (next: Mention | null) => {
+    open.current = next;
+    setMentionState(next);
+  };
+  const [active, setActive] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
   // Where the caret goes once the text it follows is in the box.
   const caret = useRef<number | null>(null);
   const groups = mention ? mentionGroups(snapshot, project, thread, mention.query) : [];
-  const mentioning = groups.length > 0;
+  const choices = groups.flatMap((g) => g.threads);
+  const mentioning = choices.length > 0;
+  /** The mention as typed, while some thread's title matches it: it closes for good when none does. */
+  const matching = (m: Mention | null) => (m && mentionGroups(snapshot, project, thread, m.query).length > 0 ? m : null);
 
   useLayoutEffect(() => {
     const at = caret.current;
@@ -84,9 +94,12 @@ function ThreadComposer() {
     edit((d) => ({ attachments: [...d.attachments, ...added.filter((n) => !d.attachments.some((x) => x.path === n.path))] }));
   };
 
-  const onChange = (value: string, caret: number) => {
+  const onChange = (value: string, at: number) => {
+    // An open mention follows the typing; only an `@` typed fresh opens one.
+    const now = open.current ? mentionFrom(value, open.current.start, at) : typedMention(text, value, at);
     edit({ text: value });
-    setMention(mentionAt(value, caret));
+    setMention(matching(now));
+    setActive(0);
   };
 
   const pickMention = (picked: ThreadSummary) => {
@@ -95,7 +108,7 @@ function ThreadComposer() {
     const before = `${text.slice(0, mention.start)}@${name} `;
     caret.current = before.length;
     edit((d) => ({
-      text: before + text.slice(mention.end).replace(/^\s/, ""),
+      text: before + text.slice(mention.end).replace(/^ /, ""),
       threads: d.threads.some((r) => r.thread === picked.id) ? d.threads : [...d.threads, { thread: picked.id, title: name }],
     }));
     setMention(null);
@@ -108,8 +121,22 @@ function ThreadComposer() {
     const before = text.slice(0, from);
     const opened = `${before}${before && !/\s$/.test(before) ? " " : ""}@`;
     caret.current = opened.length;
-    onChange(opened + text.slice(to), opened.length);
+    edit({ text: opened + text.slice(to) });
+    setMention(matching({ start: opened.length - 1, end: opened.length, query: "" }));
+    setActive(0);
     input.current?.focus();
+  };
+
+  /** With the list open, the arrows choose, Enter or Tab picks, and Escape closes it. */
+  const mentionKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    const last = choices.length - 1;
+    if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, last));
+    else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0));
+    else if ((e.key === "Enter" && !e.nativeEvent.isComposing) || e.key === "Tab") pickMention(choices[Math.min(active, last)]);
+    else if (e.key === "Escape") setMention(null);
+    else return false;
+    e.preventDefault();
+    return true;
   };
 
   const nameOfRef = (id: string, title: string | null) => {
@@ -125,7 +152,7 @@ function ThreadComposer() {
         <Approval key={pending.id} pending={pending} />
       ) : null}
       <div className={`composer ${pending ? "composer--behind" : ""}`}>
-        {mentioning && <MentionMenu groups={groups} onPick={pickMention} onClose={() => setMention(null)} />}
+        {mentioning && <MentionMenu groups={groups} active={active} onActive={setActive} onPick={pickMention} />}
         {(workflow || attachments.length > 0 || mentioned.length > 0) && (
           <div className="chips composer-chips">
             {workflow && (
@@ -164,8 +191,14 @@ function ThreadComposer() {
           placeholder={running ? "Steer the turn" : thread ? "Reply" : "What should we work on?"}
           value={text}
           onChange={(e) => onChange(e.target.value, e.target.selectionStart)}
+          onBlur={() => setMention(null)}
+          onSelect={(e) => {
+            // The caret moved away from the name being typed: the list closes.
+            const box = e.currentTarget;
+            if (open.current && (box.selectionStart !== box.selectionEnd || box.selectionStart !== open.current.end)) setMention(null);
+          }}
           onKeyDown={(e) => {
-            if (mentioning && ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(e.key)) return;
+            if (mentioning && mentionKey(e)) return;
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send();

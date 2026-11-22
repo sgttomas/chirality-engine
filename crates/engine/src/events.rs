@@ -74,7 +74,7 @@ impl Inner {
                 if method == "thread/closed" {
                     self.store.drop_requests(&thread);
                 } else {
-                    self.assignments.deliveries.forget(&thread);
+                    self.assignments.forget_thread(&thread);
                     self.store.remove_thread(&thread);
                 }
             }
@@ -96,11 +96,12 @@ impl Inner {
                 self.tool_calls.cancel(|place| place.thread == note.thread_id && place.turn == note.turn.id);
                 let state = mapping::turn_state(&note.turn);
                 let (thread, turn) = (ThreadId(note.thread_id), TurnId(note.turn.id));
-                // A turn another thread's message started reports back to it; an assigned thread's
-                // turn is looked at whether or not the engine saw how it began. Decided before the
-                // thread is idle (if Codex has not said so already), so what waits for it starts after the look.
-                let report = self.assignments.look_due(&thread, &turn, self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some()));
-                self.assignments.announced(&thread, &turn);
+                // A turn the engine started with another thread's message reports back to it; an
+                // assigned thread's turn is looked at however it began. Decided before the thread is
+                // idle (if Codex has not said so already), so what waits for it starts after the look.
+                let opened = self.assignments.take_opened(&thread, &turn);
+                let assigned = self.store.thread(&thread).is_some_and(|e| e.assigned_by.is_some());
+                let report = self.assignments.look_due(&thread, &turn, opened || assigned);
                 let known = self.store.update_thread(&thread, |e| {
                     if e.active_turn.as_ref() == Some(&turn) {
                         e.active_turn = None;
@@ -117,24 +118,25 @@ impl Inner {
                 if known.is_some() {
                     self.store.emit(Event::TurnEnded { thread: thread.clone(), turn: turn.clone(), state: state.clone() });
                     if report {
-                        self.report_in_order(thread, turn, state);
+                        self.report_in_order(thread, turn, state, opened);
                     }
                 } else if report {
-                    self.assignments.end_look(&thread);
+                    self.assignments.end_look(&thread, &turn);
                 }
             }
             "item/started" | "item/completed" => {
                 let Some(note) = decode::<p::ItemNote>(params) else { return };
                 match &note.item {
-                    p::ThreadItem::FileChange { id, changes } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
-                    // A message from another thread (not a report) began the turn: its end reports back.
+                    p::ThreadItem::FileChange { id, changes, .. } => self.store.remember_file_change(id, mapping::file_diffs(changes)),
+                    // A message from another thread (not a report) began the turn, which the engine may be
+                    // starting: Codex can tell of it before it answers the start.
                     p::ThreadItem::UserMessage { content, .. } if method == "item/started" => {
                         let mark = match content.first() {
                             Some(p::InputInfo::Text { text }) => marker::part(text),
                             _ => None,
                         };
-                        if mark.is_some_and(|m| m.report.is_none() && m.from.0 != note.thread_id) {
-                            self.assignments.opened_by_message(&ThreadId(note.thread_id.clone()), &TurnId(note.turn_id.clone()));
+                        if mark.is_some_and(|m| m.report.is_none()) {
+                            self.assignments.marked_message(&ThreadId(note.thread_id.clone()), &TurnId(note.turn_id.clone()));
                         }
                     }
                     // A call that ends unanswered was cancelled by Codex.

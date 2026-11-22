@@ -219,7 +219,7 @@
           "state": "idle"
         },
         "subagent": {
-          "nickname": "Huygens",
+          "nickname": "Noether",
           "parent": "00000000-0000-0000-0000-000000000009",
           "path": "/root/worker"
         },
@@ -1027,27 +1027,6 @@
       "type": "item"
     },
     {
-      "thread": {
-        "assignedBy": null,
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000002",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
-          "effort": "low",
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "idle"
-        },
-        "subagent": null,
-        "title": "STUB[peer] Survey.",
-        "unread": false,
-        "updatedAt": 1795000000
-      },
-      "type": "thread"
-    },
-    {
       "item": {
         "body": {
           "kind": "threadTool",
@@ -1078,31 +1057,6 @@
       "thread": "00000000-0000-0000-0000-000000000009",
       "turn": "00000000-0000-0000-0000-000000000010",
       "type": "item"
-    },
-    {
-      "thread": {
-        "assignedBy": null,
-        "forkedFrom": null,
-        "id": "00000000-0000-0000-0000-000000000012",
-        "project": "project-1",
-        "settings": {
-          "access": "ask",
-          "effort": "low",
-          "model": "gpt-6.2-sol"
-        },
-        "status": {
-          "state": "idle"
-        },
-        "subagent": {
-          "nickname": "Huygens",
-          "parent": "00000000-0000-0000-0000-000000000009",
-          "path": "/root/worker"
-        },
-        "title": null,
-        "unread": false,
-        "updatedAt": 1795000000
-      },
-      "type": "thread"
     },
     {
       "item": {
@@ -1203,13 +1157,59 @@
         "updatedAt": 1795000000
       },
       "type": "thread"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000012",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": {
+          "nickname": "Noether",
+          "parent": "00000000-0000-0000-0000-000000000009",
+          "path": "/root/worker"
+        },
+        "title": null,
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
+    },
+    {
+      "thread": {
+        "assignedBy": null,
+        "forkedFrom": null,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "project": "project-1",
+        "settings": {
+          "access": "ask",
+          "effort": "low",
+          "model": "gpt-6.2-sol"
+        },
+        "status": {
+          "state": "idle"
+        },
+        "subagent": null,
+        "title": "STUB[peer] Survey.",
+        "unread": false,
+        "updatedAt": 1795000000
+      },
+      "type": "thread"
     }
   ],
   "reads": [
     {
-      "afterEvents": 54,
+      "afterEvents": 52,
       "view": {
-        "seq": 54,
+        "seq": 52,
         "summary": {
           "assignedBy": null,
           "forkedFrom": null,
@@ -1314,9 +1314,9 @@
       }
     },
     {
-      "afterEvents": 54,
+      "afterEvents": 53,
       "view": {
-        "seq": 54,
+        "seq": 53,
         "summary": {
           "assignedBy": null,
           "forkedFrom": null,
@@ -1331,7 +1331,7 @@
             "state": "idle"
           },
           "subagent": {
-            "nickname": "Huygens",
+            "nickname": "Noether",
             "parent": "00000000-0000-0000-0000-000000000009",
             "path": "/root/worker"
           },

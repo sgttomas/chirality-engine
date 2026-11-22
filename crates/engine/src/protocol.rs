@@ -240,12 +240,14 @@ pub struct ThreadListParams {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ThreadItem {
     UserMessage { id: String, content: Vec<InputInfo> },
-    AgentMessage { id: String, text: String },
+    /// `phase`: commentary, partial_answer or final_answer, when the model says.
+    AgentMessage { id: String, text: String, #[serde(default)] phase: Option<String> },
     Plan { id: String, text: String },
     Reasoning { id: String, #[serde(default)] summary: Vec<String> },
     #[serde(rename_all = "camelCase")]
-    CommandExecution { id: String, command: String, cwd: String, aggregated_output: Option<String>, exit_code: Option<i32> },
-    FileChange { id: String, changes: Vec<FileChangeInfo> },
+    CommandExecution { id: String, command: String, cwd: String, aggregated_output: Option<String>, exit_code: Option<i32>, #[serde(default)] status: Option<String> },
+    /// `status`, as a command's: inProgress, completed, failed or declined.
+    FileChange { id: String, changes: Vec<FileChangeInfo>, #[serde(default)] status: Option<String> },
     McpToolCall {
         id: String,
         server: String,

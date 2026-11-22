@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 
 use crate::api::{ThreadId, TurnId};
 
@@ -33,7 +33,7 @@ pub(crate) const NAMESPACE: &str = "chirality";
 
 /// How long a look at an ended turn holds what waits for its thread, at most: Codex may never
 /// announce the end of a turn it said was over.
-const LOOK_LIMIT: Duration = Duration::from_secs(30);
+pub(crate) const LOOK_LIMIT: Duration = if cfg!(test) { Duration::from_secs(3) } else { Duration::from_secs(30) };
 
 #[derive(Default)]
 pub(crate) struct Assignments {
@@ -41,16 +41,19 @@ pub(crate) struct Assignments {
     /// Assignments closed while the engine runs, (assigner, assigned); after a
     /// restart a close is found in the assigner's history.
     closed: Mutex<HashSet<(ThreadId, ThreadId)>>,
-    /// The turn running on a thread that another thread's message (not a report) opened, as the
-    /// engine saw it start: its end reports back.
-    opened: Mutex<HashMap<ThreadId, TurnId>>,
-    /// Threads whose ended turns are being looked at for a report, with how many and since when: a
-    /// delivery waiting for one starts after, so a turn's reply is read before the next turn starts there.
-    looking: Mutex<HashMap<ThreadId, (usize, Instant)>>,
-    /// The turn whose look began when Codex said its thread was idle, before it announced the turn's end.
-    begun: Mutex<HashMap<ThreadId, TurnId>>,
-    /// Each thread's last report looked at, so the next waits for it.
-    reports_in_order: Mutex<HashMap<ThreadId, oneshot::Receiver<()>>>,
+    /// Turns the engine started with another thread's message (not a report): their ends report back.
+    opened: Mutex<HashSet<(ThreadId, TurnId)>>,
+    /// Threads whose `turn/start` for such a message is in flight: the turn whose first message is
+    /// marked, while it is, is that one (Codex may tell of it before it answers).
+    starting: Mutex<HashSet<ThreadId>>,
+    /// Ended turns being looked at for their report, each since when: what waits for that thread
+    /// starts after, so a turn's reply is read before the next turn starts there.
+    looks: Mutex<HashMap<(ThreadId, TurnId), Instant>>,
+    /// Told when a look ends, so what waits on it goes on.
+    pub looked: Notify,
+    /// The last report looked at, so the next, from any thread, waits for it: reports are made in
+    /// the order their turns ended.
+    last_report: Mutex<Option<oneshot::Receiver<()>>>,
     /// Turn ends looked at for a report, for tests to wait on.
     #[cfg(test)]
     pub reports: std::sync::atomic::AtomicUsize,
@@ -62,69 +65,89 @@ impl Assignments {
         self.deliveries.drop_reports(assigner, assigned);
     }
 
-    /// A place for a report after the thread's earlier ones: what to wait for, and what to tell when done.
-    pub fn reserve_report(&self, thread: &ThreadId) -> (Option<oneshot::Receiver<()>>, oneshot::Sender<()>) {
+    pub fn is_closed(&self, assigner: &ThreadId, assigned: &ThreadId) -> bool {
+        self.closed.lock().unwrap().contains(&(assigner.clone(), assigned.clone()))
+    }
+
+    /// A place for a report after every earlier one: what to wait for, and what to tell when done.
+    pub fn reserve_report(&self) -> (Option<oneshot::Receiver<()>>, oneshot::Sender<()>) {
         let (done, next) = oneshot::channel();
-        (self.reports_in_order.lock().unwrap().insert(thread.clone(), next), done)
+        (self.last_report.lock().unwrap().replace(next), done)
     }
 
-    /// The turn began with a message from another thread.
-    pub fn opened_by_message(&self, thread: &ThreadId, turn: &TurnId) {
-        self.opened.lock().unwrap().insert(thread.clone(), turn.clone());
+    /// The engine is about to start a turn on the thread with another thread's message.
+    pub fn starting(&self, thread: &ThreadId) {
+        self.starting.lock().unwrap().insert(thread.clone());
     }
 
-    /// Whether the turn that ended began with a message from another thread; forgets it.
-    pub fn take_opened(&self, thread: &ThreadId, turn: &TurnId) -> bool {
-        let mut opened = self.opened.lock().unwrap();
-        let was = opened.get(thread) == Some(turn);
-        if was {
-            opened.remove(thread);
+    /// Codex answered that start: with the turn it began, if it did.
+    pub fn started(&self, thread: &ThreadId, turn: Option<&TurnId>) {
+        self.starting.lock().unwrap().remove(thread);
+        if let Some(turn) = turn {
+            self.opened.lock().unwrap().insert((thread.clone(), turn.clone()));
         }
-        was
+    }
+
+    /// Codex tells of a turn whose first message is marked as from another thread (not a report):
+    /// it is one the engine started if a start is in flight there.
+    pub fn marked_message(&self, thread: &ThreadId, turn: &TurnId) {
+        if self.starting.lock().unwrap().contains(thread) {
+            self.opened.lock().unwrap().insert((thread.clone(), turn.clone()));
+        }
+    }
+
+    /// Whether the engine started the ended turn with another thread's message; forgets it.
+    pub fn take_opened(&self, thread: &ThreadId, turn: &TurnId) -> bool {
+        self.opened.lock().unwrap().remove(&(thread.clone(), turn.clone()))
     }
 
     /// The turn is over (Codex said its thread is idle, or announced its end): whether it is to be
-    /// looked at for a report, the look begun the first time this is asked. A turn another thread's
-    /// message began is; so is an assigned thread's (`assigned`), however it began.
+    /// looked at for a report, the look begun the first time. One the engine started with another
+    /// thread's message is, and so is an assigned thread's (`assigned`), however it began.
     pub fn look_due(&self, thread: &ThreadId, turn: &TurnId, assigned: bool) -> bool {
-        let mut begun = self.begun.lock().unwrap();
-        if begun.get(thread) == Some(turn) {
+        let key = (thread.clone(), turn.clone());
+        let mut looks = self.looks.lock().unwrap();
+        if looks.contains_key(&key) {
             return true;
         }
-        let due = self.take_opened(thread, turn) || assigned;
+        let due = assigned || self.opened.lock().unwrap().contains(&key);
         if due {
-            begun.insert(thread.clone(), turn.clone());
-            let mut looking = self.looking.lock().unwrap();
-            let at = looking.entry(thread.clone()).or_insert((0, Instant::now()));
-            at.0 += 1;
-            at.1 = Instant::now();
+            looks.insert(key, Instant::now());
         }
         due
     }
 
-    /// The turn's end was announced: a look begun when its thread went idle is now that turn's report's.
-    pub fn announced(&self, thread: &ThreadId, turn: &TurnId) {
-        let mut begun = self.begun.lock().unwrap();
-        if begun.get(thread) == Some(turn) {
-            begun.remove(thread);
-        }
+    pub fn end_look(&self, thread: &ThreadId, turn: &TurnId) {
+        self.looks.lock().unwrap().remove(&(thread.clone(), turn.clone()));
+        self.looked.notify_waiters();
     }
 
-    pub fn end_look(&self, thread: &ThreadId) {
-        let mut looking = self.looking.lock().unwrap();
-        if let Some(at) = looking.get_mut(thread) {
-            at.0 -= 1;
-            if at.0 == 0 {
-                looking.remove(thread);
-            }
-        }
-    }
-
+    /// Whether a turn of the thread is being looked at; a look past its time is over.
     pub fn is_looking(&self, thread: &ThreadId) -> bool {
-        self.looking.lock().unwrap().get(thread).is_some_and(|(_, since)| since.elapsed() < LOOK_LIMIT)
+        let mut looks = self.looks.lock().unwrap();
+        looks.retain(|_, since| since.elapsed() < LOOK_LIMIT);
+        looks.keys().any(|(t, _)| t == thread)
     }
 
-    pub fn is_closed(&self, assigner: &ThreadId, assigned: &ThreadId) -> bool {
-        self.closed.lock().unwrap().contains(&(assigner.clone(), assigned.clone()))
+    /// The thread is gone from the engine (archived, or its project removed): nothing of it is kept.
+    pub fn forget_thread(&self, thread: &ThreadId) {
+        self.deliveries.forget(thread);
+        self.opened.lock().unwrap().retain(|(t, _)| t != thread);
+        self.starting.lock().unwrap().remove(thread);
+        self.looks.lock().unwrap().retain(|(t, _), _| t != thread);
+        self.looked.notify_waiters();
+    }
+
+    /// Codex stopped: no turn it ran will end, and no start in flight was answered.
+    pub fn codex_stopped(&self) {
+        self.opened.lock().unwrap().clear();
+        self.starting.lock().unwrap().clear();
+        self.looks.lock().unwrap().clear();
+        self.looked.notify_waiters();
+    }
+
+    #[cfg(test)]
+    pub fn looks(&self) -> usize {
+        self.looks.lock().unwrap().len()
     }
 }
