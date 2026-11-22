@@ -1,22 +1,34 @@
-// Groups a turn's items for showing: the agent's work folds between what it says.
+// Groups a turn's items for showing: the agent's work folds between what it says, and an
+// item the application shows its own way stands on its own.
+import type { ReactNode } from "react";
+
 import type { Item, ThreadId } from "../../engine/types";
+import type { ItemViewer } from "./itemView";
 
 export type Block =
   | { kind: "item"; item: Item }
+  /** An item the application's view gave a node. */
+  | { kind: "view"; item: Item; node: ReactNode }
   /** Consecutive reasoning, commands, tool calls, searches, waits for subagents, and listings and reads of threads. */
   | { kind: "work"; items: Item[] };
 
 const isWork = (item: Item) =>
   ["reasoning", "command", "toolCall", "webSearch", "subagentTool"].includes(item.body.kind) || (item.body.kind === "threadTool" && (item.body.tool === "threads" || item.body.tool === "read"));
 
-export function blocksOf(items: Item[]): Block[] {
+const shown = ["userMessage", "agentMessage", "plan", "fileChange", "subagent", "threadTool", "error"];
+
+/** The blocks to show; `nodes` holds the application's node for each item, by index. An item
+ * with no node and no standard view is left out, so it neither splits a fold nor ends one. */
+export function blocksOf(items: Item[], nodes: readonly ReturnType<ItemViewer>[] = []): Block[] {
   const blocks: Block[] = [];
-  for (const item of items) {
+  items.forEach((item, i) => {
+    const node = nodes[i];
     const last = blocks[blocks.length - 1];
-    if (isWork(item) && last?.kind === "work") last.items.push(item);
+    if (node != null) blocks.push({ kind: "view", item, node });
+    else if (isWork(item) && last?.kind === "work") last.items.push(item);
     else if (isWork(item)) blocks.push({ kind: "work", items: [item] });
-    else blocks.push({ kind: "item", item });
-  }
+    else if (shown.includes(item.body.kind)) blocks.push({ kind: "item", item });
+  });
   return blocks;
 }
 

@@ -1,8 +1,9 @@
-import { useEffect, type ReactNode } from "react";
+import { useContext, useEffect, type ReactNode } from "react";
 
 import { markLabel, markOf, nameOf } from "../state/selectors";
 import { useStore, useStoreHandle } from "../state/store";
 import { Conversation } from "./Conversation";
+import { ItemView, type ItemViewer } from "./conversation/itemView";
 import { FirstUse } from "./FirstUse";
 import { Navigator } from "./Navigator";
 import { FeaturedWorkflows } from "./composer/WorkflowPicker";
@@ -22,13 +23,16 @@ export interface StandardLayoutProps {
   /** The workflow names the picker lists before anything is typed, besides the project's own;
    * a search finds every workflow. Unset, it lists them all. */
   featuredWorkflows?: readonly string[];
+  /** The application's view of items, over an `ItemView` around the layout; unset, that one applies. */
+  itemView?: ItemViewer;
 }
 
 /** Projects and threads on the left, the conversation in the centre, the side panel on the
  * right; first use until the person is signed in with a project. */
-export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, panel, featuredWorkflows }: StandardLayoutProps) {
+export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, panel, featuredWorkflows, itemView }: StandardLayoutProps) {
   const snapshot = useStore((s) => s.model?.snapshot);
   const control = usePanelState(panel);
+  const outerItemView = useContext(ItemView);
   useNotifications();
   useWindowTitle(brand);
 
@@ -38,6 +42,7 @@ export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, 
   return (
     <PanelContext.Provider value={control}>
       <FeaturedWorkflows.Provider value={featuredWorkflows}>
+      <ItemView.Provider value={itemView ?? outerItemView}>
       {firstUse ? (
         <FirstUse brand={brand} />
       ) : (
@@ -47,6 +52,7 @@ export function StandardLayout({ brand = "Chirality", panelTabs = standardTabs, 
           {control.panel.open && <RightPanel tabs={panelTabs} />}
         </div>
       )}
+      </ItemView.Provider>
       </FeaturedWorkflows.Provider>
       <ErrorNotice />
     </PanelContext.Provider>

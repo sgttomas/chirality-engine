@@ -32,6 +32,7 @@ export { FirstUse, SignIn } from "./ui/FirstUse";
 // The conversation
 export { Conversation, ConversationHeader, ThreadHeading, Turns } from "./ui/Conversation";
 export { TurnView } from "./ui/conversation/TurnView";
+export { ItemView, type ItemViewer } from "./ui/conversation/itemView";
 export { AgentMessage, ErrorItem, FileChange, Plan, UserMessage, Work } from "./ui/conversation/Items";
 export { Markdown } from "./ui/conversation/Markdown";
 export { ThreadTitle } from "./ui/conversation/ThreadTitle";
