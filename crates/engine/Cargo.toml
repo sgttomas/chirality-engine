@@ -6,8 +6,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+pin-project-lite = "0.2"
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror.workspace = true
 tokio.workspace = true
 ts-rs.workspace = true

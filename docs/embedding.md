@@ -1,7 +1,8 @@
 # Embedding under containment
 
 Part of the engine's design (`SPEC.md`). Designed 2026-11-22 for SWBPIPE,
-revised after five rounds of review; not yet built.
+revised after five rounds of review. Step 1 (the core) is built; calls
+(`calls.rs`) are not yet.
 
 SWBPIPE runs one Codex per session, with one ephemeral thread, no built-in
 capability, and remote control off; any built-in activity ends the session.
